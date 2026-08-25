@@ -1,0 +1,1 @@
+{"path":"fixtures/alpine/directives.html","kind":"template","objects":[{"range":[146,208],"members":[{"name":"open","kind":"Property","is_async":false,"has_await":false,"range":[148,159]},{"name":"rows","kind":"Property","is_async":false,"has_await":false,"range":[161,169]},{"name":"toggle","kind":"Method","is_async":false,"has_await":false,"range":[171,206]}]}],"bindings":[]}

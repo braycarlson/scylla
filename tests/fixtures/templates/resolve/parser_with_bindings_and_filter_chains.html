@@ -1,0 +1,9 @@
+
+{% with full_name=person.first_name|add_str:' '|add_str:person.last_name %}
+    <p>{{ full_name|default:"Anonymous User" }}</p>
+{% endwith %}
+
+{% with phone_href='tel:'|add_str:person.phone email_href='mailto:'|add_str:person.email %}
+    <a href="{{ phone_href }}">{{ person.phone }}</a>
+    <a href="{{ email_href }}">{{ person.email }}</a>
+{% endwith %}

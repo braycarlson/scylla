@@ -1,0 +1,4 @@
+avoid-breaking-exported-api = false
+source-item-ordering = ["enum", "struct"]
+too-many-arguments-threshold = 7
+too-many-lines-threshold = 70

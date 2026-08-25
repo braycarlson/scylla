@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_variable_in_list_filter.html","tokens":[["VariableOpen",0,2],["Whitespace",2,3],["Identifier",3,13],["Pipe",13,14],["Identifier",14,21],["Colon",21,22],["String",22,42],["Whitespace",42,43],["VariableClose",43,45],["Text",45,46]],"tree":[["Document",0,46],["TemplateVariable",0,45],["FilterChain",13,43],["Filter",13,43]],"errors":[]}

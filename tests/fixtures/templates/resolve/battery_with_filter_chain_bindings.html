@@ -1,0 +1,1 @@
+{% with navigation_url|add:'?return_url='|add:request.path as navigation_with_return_url %}{{ navigation_with_return_url }}{% endwith %}

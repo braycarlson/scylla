@@ -1,0 +1,12 @@
+[
+  {
+    "fixture": "parameters.js",
+    "category": "oxlint",
+    "reason": "The fixture states rule 5 of phase 3: a parameter's default value resolves in a scope that sees the parameters before it and no part of the body. `function outer(first, second = first, third = body)` with a `const body` inside the body is a ReferenceError at run time, and scylla reports `body` undefined and `body` unused to match. ESLint's scope model, which oxlint reproduces, puts a function's body declarations in the function scope itself rather than in a block under it, so `body` resolves for the oracle and neither row is reported. The oracle is the limit: the model reports what the language does."
+  },
+  {
+    "fixture": "bat/tests/benchmarks/highlighting-speed-src/jquery.js",
+    "category": "oxlint",
+    "reason": "The oracle reports no `no-unused-vars` row at all for this file: run alone under oxlint 1.79.0 the rule yields nothing across 280KB of jQuery 3.x, while the same catch clause written on its own \u2014 `try { run(); } catch (e) { fallback = 1; }` \u2014 reports `Catch parameter 'e' is caught but never used.` The ten rows scylla reports are all unused catch parameters and each is genuinely unused. The oracle is the limit; the file stays in the corpus for the other two rules, whose rows match."
+  }
+]

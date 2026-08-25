@@ -1,0 +1,12 @@
+[
+  {
+    "fixture": "control_flow.zig",
+    "category": "zigfmt-declaration-context",
+    "reason": "`while (a) : (b)` spaces its continue expression's colon, and a labelled `break :outer` spaces the label's colon from the keyword and hugs it to the label. Both readings come from the statement's shape rather than from the token stream, so the emitter spaces those colons the way it spaces a type annotation's."
+  },
+  {
+    "fixture": "expressions.zig",
+    "category": "zigfmt-line-breaking",
+    "reason": "zig fmt indents the `\\\\` lines of a multiline string one level under the declaration that opens it. The lines open no bracket, so the emitter's nesting model leaves them at the column the source gave them."
+  }
+]

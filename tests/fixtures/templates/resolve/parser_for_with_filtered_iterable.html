@@ -1,0 +1,4 @@
+
+{% for assignment in dispatch.assignments|get_item:column %}
+    {% include 'components/fake_assignment_card.html' with assignment=assignment %}
+{% endfor %}

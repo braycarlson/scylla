@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_only_block.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,5],["Whitespace",5,6],["TagClose",6,8],["TagOpen",8,10],["Whitespace",10,11],["TagName",11,16],["Whitespace",16,17],["TagClose",17,19],["Text",19,20]],"tree":[["Document",0,20],["TemplateTag",0,8],["TemplateTag",8,19]],"errors":[]}

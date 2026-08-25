@@ -1,0 +1,14 @@
+
+{% extends "base.html" %}
+{% block content %}
+    {% if user.is_authenticated %}
+        <h1>{{ user.username }}</h1>
+        {% for item in items %}
+            <div>{{ item.name|upper }}</div>
+        {% empty %}
+            <p>No items</p>
+        {% endfor %}
+    {% else %}
+        <a href="{% url 'login' %}">Login</a>
+    {% endif %}
+{% endblock %}

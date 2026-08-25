@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_unclosed_variable.html","tokens":[["VariableOpen",0,2],["Whitespace",2,3],["Identifier",3,11],["Whitespace",11,12]],"tree":[["Document",0,12],["TemplateVariable",0,12]],"errors":[["UnterminatedTemplateVariable",0]]}

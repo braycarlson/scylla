@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_resetcycle_tag.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,13],["Whitespace",13,14],["Identifier",14,21],["Whitespace",21,22],["TagClose",22,24],["Text",24,25]],"tree":[["Document",0,25],["TemplateTag",0,24]],"errors":[]}

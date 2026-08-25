@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_alpine_ignore.html","tokens":[["AngleOpen",0,1],["ElementName",1,4],["Whitespace",4,5],["AttributeName",5,13],["AngleClose",13,14],["Text",14,15]],"tree":[["Document",0,15],["Element",0,15],["OpenTag",0,14],["Attribute",5,13]],"errors":[["UnclosedElement",0]]}

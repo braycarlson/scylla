@@ -1,0 +1,7 @@
+[
+  {
+    "fixture": "broken/half_typed_member_access.html",
+    "category": "reduced-fidelity-syntax-error",
+    "reason": "The oracle drops an x-data object whose tree-sitter parse reports an error, and `{ product: Glue.querySet. }` ends a member access on a dot. Decision 16 gives the library unmatched brackets and unterminated strings instead of error nodes, and a trailing dot is neither, so the object comes back with its one property."
+  }
+]

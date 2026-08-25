@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_translate_with_noop.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,12],["Whitespace",12,13],["String",13,26],["Whitespace",26,27],["Identifier",27,31],["Whitespace",31,32],["TagClose",32,34],["Text",34,35]],"tree":[["Document",0,35],["TemplateTag",0,34]],"errors":[]}

@@ -1,0 +1,24 @@
+target
+.tigerstyle_cache/
+
+# Compiled output of the oracle-* tools. Go drops its binaries beside the
+# source rather than under target/, so the bare `target` rule above misses
+# them. Together they are 9.8 MB, and a binary committed once stays in history.
+/tools/oracle-go/oracle-go
+/tools/oracle-gotypes/oracle-gotypes
+
+# cargo-mutants writes its working tree and its result files into the repository
+# root, and it keeps the previous run beside the current one as mutants.out.old,
+# so the pattern needs the glob. This is the one that matters right now: the
+# first mutants run drops thousands of files here.
+mutants.out*/
+
+# tools/oracle-python/main.py imports the fixtures, and CPython writes bytecode
+# beside any module it imports.
+__pycache__/
+
+# tools/oracle-zig builds in place. Zig puts its cache and its install prefix in
+# the working directory rather than under target/, so the bare target rule above
+# does not reach them.
+.zig-cache/
+zig-out/

@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_variable_floatformat_with_string_arg.html","tokens":[["VariableOpen",0,2],["Whitespace",2,3],["Identifier",3,8],["Pipe",8,9],["Identifier",9,20],["Colon",20,21],["String",21,25],["Whitespace",25,26],["VariableClose",26,28],["Text",28,29]],"tree":[["Document",0,29],["TemplateVariable",0,28],["FilterChain",8,26],["Filter",8,26]],"errors":[]}

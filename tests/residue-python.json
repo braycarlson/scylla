@@ -1,0 +1,12 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Python/battest.py",
+    "category": "not-python",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Python module. CPython's own `ast.parse` rejects it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "type_params.py",
+    "category": "pep-695-type-parameter-scopes",
+    "reason": "PEP 695 gives a `def f[T]` or a `type A[T] = ...` its own CPython scope. The binder now opens one too, a `ScopeKind::Type` on the `TypeParams` node standing between the definition and the scope it was written in, so the parameters bind there and the annotations and bases read them. What still differs is the synthetic symbols CPython carries in that scope to hold the compiler's own state: `.defaults`, `.generic_base`, `.type_params`, and `__type_params__`. The binder models the language's scopes, not those."
+  }
+]

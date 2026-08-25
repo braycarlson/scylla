@@ -1,0 +1,6 @@
+{# `readonly` is read through a VIEW-level verb only -- that is what lets #}
+{# views.py conclude its DELETE grant is over-broad, so leave it alone. #}
+{% extends 'seeded/base.html' %}
+{% block content %}<div x-init="Glue.model.readonly.load()"></div>
+{# lintcheck-expect: glue/unregistered-name #}
+<div x-init="Glue.model.nobody.load()"></div>{% endblock %}

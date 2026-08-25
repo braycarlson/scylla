@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/integration_unclosed_block_reports_parse_error.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,8],["Whitespace",8,9],["Identifier",9,21],["Whitespace",21,22],["TagClose",22,24],["Text",24,39]],"tree":[["Document",0,39],["TemplateTag",0,24]],"errors":[]}

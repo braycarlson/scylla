@@ -1,0 +1,15 @@
+{# Template safety rules. #}
+
+{# lintcheck-expect: house/unsafe-json-in-island #}
+<div x-data="{ items: {{ items_json|safe }} }"></div>
+
+{# A value landing inside a JavaScript string with nothing escaping it #}
+{# for JavaScript: one apostrophe in the name ends the string. #}
+{# lintcheck-expect: house/unescaped-js-string #}
+<div x-data="{ owner: '{{ object.owner_name }}' }"></div>
+
+{# lintcheck-expect: house/missing-csrf #}
+<form method="post" action="/catalog/save/">
+    <input name="title">
+    <button type="submit">Save</button>
+</form>

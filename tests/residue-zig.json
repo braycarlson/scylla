@@ -1,0 +1,7 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Zig/example.zig",
+    "category": "not-zig",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Zig source file. `std.zig.Ast` rejects it on the first escape byte, which is what makes it residue rather than a defect."
+  }
+]

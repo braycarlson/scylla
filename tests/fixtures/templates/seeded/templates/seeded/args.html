@@ -1,0 +1,6 @@
+{# The first read keeps `rows` off glue/dead-registration, so views.py is #}
+{# left reporting only the registration-args violation it is there for. #}
+{% extends 'seeded/base.html' %}
+{% block content %}<div x-init="Glue.querySet.rows.all()"></div>
+{# lintcheck-expect: glue/namespace-mismatch #}
+<div x-init="Glue.model.rows.load()"></div>{% endblock %}

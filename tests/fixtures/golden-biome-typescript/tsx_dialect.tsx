@@ -1,0 +1,11 @@
+const arrow = <T,>(x: T): T => x;
+const bounded = <T extends object>(x: T): T => x;
+const plain = <T>(x: T): T => x;
+const two = <A, B>(a: A, b: B): A => a;
+const defaulted = <T = string,>(x: T): T => x;
+const nested = <T extends Array<string>>(x: T): T => x;
+const call = identity<string>(value);
+const generic = <Box<T> />;
+const paired = <Box<T>>body</Box>;
+const compared = one < two;
+const shifted = one << two;

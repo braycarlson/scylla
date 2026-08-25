@@ -1,0 +1,12 @@
+[
+  {
+    "fixture": "bat/tests/snapshots/sample.modified.rs",
+    "category": "not-rust",
+    "reason": "The file is not valid UTF-8; it is a byte snapshot `bat` keeps to exercise its own encoding path. The oracle cannot read it, so it is residue rather than a defect."
+  },
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Rust/output.rs",
+    "category": "not-rust",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Rust module. `syn` rejects it too, which is what makes it residue rather than a defect."
+  }
+]

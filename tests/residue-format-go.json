@@ -1,0 +1,27 @@
+[
+  {
+    "fixture": "declarations.go",
+    "category": "gofmt-import-grouping",
+    "reason": "gofmt sorts an import block and moves a blank-line-separated group into place. Reordering an import moves tokens the source wrote, which the preservation relation of decision 10 forbids, so scylla re-indents the block and leaves the order alone."
+  },
+  {
+    "fixture": "declarations.go",
+    "category": "gofmt-declaration-context",
+    "reason": "gofmt reads a declaration's shape from the tree and spaces a field name from its type accordingly, and pads the name and type columns of a struct with its tabwriter. The emitter reads the token stream, so it cannot tell a struct field's type from an index expression, and `src/format/align.rs` aligns the two runs decision 10 of the plan names — assignments and trailing comments — rather than every tabwriter cell."
+  },
+  {
+    "fixture": "expressions.go",
+    "category": "gofmt-operator-precedence-spacing",
+    "reason": "gofmt drops the spaces around the higher-precedence operator of a mixed expression, so `1 + 2*3` rather than `1 + 2 * 3`. The rule reads the expression's precedence tree, which the token-stream emitter does not build; every binary operator is spaced instead."
+  },
+  {
+    "fixture": "functions.go",
+    "category": "gofmt-declaration-context",
+    "reason": "A pointer receiver `(h *Holder)` spaces its star as a type prefix rather than as a binary operator, which is a declaration-context call the token stream cannot make."
+  },
+  {
+    "fixture": "types.go",
+    "category": "gofmt-declaration-context",
+    "reason": "Every line of the type fixture is a struct field whose name and type are separated by a tabwriter column, and whose type spacing is read from the declaration's shape."
+  }
+]

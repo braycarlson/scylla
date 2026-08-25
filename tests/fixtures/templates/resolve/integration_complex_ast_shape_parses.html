@@ -1,0 +1,19 @@
+
+{% extends 'layouts/base.html' %}
+{% load static fake_tags %}
+
+{% block page_content %}
+<div class="wrapper">
+    {% with full_name=person.first_name|add_str:' '|add_str:person.last_name %}
+        {% if cards %}
+            {% for card in cards %}
+                {% include 'components/fake_card.html' with card=card full_name=full_name %}
+            {% empty %}
+                {% include 'components/fake_empty.html' %}
+            {% endfor %}
+        {% else %}
+            {% include 'components/fake_empty.html' %}
+        {% endif %}
+    {% endwith %}
+</div>
+{% endblock %}

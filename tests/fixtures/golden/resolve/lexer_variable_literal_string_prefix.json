@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_variable_literal_string_prefix.html","tokens":[["VariableOpen",0,2],["Whitespace",2,3],["String",3,6],["Pipe",6,7],["Identifier",7,10],["Colon",10,11],["Identifier",11,24],["Whitespace",24,25],["VariableClose",25,27],["Text",27,28]],"tree":[["Document",0,28],["TemplateVariable",0,27],["FilterChain",6,25],["Filter",6,25]],"errors":[]}

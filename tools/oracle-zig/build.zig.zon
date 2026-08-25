@@ -1,0 +1,8 @@
+.{
+    .name = .oracle_zig,
+    .version = "0.1.0",
+    .fingerprint = 0x3829cbfe4a84ec64,
+    .minimum_zig_version = "0.16.0",
+    .paths = .{""},
+    .dependencies = .{},
+}

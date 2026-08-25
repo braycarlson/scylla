@@ -1,0 +1,21 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+{% user_list_from_content_type obj as comment_user_list %}
+{% comment_form related_obj request.get_full_path request.user user_list=comment_user_list as comment_form %}
+
+{% for comment in comment_list %}
+    {% include 'components/fake_comment.html' with comment=comment %}
+
+    {% if comment.user == request.user %}
+        {% grouping_url edit_url_name object_pk=model.pk pk=comment.pk as comment_edit_url %}
+    {% endif %}
+
+    {% if children_list %}
+        {% for child in children_list %}
+            {% include 'components/fake_child_comment.html' with comment=child %}
+        {% endfor %}
+    {% endif %}
+{% empty %}
+    <p>No comments yet</p>
+{% endfor %}
+{% endblock %}

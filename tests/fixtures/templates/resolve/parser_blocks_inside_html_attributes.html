@@ -1,0 +1,6 @@
+
+<div class="{% block shell_class %}shell-default{% endblock %} {{ extra_class|default:'shell-base' }}">
+    <span data-state="{% if record.is_enabled %}enabled{% else %}disabled{% endif %}">
+        {{ record.label }}
+    </span>
+</div>

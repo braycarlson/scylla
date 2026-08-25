@@ -1,0 +1,16 @@
+
+{% if obj_a.stage == StageChoices.IDENTIFY %}
+    {% include 'badge/fake_identify.html' %}
+{% elif obj_a.stage == StageChoices.CONNECT %}
+    {% include 'badge/fake_connect.html' %}
+{% elif obj_a.stage == StageChoices.EXPLORE %}
+    {% include 'badge/fake_explore.html' %}
+{% elif obj_a.stage == StageChoices.ADVISE %}
+    {% include 'badge/fake_advise.html' %}
+{% elif obj_a.stage == StageChoices.SENT %}
+    {% include 'badge/fake_sent.html' %}
+{% elif obj_a.stage == StageChoices.WON %}
+    {% include 'badge/fake_won.html' %}
+{% elif obj_a.stage == StageChoices.LOST %}
+    {% include 'badge/fake_lost.html' %}
+{% endif %}

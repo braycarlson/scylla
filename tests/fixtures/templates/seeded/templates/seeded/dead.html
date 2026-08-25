@@ -1,0 +1,6 @@
+{# This template must never read `never_read`; its absence is what makes #}
+{# views.py report glue/dead-registration. Reading some other name is fine. #}
+{% extends 'seeded/base.html' %}
+{% block content %}<p>nothing reads the registered name here</p>
+{# lintcheck-expect: glue/unregistered-name #}
+<div x-init="Glue.model.elsewhere.load()"></div>{% endblock %}

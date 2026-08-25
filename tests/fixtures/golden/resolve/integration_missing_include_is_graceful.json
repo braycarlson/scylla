@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/integration_missing_include_is_graceful.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,10],["Whitespace",10,11],["String",11,43],["Whitespace",43,44],["TagClose",44,46],["Text",46,47]],"tree":[["Document",0,47],["TemplateTag",0,46]],"errors":[]}

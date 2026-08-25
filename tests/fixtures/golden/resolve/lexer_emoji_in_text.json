@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_emoji_in_text.html","tokens":[["AngleOpen",0,1],["ElementName",1,4],["AngleClose",4,5],["Text",5,20],["AngleOpenSlash",20,22],["ElementName",22,25],["AngleClose",25,26],["Text",26,27]],"tree":[["Document",0,27],["Element",0,26],["OpenTag",0,5],["CloseTag",20,26]],"errors":[]}

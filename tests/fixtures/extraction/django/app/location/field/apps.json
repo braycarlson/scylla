@@ -1,0 +1,1 @@
+{"path":"fixtures/django/app/location/field/apps.py","kind":"python","registrations":[],"models":[{"name":"LocationFieldConfig","app_label":null,"range":[36,134],"bases":[{"kind":"Literal","text":"AppConfig"}],"fields":[]}]}

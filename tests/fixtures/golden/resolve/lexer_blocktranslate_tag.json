@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_blocktranslate_tag.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,17],["Whitespace",17,18],["TagClose",18,20],["Text",20,21]],"tree":[["Document",0,21],["TemplateTag",0,20]],"errors":[]}

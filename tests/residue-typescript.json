@@ -1,0 +1,37 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/TypeScript/example.cts",
+    "category": "not-typescript",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a TypeScript module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/TypeScript/example.ts",
+    "category": "not-typescript",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a TypeScript module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/TypeScriptReact/app.tsx",
+    "category": "not-typescript",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a TSX module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect. The two `TypeScript/example.*` rows above are the same file in the other dialect."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/classic/schemas.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/core/checks.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/core/schemas.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/mini/schemas.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  }
+]

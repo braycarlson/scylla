@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_alpine_with_fake_django_data.html","kind":"template","objects":[{"range":[13,78],"members":[{"name":"selected","kind":"Property","is_async":false,"has_await":false,"range":[15,63]},{"name":"open","kind":"Property","is_async":false,"has_await":false,"range":[65,76]}]}],"bindings":[]}

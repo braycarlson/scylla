@@ -1,0 +1,5 @@
+{% extends 'seeded/base.html' %}
+{% block content %}
+{# lintcheck-expect: glue/access-verb #}
+<button @click="Glue.model.product.delete()">x</button>
+{% endblock %}

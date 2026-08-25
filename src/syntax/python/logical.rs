@@ -1,0 +1,802 @@
+use crate::bounded::{BoundedVec, Span};
+use crate::syntax::python::kind::PythonKind;
+use crate::token::Token;
+
+const WIDE: [(u32, u32); 121] = [
+    (0x1100, 0x115F),
+    (0x231A, 0x231B),
+    (0x2329, 0x232A),
+    (0x23E9, 0x23EC),
+    (0x23F0, 0x23F0),
+    (0x23F3, 0x23F3),
+    (0x25FD, 0x25FE),
+    (0x2614, 0x2615),
+    (0x2648, 0x2653),
+    (0x267F, 0x267F),
+    (0x2693, 0x2693),
+    (0x26A1, 0x26A1),
+    (0x26AA, 0x26AB),
+    (0x26BD, 0x26BE),
+    (0x26C4, 0x26C5),
+    (0x26CE, 0x26CE),
+    (0x26D4, 0x26D4),
+    (0x26EA, 0x26EA),
+    (0x26F2, 0x26F3),
+    (0x26F5, 0x26F5),
+    (0x26FA, 0x26FA),
+    (0x26FD, 0x26FD),
+    (0x2705, 0x2705),
+    (0x270A, 0x270B),
+    (0x2728, 0x2728),
+    (0x274C, 0x274C),
+    (0x274E, 0x274E),
+    (0x2753, 0x2755),
+    (0x2757, 0x2757),
+    (0x2795, 0x2797),
+    (0x27B0, 0x27B0),
+    (0x27BF, 0x27BF),
+    (0x2B1B, 0x2B1C),
+    (0x2B50, 0x2B50),
+    (0x2B55, 0x2B55),
+    (0x2E80, 0x2E99),
+    (0x2E9B, 0x2EF3),
+    (0x2F00, 0x2FD5),
+    (0x2FF0, 0x2FFB),
+    (0x3000, 0x303E),
+    (0x3041, 0x3096),
+    (0x3099, 0x30FF),
+    (0x3105, 0x312F),
+    (0x3131, 0x318E),
+    (0x3190, 0x31E3),
+    (0x31F0, 0x321E),
+    (0x3220, 0x3247),
+    (0x3250, 0x4DBF),
+    (0x4E00, 0xA48C),
+    (0xA490, 0xA4C6),
+    (0xA960, 0xA97C),
+    (0xAC00, 0xD7A3),
+    (0xF900, 0xFAFF),
+    (0xFE10, 0xFE19),
+    (0xFE30, 0xFE52),
+    (0xFE54, 0xFE66),
+    (0xFE68, 0xFE6B),
+    (0xFF01, 0xFF60),
+    (0xFFE0, 0xFFE6),
+    (0x1_6FE0, 0x1_6FE4),
+    (0x1_6FF0, 0x1_6FF1),
+    (0x1_7000, 0x1_87F7),
+    (0x1_8800, 0x1_8CD5),
+    (0x1_8D00, 0x1_8D08),
+    (0x1_AFF0, 0x1_AFF3),
+    (0x1_AFF5, 0x1_AFFB),
+    (0x1_AFFD, 0x1_AFFE),
+    (0x1_B000, 0x1_B122),
+    (0x1_B132, 0x1_B132),
+    (0x1_B150, 0x1_B152),
+    (0x1_B155, 0x1_B155),
+    (0x1_B164, 0x1_B167),
+    (0x1_B170, 0x1_B2FB),
+    (0x1_F004, 0x1_F004),
+    (0x1_F0CF, 0x1_F0CF),
+    (0x1_F18E, 0x1_F18E),
+    (0x1_F191, 0x1_F19A),
+    (0x1_F200, 0x1_F202),
+    (0x1_F210, 0x1_F23B),
+    (0x1_F240, 0x1_F248),
+    (0x1_F250, 0x1_F251),
+    (0x1_F260, 0x1_F265),
+    (0x1_F300, 0x1_F320),
+    (0x1_F32D, 0x1_F335),
+    (0x1_F337, 0x1_F37C),
+    (0x1_F37E, 0x1_F393),
+    (0x1_F3A0, 0x1_F3CA),
+    (0x1_F3CF, 0x1_F3D3),
+    (0x1_F3E0, 0x1_F3F0),
+    (0x1_F3F4, 0x1_F3F4),
+    (0x1_F3F8, 0x1_F43E),
+    (0x1_F440, 0x1_F440),
+    (0x1_F442, 0x1_F4FC),
+    (0x1_F4FF, 0x1_F53D),
+    (0x1_F54B, 0x1_F54E),
+    (0x1_F550, 0x1_F567),
+    (0x1_F57A, 0x1_F57A),
+    (0x1_F595, 0x1_F596),
+    (0x1_F5A4, 0x1_F5A4),
+    (0x1_F5FB, 0x1_F64F),
+    (0x1_F680, 0x1_F6C5),
+    (0x1_F6CC, 0x1_F6CC),
+    (0x1_F6D0, 0x1_F6D2),
+    (0x1_F6D5, 0x1_F6D7),
+    (0x1_F6DC, 0x1_F6DF),
+    (0x1_F6EB, 0x1_F6EC),
+    (0x1_F6F4, 0x1_F6FC),
+    (0x1_F7E0, 0x1_F7EB),
+    (0x1_F7F0, 0x1_F7F0),
+    (0x1_F90C, 0x1_F93A),
+    (0x1_F93C, 0x1_F945),
+    (0x1_F947, 0x1_F9FF),
+    (0x1_FA70, 0x1_FA7C),
+    (0x1_FA80, 0x1_FA88),
+    (0x1_FA90, 0x1_FABD),
+    (0x1_FABF, 0x1_FAC5),
+    (0x1_FACE, 0x1_FADB),
+    (0x1_FAE0, 0x1_FAE8),
+    (0x1_FAF0, 0x1_FAF8),
+    (0x2_0000, 0x2_FFFD),
+    (0x3_0000, 0x3_FFFD),
+];
+
+const ZERO: [(u32, u32); 357] = [
+    (0x0300, 0x036F),
+    (0x0483, 0x0489),
+    (0x0591, 0x05BD),
+    (0x05BF, 0x05BF),
+    (0x05C1, 0x05C2),
+    (0x05C4, 0x05C5),
+    (0x05C7, 0x05C7),
+    (0x0600, 0x0605),
+    (0x0610, 0x061A),
+    (0x061C, 0x061C),
+    (0x064B, 0x065F),
+    (0x0670, 0x0670),
+    (0x06D6, 0x06DD),
+    (0x06DF, 0x06E4),
+    (0x06E7, 0x06E8),
+    (0x06EA, 0x06ED),
+    (0x070F, 0x070F),
+    (0x0711, 0x0711),
+    (0x0730, 0x074A),
+    (0x07A6, 0x07B0),
+    (0x07EB, 0x07F3),
+    (0x07FD, 0x07FD),
+    (0x0816, 0x0819),
+    (0x081B, 0x0823),
+    (0x0825, 0x0827),
+    (0x0829, 0x082D),
+    (0x0859, 0x085B),
+    (0x0890, 0x0891),
+    (0x0898, 0x089F),
+    (0x08CA, 0x0902),
+    (0x093A, 0x093A),
+    (0x093C, 0x093C),
+    (0x0941, 0x0948),
+    (0x094D, 0x094D),
+    (0x0951, 0x0957),
+    (0x0962, 0x0963),
+    (0x0981, 0x0981),
+    (0x09BC, 0x09BC),
+    (0x09C1, 0x09C4),
+    (0x09CD, 0x09CD),
+    (0x09E2, 0x09E3),
+    (0x09FE, 0x09FE),
+    (0x0A01, 0x0A02),
+    (0x0A3C, 0x0A3C),
+    (0x0A41, 0x0A42),
+    (0x0A47, 0x0A48),
+    (0x0A4B, 0x0A4D),
+    (0x0A51, 0x0A51),
+    (0x0A70, 0x0A71),
+    (0x0A75, 0x0A75),
+    (0x0A81, 0x0A82),
+    (0x0ABC, 0x0ABC),
+    (0x0AC1, 0x0AC5),
+    (0x0AC7, 0x0AC8),
+    (0x0ACD, 0x0ACD),
+    (0x0AE2, 0x0AE3),
+    (0x0AFA, 0x0AFF),
+    (0x0B01, 0x0B01),
+    (0x0B3C, 0x0B3C),
+    (0x0B3F, 0x0B3F),
+    (0x0B41, 0x0B44),
+    (0x0B4D, 0x0B4D),
+    (0x0B55, 0x0B56),
+    (0x0B62, 0x0B63),
+    (0x0B82, 0x0B82),
+    (0x0BC0, 0x0BC0),
+    (0x0BCD, 0x0BCD),
+    (0x0C00, 0x0C00),
+    (0x0C04, 0x0C04),
+    (0x0C3C, 0x0C3C),
+    (0x0C3E, 0x0C40),
+    (0x0C46, 0x0C48),
+    (0x0C4A, 0x0C4D),
+    (0x0C55, 0x0C56),
+    (0x0C62, 0x0C63),
+    (0x0C81, 0x0C81),
+    (0x0CBC, 0x0CBC),
+    (0x0CBF, 0x0CBF),
+    (0x0CC6, 0x0CC6),
+    (0x0CCC, 0x0CCD),
+    (0x0CE2, 0x0CE3),
+    (0x0D00, 0x0D01),
+    (0x0D3B, 0x0D3C),
+    (0x0D41, 0x0D44),
+    (0x0D4D, 0x0D4D),
+    (0x0D62, 0x0D63),
+    (0x0D81, 0x0D81),
+    (0x0DCA, 0x0DCA),
+    (0x0DD2, 0x0DD4),
+    (0x0DD6, 0x0DD6),
+    (0x0E31, 0x0E31),
+    (0x0E34, 0x0E3A),
+    (0x0E47, 0x0E4E),
+    (0x0EB1, 0x0EB1),
+    (0x0EB4, 0x0EBC),
+    (0x0EC8, 0x0ECE),
+    (0x0F18, 0x0F19),
+    (0x0F35, 0x0F35),
+    (0x0F37, 0x0F37),
+    (0x0F39, 0x0F39),
+    (0x0F71, 0x0F7E),
+    (0x0F80, 0x0F84),
+    (0x0F86, 0x0F87),
+    (0x0F8D, 0x0F97),
+    (0x0F99, 0x0FBC),
+    (0x0FC6, 0x0FC6),
+    (0x102D, 0x1030),
+    (0x1032, 0x1037),
+    (0x1039, 0x103A),
+    (0x103D, 0x103E),
+    (0x1058, 0x1059),
+    (0x105E, 0x1060),
+    (0x1071, 0x1074),
+    (0x1082, 0x1082),
+    (0x1085, 0x1086),
+    (0x108D, 0x108D),
+    (0x109D, 0x109D),
+    (0x1160, 0x11FF),
+    (0x135D, 0x135F),
+    (0x1712, 0x1714),
+    (0x1732, 0x1733),
+    (0x1752, 0x1753),
+    (0x1772, 0x1773),
+    (0x17B4, 0x17B5),
+    (0x17B7, 0x17BD),
+    (0x17C6, 0x17C6),
+    (0x17C9, 0x17D3),
+    (0x17DD, 0x17DD),
+    (0x180B, 0x180F),
+    (0x1885, 0x1886),
+    (0x18A9, 0x18A9),
+    (0x1920, 0x1922),
+    (0x1927, 0x1928),
+    (0x1932, 0x1932),
+    (0x1939, 0x193B),
+    (0x1A17, 0x1A18),
+    (0x1A1B, 0x1A1B),
+    (0x1A56, 0x1A56),
+    (0x1A58, 0x1A5E),
+    (0x1A60, 0x1A60),
+    (0x1A62, 0x1A62),
+    (0x1A65, 0x1A6C),
+    (0x1A73, 0x1A7C),
+    (0x1A7F, 0x1A7F),
+    (0x1AB0, 0x1ACE),
+    (0x1B00, 0x1B03),
+    (0x1B34, 0x1B34),
+    (0x1B36, 0x1B3A),
+    (0x1B3C, 0x1B3C),
+    (0x1B42, 0x1B42),
+    (0x1B6B, 0x1B73),
+    (0x1B80, 0x1B81),
+    (0x1BA2, 0x1BA5),
+    (0x1BA8, 0x1BA9),
+    (0x1BAB, 0x1BAD),
+    (0x1BE6, 0x1BE6),
+    (0x1BE8, 0x1BE9),
+    (0x1BED, 0x1BED),
+    (0x1BEF, 0x1BF1),
+    (0x1C2C, 0x1C33),
+    (0x1C36, 0x1C37),
+    (0x1CD0, 0x1CD2),
+    (0x1CD4, 0x1CE0),
+    (0x1CE2, 0x1CE8),
+    (0x1CED, 0x1CED),
+    (0x1CF4, 0x1CF4),
+    (0x1CF8, 0x1CF9),
+    (0x1DC0, 0x1DFF),
+    (0x200B, 0x200F),
+    (0x202A, 0x202E),
+    (0x2060, 0x2064),
+    (0x2066, 0x206F),
+    (0x20D0, 0x20F0),
+    (0x2CEF, 0x2CF1),
+    (0x2D7F, 0x2D7F),
+    (0x2DE0, 0x2DFF),
+    (0x302A, 0x302D),
+    (0x3099, 0x309A),
+    (0xA66F, 0xA672),
+    (0xA674, 0xA67D),
+    (0xA69E, 0xA69F),
+    (0xA6F0, 0xA6F1),
+    (0xA802, 0xA802),
+    (0xA806, 0xA806),
+    (0xA80B, 0xA80B),
+    (0xA825, 0xA826),
+    (0xA82C, 0xA82C),
+    (0xA8C4, 0xA8C5),
+    (0xA8E0, 0xA8F1),
+    (0xA8FF, 0xA8FF),
+    (0xA926, 0xA92D),
+    (0xA947, 0xA951),
+    (0xA980, 0xA982),
+    (0xA9B3, 0xA9B3),
+    (0xA9B6, 0xA9B9),
+    (0xA9BC, 0xA9BD),
+    (0xA9E5, 0xA9E5),
+    (0xAA29, 0xAA2E),
+    (0xAA31, 0xAA32),
+    (0xAA35, 0xAA36),
+    (0xAA43, 0xAA43),
+    (0xAA4C, 0xAA4C),
+    (0xAA7C, 0xAA7C),
+    (0xAAB0, 0xAAB0),
+    (0xAAB2, 0xAAB4),
+    (0xAAB7, 0xAAB8),
+    (0xAABE, 0xAABF),
+    (0xAAC1, 0xAAC1),
+    (0xAAEC, 0xAAED),
+    (0xAAF6, 0xAAF6),
+    (0xABE5, 0xABE5),
+    (0xABE8, 0xABE8),
+    (0xABED, 0xABED),
+    (0xFB1E, 0xFB1E),
+    (0xFE00, 0xFE0F),
+    (0xFE20, 0xFE2F),
+    (0xFEFF, 0xFEFF),
+    (0xFFF9, 0xFFFB),
+    (0x1_01FD, 0x1_01FD),
+    (0x1_02E0, 0x1_02E0),
+    (0x1_0376, 0x1_037A),
+    (0x1_0A01, 0x1_0A03),
+    (0x1_0A05, 0x1_0A06),
+    (0x1_0A0C, 0x1_0A0F),
+    (0x1_0A38, 0x1_0A3A),
+    (0x1_0A3F, 0x1_0A3F),
+    (0x1_0AE5, 0x1_0AE6),
+    (0x1_0D24, 0x1_0D27),
+    (0x1_0EAB, 0x1_0EAC),
+    (0x1_0EFD, 0x1_0EFF),
+    (0x1_0F46, 0x1_0F50),
+    (0x1_0F82, 0x1_0F85),
+    (0x1_1001, 0x1_1001),
+    (0x1_1038, 0x1_1046),
+    (0x1_1070, 0x1_1070),
+    (0x1_1073, 0x1_1074),
+    (0x1_107F, 0x1_1081),
+    (0x1_10B3, 0x1_10B6),
+    (0x1_10B9, 0x1_10BA),
+    (0x1_10BD, 0x1_10BD),
+    (0x1_10C2, 0x1_10C2),
+    (0x1_10CD, 0x1_10CD),
+    (0x1_1100, 0x1_1102),
+    (0x1_1127, 0x1_112B),
+    (0x1_112D, 0x1_1134),
+    (0x1_1173, 0x1_1173),
+    (0x1_1180, 0x1_1181),
+    (0x1_11B6, 0x1_11BE),
+    (0x1_11C9, 0x1_11CC),
+    (0x1_11CF, 0x1_11CF),
+    (0x1_122F, 0x1_1231),
+    (0x1_1234, 0x1_1234),
+    (0x1_1236, 0x1_1237),
+    (0x1_123E, 0x1_123E),
+    (0x1_1241, 0x1_1241),
+    (0x1_12DF, 0x1_12DF),
+    (0x1_12E3, 0x1_12EA),
+    (0x1_1300, 0x1_1301),
+    (0x1_133B, 0x1_133C),
+    (0x1_1340, 0x1_1340),
+    (0x1_1366, 0x1_136C),
+    (0x1_1370, 0x1_1374),
+    (0x1_1438, 0x1_143F),
+    (0x1_1442, 0x1_1444),
+    (0x1_1446, 0x1_1446),
+    (0x1_145E, 0x1_145E),
+    (0x1_14B3, 0x1_14B8),
+    (0x1_14BA, 0x1_14BA),
+    (0x1_14BF, 0x1_14C0),
+    (0x1_14C2, 0x1_14C3),
+    (0x1_15B2, 0x1_15B5),
+    (0x1_15BC, 0x1_15BD),
+    (0x1_15BF, 0x1_15C0),
+    (0x1_15DC, 0x1_15DD),
+    (0x1_1633, 0x1_163A),
+    (0x1_163D, 0x1_163D),
+    (0x1_163F, 0x1_1640),
+    (0x1_16AB, 0x1_16AB),
+    (0x1_16AD, 0x1_16AD),
+    (0x1_16B0, 0x1_16B5),
+    (0x1_16B7, 0x1_16B7),
+    (0x1_171D, 0x1_171F),
+    (0x1_1722, 0x1_1725),
+    (0x1_1727, 0x1_172B),
+    (0x1_182F, 0x1_1837),
+    (0x1_1839, 0x1_183A),
+    (0x1_193B, 0x1_193C),
+    (0x1_193E, 0x1_193E),
+    (0x1_1943, 0x1_1943),
+    (0x1_19D4, 0x1_19D7),
+    (0x1_19DA, 0x1_19DB),
+    (0x1_19E0, 0x1_19E0),
+    (0x1_1A01, 0x1_1A0A),
+    (0x1_1A33, 0x1_1A38),
+    (0x1_1A3B, 0x1_1A3E),
+    (0x1_1A47, 0x1_1A47),
+    (0x1_1A51, 0x1_1A56),
+    (0x1_1A59, 0x1_1A5B),
+    (0x1_1A8A, 0x1_1A96),
+    (0x1_1A98, 0x1_1A99),
+    (0x1_1C30, 0x1_1C36),
+    (0x1_1C38, 0x1_1C3D),
+    (0x1_1C3F, 0x1_1C3F),
+    (0x1_1C92, 0x1_1CA7),
+    (0x1_1CAA, 0x1_1CB0),
+    (0x1_1CB2, 0x1_1CB3),
+    (0x1_1CB5, 0x1_1CB6),
+    (0x1_1D31, 0x1_1D36),
+    (0x1_1D3A, 0x1_1D3A),
+    (0x1_1D3C, 0x1_1D3D),
+    (0x1_1D3F, 0x1_1D45),
+    (0x1_1D47, 0x1_1D47),
+    (0x1_1D90, 0x1_1D91),
+    (0x1_1D95, 0x1_1D95),
+    (0x1_1D97, 0x1_1D97),
+    (0x1_1EF3, 0x1_1EF4),
+    (0x1_1F00, 0x1_1F01),
+    (0x1_1F36, 0x1_1F3A),
+    (0x1_1F40, 0x1_1F40),
+    (0x1_1F42, 0x1_1F42),
+    (0x1_3430, 0x1_3440),
+    (0x1_3447, 0x1_3455),
+    (0x1_6AF0, 0x1_6AF4),
+    (0x1_6B30, 0x1_6B36),
+    (0x1_6F4F, 0x1_6F4F),
+    (0x1_6F8F, 0x1_6F92),
+    (0x1_6FE4, 0x1_6FE4),
+    (0x1_BC9D, 0x1_BC9E),
+    (0x1_BCA0, 0x1_BCA3),
+    (0x1_CF00, 0x1_CF2D),
+    (0x1_CF30, 0x1_CF46),
+    (0x1_D167, 0x1_D169),
+    (0x1_D173, 0x1_D182),
+    (0x1_D185, 0x1_D18B),
+    (0x1_D1AA, 0x1_D1AD),
+    (0x1_D242, 0x1_D244),
+    (0x1_DA00, 0x1_DA36),
+    (0x1_DA3B, 0x1_DA6C),
+    (0x1_DA75, 0x1_DA75),
+    (0x1_DA84, 0x1_DA84),
+    (0x1_DA9B, 0x1_DA9F),
+    (0x1_DAA1, 0x1_DAAF),
+    (0x1_E000, 0x1_E006),
+    (0x1_E008, 0x1_E018),
+    (0x1_E01B, 0x1_E021),
+    (0x1_E023, 0x1_E024),
+    (0x1_E026, 0x1_E02A),
+    (0x1_E08F, 0x1_E08F),
+    (0x1_E130, 0x1_E136),
+    (0x1_E2AE, 0x1_E2AE),
+    (0x1_E2EC, 0x1_E2EF),
+    (0x1_E4EC, 0x1_E4EF),
+    (0x1_E8D0, 0x1_E8D6),
+    (0x1_E944, 0x1_E94A),
+    (0xE_0001, 0xE_0001),
+    (0xE_0020, 0xE_007F),
+    (0xE_0100, 0xE_01EF),
+];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LogicalLine {
+    pub span: Span,
+    pub token_end: u32,
+    pub token_start: u32,
+}
+
+pub fn logical_lines(
+    tokens: &[Token],
+    raw: &[PythonKind],
+    out: &mut BoundedVec<LogicalLine>,
+) -> bool {
+    assert_eq!(tokens.len(), raw.len());
+
+    out.clear();
+
+    let mut start = None;
+
+    for (position, kind) in raw.iter().enumerate() {
+        if *kind == PythonKind::Newline {
+            if !close_line(tokens, &mut start, position, out) {
+                return false;
+            }
+
+            continue;
+        }
+
+        if carries_text(*kind) && start.is_none() {
+            start = Some(position);
+        }
+    }
+
+    close_line(tokens, &mut start, raw.len(), out)
+}
+
+pub fn width_of(line: &[u8], tab_width: u32) -> u32 {
+    assert!(tab_width > 0);
+
+    let mut found = 0;
+    let mut offset = 0;
+
+    while offset < line.len() {
+        if line[offset] == b'\t' {
+            found = found - found % tab_width + tab_width;
+            offset += 1;
+
+            continue;
+        }
+
+        let (point, width) = decoded(line, offset);
+
+        found += columns_of(point);
+        offset += width;
+    }
+
+    found
+}
+
+fn close_line(
+    tokens: &[Token],
+    start: &mut Option<usize>,
+    end: usize,
+    out: &mut BoundedVec<LogicalLine>,
+) -> bool {
+    let Some(opened) = start.take() else {
+        return true;
+    };
+
+    assert!(end > opened);
+
+    let offset = tokens[opened].offset;
+    let mut close = offset;
+
+    for token in &tokens[opened..end] {
+        if token.length > 0 {
+            close = token.end();
+        }
+    }
+
+    out.push(LogicalLine {
+        span: Span {
+            length: close - offset,
+            offset,
+        },
+        token_end: u32::try_from(end).expect("a bounded position fits in u32"),
+        token_start: u32::try_from(opened).expect("a bounded position fits in u32"),
+    })
+}
+
+const fn carries_text(kind: PythonKind) -> bool {
+    !matches!(
+        kind,
+        PythonKind::Dedent | PythonKind::Indent | PythonKind::Newline
+    )
+}
+
+fn decoded(line: &[u8], offset: usize) -> (u32, usize) {
+    let head = line[offset];
+
+    if head < 0x80 {
+        return (u32::from(head), 1);
+    }
+
+    if !(0xC2..=0xF4).contains(&head) {
+        return (u32::from(head), 1);
+    }
+
+    let width = if head >= 0xF0 {
+        4
+    } else if head >= 0xE0 {
+        3
+    } else {
+        2
+    };
+
+    if offset + width > line.len() {
+        return (u32::from(head), 1);
+    }
+
+    let mut point = u32::from(head & mask_of(width));
+
+    for byte in &line[offset + 1..offset + width] {
+        if byte & 0xC0 != 0x80 {
+            return (u32::from(head), 1);
+        }
+
+        point = (point << 6) | u32::from(byte & 0x3F);
+    }
+
+    (point, width)
+}
+
+const fn mask_of(width: usize) -> u8 {
+    match width {
+        2 => 0x1F,
+        3 => 0x0F,
+        _ => 0x07,
+    }
+}
+
+fn columns_of(point: u32) -> u32 {
+    if within(&ZERO, point) {
+        return 0;
+    }
+
+    if within(&WIDE, point) {
+        return 2;
+    }
+
+    1
+}
+
+fn within(ranges: &[(u32, u32)], point: u32) -> bool {
+    let mut low = 0;
+    let mut high = ranges.len();
+
+    while low < high {
+        let middle = low + (high - low) / 2;
+        let (first, last) = ranges[middle];
+
+        if point < first {
+            high = middle;
+
+            continue;
+        }
+
+        if point > last {
+            low = middle + 1;
+
+            continue;
+        }
+
+        return true;
+    }
+
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::language::Lexer as _;
+    use crate::lex::PYTHON;
+    use crate::syntax::python::classify::classify;
+    use crate::token::Tokens;
+
+    fn lines_of(source: &[u8]) -> Vec<String> {
+        let mut lexed = Tokens::reserve(1 << 12);
+        let mut tokens = Tokens::reserve(1 << 12);
+        let mut raw = BoundedVec::reserve(1 << 12);
+        let mut out = BoundedVec::reserve(1 << 8);
+
+        PYTHON.lex(source, &mut lexed);
+
+        assert!(classify(source, lexed.as_slice(), &mut tokens, &mut raw));
+        assert!(logical_lines(tokens.as_slice(), &raw, &mut out));
+
+        out.iter()
+            .map(|held| String::from_utf8_lossy(&source[held.span.range()]).into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn a_bracketed_expression_over_three_lines_is_one_logical_line() {
+        assert_eq!(
+            lines_of(b"held = [\n    1,\n]\n"),
+            vec!["held = [\n    1,\n]".to_owned()]
+        );
+    }
+
+    #[test]
+    fn two_statements_joined_by_a_semicolon_are_one_logical_line() {
+        assert_eq!(
+            lines_of(b"first = 1; second = 2\n"),
+            vec!["first = 1; second = 2".to_owned()]
+        );
+    }
+
+    #[test]
+    fn each_statement_on_its_own_line_is_its_own_row() {
+        assert_eq!(
+            lines_of(b"first = 1\nsecond = 2\n"),
+            vec!["first = 1".to_owned(), "second = 2".to_owned()]
+        );
+    }
+
+    #[test]
+    fn an_indented_body_reads_one_row_a_statement() {
+        assert_eq!(
+            lines_of(b"def read():\n    return 1\n"),
+            vec!["def read():".to_owned(), "return 1".to_owned()]
+        );
+    }
+
+    #[test]
+    fn a_file_of_nothing_reports_no_row_at_all() {
+        assert!(lines_of(b"").is_empty());
+        assert!(lines_of(b"\n\n").is_empty());
+    }
+
+    #[test]
+    fn a_tab_advances_to_the_next_stop() {
+        assert_eq!(width_of(b"abc\t", 8), 8);
+        assert_eq!(width_of(b"abc\td", 8), 9);
+        assert_eq!(width_of(b"\t", 8), 8);
+        assert_eq!(width_of(b"abcdefgh\t", 8), 16);
+        assert_eq!(width_of(b"abc\t", 4), 4);
+    }
+
+    #[test]
+    fn a_plain_line_counts_one_column_a_byte() {
+        assert_eq!(width_of(b"held = 1", 8), 8);
+        assert_eq!(width_of(b"", 8), 0);
+    }
+
+    #[test]
+    fn a_wide_code_point_counts_two_columns() {
+        assert_eq!(width_of("\u{65e5}\u{672c}\u{8a9e}".as_bytes(), 8), 6);
+        assert_eq!(width_of("ab\u{65e5}".as_bytes(), 8), 4);
+    }
+
+    #[test]
+    fn a_combining_mark_counts_none() {
+        assert_eq!(width_of("e\u{0301}".as_bytes(), 8), 1);
+        assert_eq!(width_of("\u{00e9}".as_bytes(), 8), 1);
+    }
+
+    #[test]
+    fn a_narrow_code_point_past_the_ascii_range_still_counts_one() {
+        assert_eq!(width_of("h\u{e9}llo".as_bytes(), 8), 5);
+        assert_eq!(width_of("\u{3bb}".as_bytes(), 8), 1);
+    }
+
+    #[test]
+    fn a_malformed_run_counts_its_lead_byte_and_moves_on() {
+        assert_eq!(width_of(&[0xE2, 0x28], 8), 2);
+        assert_eq!(width_of(&[0xF0], 8), 1);
+    }
+
+    #[test]
+    fn a_lead_byte_outside_the_lead_range_counts_one_byte() {
+        assert_eq!(width_of(&[0x80, 0x80], 8), 2);
+        assert_eq!(width_of(&[0xBF, b'a'], 8), 2);
+        assert_eq!(width_of(&[0xC0, 0x80], 8), 2);
+        assert_eq!(width_of(&[0xC1, 0xBF], 8), 2);
+        assert_eq!(width_of(&[0xF5, 0x80, 0x80, 0x80], 8), 4);
+        assert_eq!(width_of(&[0xF8, 0x80, 0x80, 0x80], 8), 4);
+        assert_eq!(width_of(&[0xFF], 8), 1);
+    }
+
+    #[test]
+    fn the_tables_follow_the_unicode_database() {
+        assert_eq!(width_of("\u{1f680}".as_bytes(), 8), 2);
+        assert_eq!(width_of("\u{a960}".as_bytes(), 8), 2);
+        assert_eq!(width_of("\u{fe10}".as_bytes(), 8), 2);
+        assert_eq!(width_of("\u{17000}".as_bytes(), 8), 2);
+        assert_eq!(width_of("\u{3248}".as_bytes(), 8), 1);
+        assert_eq!(width_of("\u{5e9}\u{5b8}\u{5c1}".as_bytes(), 8), 1);
+        assert_eq!(width_of("\u{64b}".as_bytes(), 8), 0);
+        assert_eq!(width_of("\u{ad}".as_bytes(), 8), 1);
+        assert_eq!(width_of("\u{1160}".as_bytes(), 8), 0);
+        assert_eq!(width_of("\u{200b}".as_bytes(), 8), 0);
+    }
+
+    #[test]
+    fn each_table_is_sorted_and_non_overlapping() {
+        for table in [&WIDE[..], &ZERO[..]] {
+            for (held, next) in table.iter().zip(table.iter().skip(1)) {
+                assert!(held.0 <= held.1);
+                assert!(held.1 < next.0);
+            }
+        }
+    }
+}

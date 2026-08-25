@@ -1,0 +1,51 @@
+* {
+    margin: 0;
+}
+
+a:hover > b + c ~ d e {
+    color: red;
+}
+
+.card.wide {
+    color: red;
+}
+
+a b.c#d[data-role] {
+    color: red;
+}
+
+input::placeholder {
+    color: red;
+}
+
+a[href^="https"], a[rel~="me"], a[lang|="en"] {
+    color: red;
+}
+
+:is(.one, .two) .three {
+    color: red;
+}
+
+li:nth-child(2n + 1) {
+    color: red;
+}
+
+.d\:e {
+    color: red;
+}
+
+> .child {
+    color: red;
+}
+
+ns|cell {
+    color: red;
+}
+
+a[data-role*="held"] {
+    color: red;
+}
+
+a[data-role$="held"] {
+    color: red;
+}

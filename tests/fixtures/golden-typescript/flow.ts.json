@@ -1,0 +1,1 @@
+{"ast":[["program",0,41],["type_alias_declaration",0,21],["type_identifier",5,10],["flow_maybe_type",13,20],["predefined_type",14,20],["type_alias_declaration",22,40],["type_identifier",27,35],["existential_type",38,39]],"broken":false,"path":"flow.ts"}

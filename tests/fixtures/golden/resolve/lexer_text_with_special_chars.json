@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_text_with_special_chars.html","tokens":[["AngleOpen",0,1],["ElementName",1,4],["AngleClose",4,5],["Text",5,46],["AngleOpenSlash",46,48],["ElementName",48,51],["AngleClose",51,52],["Text",52,53]],"tree":[["Document",0,53],["Element",0,52],["OpenTag",0,5],["CloseTag",46,52]],"errors":[]}

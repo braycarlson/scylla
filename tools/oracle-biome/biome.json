@@ -1,0 +1,17 @@
+{
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 4,
+    "lineWidth": 88
+  },
+  "css": {
+    "parser": { "cssModules": true, "tailwindDirectives": true },
+    "formatter": { "enabled": true }
+  },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "semicolons": "always" }
+  },
+  "vcs": { "enabled": false },
+  "files": { "ignoreUnknown": true }
+}

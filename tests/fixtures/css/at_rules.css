@@ -1,0 +1,53 @@
+@charset "utf-8";
+
+@import "base.css";
+
+@import url("print.css") print, screen;
+
+@namespace svg "http://www.w3.org/2000/svg";
+
+@media screen and (min-width: 100px), print {
+    a {
+        color: red;
+    }
+}
+
+@media not all and (monochrome) {
+    a {
+        color: red;
+    }
+}
+
+@media only screen and ((min-width: 1px) or (max-width: 2px)) {
+    a {
+        color: red;
+    }
+}
+
+@supports (display: grid) {
+    a {
+        color: red;
+    }
+}
+
+@supports not (display: grid) {
+    a {
+        color: red;
+    }
+}
+
+@supports selector(:has(a)) {
+    a {
+        color: red;
+    }
+}
+
+@font-face {
+    font-family: "Held";
+}
+
+@layer base, extra;
+
+a {
+    @apply text-sm font-bold;
+}

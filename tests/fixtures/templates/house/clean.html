@@ -1,0 +1,65 @@
+{# Every rule in the pack, written the way the house style asks for. #}
+{# The seeded harness holds this file to zero findings, so it is the #}
+{# pack's false-positive guard: a rule that starts firing here is #}
+{# accusing correct code. #}
+
+<div x-data="{
+    async init() {
+        this.rows = await Glue.querySet.rows.all();
+        this.choices = JSON.parse('{{ choices_json|escapejs }}');
+    },
+
+    choices: [],
+    open: false,
+    rows: [],
+
+    async apply() {
+        const url = '{% url 'catalog:json:save' %}';
+        const payload = { open: this.open };
+
+        await Glue.fetch(url, { payload });
+    },
+
+    async refresh() {
+        const base = '{% url 'catalog:template:row' pk=0 %}';
+
+        await Glue.view(base.replace('0', this.pk)).renderInnerHtml(this.$refs.rowHost);
+    },
+
+    toggle() {
+        this.open = !this.open;
+    }
+}">
+    <div x-ref="rowHost"></div>
+
+    <div class="bg-app-layer-two text-app-default-text-color border-app-primary">
+        <span style="max-height: calc(100vh - 120px)"></span>
+        <span style="color: var(--app-default-text-color, #2C3E36)"></span>
+    </div>
+
+    <form method="post" action="{% url 'catalog:form:save' %}">
+        {% csrf_token %}
+        <input name="title">
+        <button type="submit">Save</button>
+    </form>
+
+    <form method="get" action="{% url 'catalog:page:list' %}">
+        <input name="q">
+    </form>
+
+    <form method="post" action="{% url 'catalog:form:bulk' %}">
+        {% include 'catalog/form/fields.html' %}
+    </form>
+</div>
+
+<script>
+    window.catalogReady = true;
+</script>
+
+<style>
+    .badge { background: var(--app-layer-two, #FBFCF8); }
+
+    @media print {
+        .badge { background: #000; color: #fff; }
+    }
+</style>

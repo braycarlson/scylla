@@ -1,0 +1,12 @@
+{% load django_glue %}
+{% django_glue_init %}
+
+<div x-data="{
+    product: Glue.model.legacy_product,
+    pinned: Glue.model.legacy_product_view,
+    keyword: Glue.model.legacy_keyword,
+    row: Glue.template.legacy_row,
+    report: Glue.function.legacy_report,
+}">
+    <button @click="Glue.querySet.legacy_products.filter()">Filter</button>
+</div>

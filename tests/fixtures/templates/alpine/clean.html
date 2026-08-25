@@ -1,0 +1,31 @@
+{# Every rule in the pack, written the way Alpine actually wants it. #}
+{# Held to zero findings, so this is the pack's false-positive guard. #}
+
+<div x-data="{ open: false, rows: [], toggle() { this.open = !this.open } }">
+    <span x-show="open" x-cloak></span>
+    <span x-text="rows.length"></span>
+
+    <button @click.prevent.stop="toggle()">save</button>
+    <input @keydown.k="toggle()" @keyup.f3="toggle()" x-model.lazy="open">
+
+    <div x-transition:enter.duration.500ms x-collapse x-intersect="toggle()"></div>
+    <div :class="open ? 'a' : 'b'" x-ref="host" x-mask="(999) 999-9999"></div>
+
+    {# A listener bound to the window hears a dispatch from anywhere. #}
+    <div @row-saved.window="rows = []"></div>
+
+    {# One bound to its own subtree hears the dispatch that bubbles up. #}
+    <div @row-added="rows.push(1)">
+        <button @click="$dispatch('row-added')">add</button>
+    </div>
+
+    {# A directive this project teaches Alpine below. #}
+    <div x-clipboard="open"></div>
+
+    {# Not Alpine at all, so none of these rules look at them. #}
+    <div class="card" data-role="panel" aria-hidden="true"></div>
+</div>
+
+<script>
+    Alpine.directive('clipboard', (el) => { el.textContent = 'copied' });
+</script>

@@ -1,0 +1,4 @@
+
+{% if perms.app_e.view_x or perms.app_e.view_y or perms.app_e.view_z %}
+    {% include 'components/fake_panel.html' %}
+{% endif %}

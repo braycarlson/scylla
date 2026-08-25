@@ -1,0 +1,7 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/JavaScript/test.js",
+    "category": "not-javascript",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a JavaScript module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect."
+  }
+]

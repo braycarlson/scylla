@@ -1,0 +1,12 @@
+
+{% for card in cards %}
+    <article class="card">
+        {% if card.is_featured %}
+            {% include 'cards/fake_featured.html' with card=card %}
+        {% else %}
+            {% include 'cards/fake_standard.html' with card=card %}
+        {% endif %}
+    </article>
+{% empty %}
+    {% include 'cards/fake_empty.html' %}
+{% endfor %}

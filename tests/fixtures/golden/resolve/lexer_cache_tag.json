@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_cache_tag.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,8],["Whitespace",8,9],["Number",9,12],["Whitespace",12,13],["Identifier",13,20],["Whitespace",20,21],["TagClose",21,23],["Text",23,24]],"tree":[["Document",0,24],["TemplateTag",0,23]],"errors":[]}

@@ -1,0 +1,32 @@
+{# Template syntax where an editor's JavaScript and CSS parsers can reach it. #}
+{# Nothing here is a finding; the fixture exists so the JetBrains plugin can #}
+{# be opened on it and checked for red squiggles that are not really errors. #}
+
+<div x-data="{ base: '{{ theme|escapejs }}', rows: [] }">
+    {# A tag in expression position: the plugin splices `__lintcheck_tag` in. #}
+    <div :class="{{ base }} + ' tail'"></div>
+    <div :class="'card ' + {{ theme }}"></div>
+
+    {# A tag wrapping statements: the plugin drops it and keeps the pieces. #}
+    <button @click="{% if perms.catalog.change_product %}rows.push(1){% endif %}">add</button>
+
+    {# Both loop shapes bind their names inside the injected file. #}
+    <template x-for="row in rows"><span x-text="row"></span></template>
+    <template x-for="(row, index) in rows"><span x-text="index"></span></template>
+
+    {# A magic, so the wrapper's parameter list is what resolves it. #}
+    <div @row-added.window="$nextTick(() => rows.push(1))"></div>
+</div>
+
+<script>
+    let x = {{ value }};
+    const url = '{% url "catalog:list" %}';
+
+    {% if debug %}
+    console.log(x, url);
+    {% endif %}
+</script>
+
+<style>
+    .card { color: {{ colour }}; }
+</style>

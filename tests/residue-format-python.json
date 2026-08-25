@@ -1,0 +1,27 @@
+[
+  {
+    "fixture": "fstrings.py",
+    "category": "verbatim-format-string",
+    "reason": "Decision 4 makes a format string one `Verbatim` element, so its interior is reproduced byte for byte. ruff formats inside the braces and normalises the quotes it finds there, so `f'{d[\"key\"]}'` becomes `f\"{d['key']}\"` under ruff and stays as written under scylla."
+  },
+  {
+    "fixture": "imports.py",
+    "category": "redundant-parentheses",
+    "reason": "ruff drops the parentheses around a `from ... import (a, b)` list that fits on one line. Removing them deletes two tokens the source wrote, which the preservation relation of decision 10 forbids, so scylla keeps them and lays the list out inside them."
+  },
+  {
+    "fixture": "literals.py",
+    "category": "literal-normalisation",
+    "reason": "ruff rewrites the text of a literal: `.5` gains its leading zero, a redundant `u` prefix is dropped, and an implicit concatenation of three strings becomes one. The emitter rewrites a literal only where the rewrite is a quote swap that changes no other byte, so these three stay as the source wrote them."
+  },
+  {
+    "fixture": "statements.py",
+    "category": "statement-separator",
+    "reason": "ruff deletes a semicolon after splitting `a = 1; b = 2` onto two lines. The semicolon is a token, not whitespace, so deleting it would break the preservation relation of decision 10; scylla splits the line and leaves the separator where it stands."
+  },
+  {
+    "fixture": "with_yield.py",
+    "category": "redundant-parentheses",
+    "reason": "ruff drops the parentheses around a parenthesised `with` item list that fits on one line, for the same reason it drops them from a `from ... import` list, and scylla keeps them for the same reason it keeps those."
+  }
+]

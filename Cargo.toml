@@ -1,0 +1,112 @@
+[package]
+name = "scylla"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/braycarlson/scylla"
+description = "A statically allocated parser and formatter for several languages"
+keywords = ["lexer", "no-alloc", "parser", "static-analysis"]
+categories = ["parser-implementations"]
+readme = "README.md"
+exclude = ["plans/", "tests/fixtures/", "tools/"]
+
+[dependencies]
+
+[features]
+fuzzing = []
+tests = []
+
+[profile.dev]
+overflow-checks = true
+panic = "unwind"
+
+[profile.release]
+codegen-units = 1
+lto = true
+overflow-checks = true
+panic = "unwind"
+
+[lints.rust]
+elided_lifetimes_in_paths = "warn"
+explicit_outlives_requirements = "warn"
+macro_use_extern_crate = "warn"
+meta_variable_misuse = "warn"
+non_ascii_idents = "warn"
+rust_2018_idioms = { level = "warn", priority = -1 }
+single_use_lifetimes = "warn"
+trivial_casts = "warn"
+trivial_numeric_casts = "warn"
+unit_bindings = "warn"
+unnameable_types = "warn"
+unreachable_pub = "warn"
+unused_lifetimes = "warn"
+unused_qualifications = "warn"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+cargo = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+restriction = { level = "warn", priority = -1 }
+
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
+
+absolute_paths = "allow"
+arithmetic_side_effects = "allow"
+as_conversions = "allow"
+assertions_on_result_states = "allow"
+big_endian_bytes = "allow"
+blanket_clippy_restriction_lints = "allow"
+collapsible_if = "allow"
+default_numeric_fallback = "allow"
+else_if_without_else = "allow"
+exhaustive_enums = "allow"
+exhaustive_structs = "allow"
+expect_used = "allow"
+field_scoped_visibility_modifiers = "allow"
+impl_trait_in_params = "allow"
+implicit_return = "allow"
+indexing_slicing = "allow"
+inline_modules = "allow"
+integer_division = "allow"
+integer_division_remainder_used = "allow"
+let_underscore_must_use = "allow"
+let_underscore_untyped = "allow"
+little_endian_bytes = "allow"
+match_same_arms = "allow"
+missing_assert_message = "allow"
+missing_const_for_fn = "allow"
+missing_docs_in_private_items = "allow"
+missing_errors_doc = "allow"
+missing_inline_in_public_items = "allow"
+missing_panics_doc = "allow"
+missing_trait_methods = "allow"
+mod_module_files = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+option_if_let_else = "allow"
+panic = "allow"
+panic_in_result_fn = "allow"
+pattern_type_mismatch = "allow"
+pub_use = "allow"
+pub_with_shorthand = "allow"
+question_mark_used = "allow"
+redundant_closure_for_method_calls = "allow"
+redundant_pub_crate = "allow"
+renamed_function_params = "allow"
+same_name_method = "allow"
+semicolon_outside_block = "allow"
+separated_literal_suffix = "allow"
+should_implement_trait = "allow"
+single_call_fn = "allow"
+struct_excessive_bools = "allow"
+tests_outside_test_module = "allow"
+undocumented_unsafe_blocks = "allow"
+unreachable = "allow"
+unwrap_in_result = "allow"
+wildcard_enum_match_arm = "allow"
+
+[[bench]]
+name = "pipeline"
+harness = false

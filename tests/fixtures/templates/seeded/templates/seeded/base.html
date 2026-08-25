@@ -1,0 +1,6 @@
+{# The layout every other seeded template extends. Its real job is the #}
+{# init tag, which is what keeps them all off glue/missing-init. #}
+<head>{% django_glue_init %}</head>
+{# lintcheck-expect: glue/unregistered-name #}
+<div x-init="Glue.model.layout_ghost.load()"></div>
+{% block content %}{% endblock %}

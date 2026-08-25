@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_session_controller_to_json_with_string_key.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,29],["Whitespace",29,30],["String",30,48],["Whitespace",48,49],["TagClose",49,51],["Text",51,52]],"tree":[["Document",0,52],["TemplateTag",0,51]],"errors":[]}

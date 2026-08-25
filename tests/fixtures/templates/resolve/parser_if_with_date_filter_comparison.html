@@ -1,0 +1,6 @@
+
+{% if issue.due_date|date:'Y-m-d' < today %}
+    {% include 'badge/fake_overdue.html' %}
+{% elif issue.due_date|date:'Y-m-d' == today %}
+    {% include 'badge/fake_due_today.html' %}
+{% endif %}

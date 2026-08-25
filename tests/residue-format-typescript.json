@@ -1,0 +1,82 @@
+[
+  {
+    "fixture": "annotations.ts",
+    "category": "biome-line-breaking",
+    "reason": "biome explodes a parameter-property constructor across lines and adds the trailing comma that layout wants."
+  },
+  {
+    "fixture": "control_flow.ts",
+    "category": "biome-line-breaking",
+    "reason": "biome indents the body of a braceless clause and deletes an empty statement."
+  },
+  {
+    "fixture": "declarations.ts",
+    "category": "biome-line-breaking",
+    "reason": "biome explodes a multi-declarator statement and a destructuring pattern across lines."
+  },
+  {
+    "fixture": "decorators.ts",
+    "category": "biome-line-breaking",
+    "reason": "biome moves a decorator onto its own line when the member it decorates is long enough."
+  },
+  {
+    "fixture": "expressions.ts",
+    "category": "biome-line-breaking",
+    "reason": "biome reflows a long chain across lines."
+  },
+  {
+    "fixture": "functions.ts",
+    "category": "biome-line-breaking",
+    "reason": "biome parenthesises a single arrow parameter and reflows a parameter list."
+  },
+  {
+    "fixture": "literals.ts",
+    "category": "biome-literal-normalisation",
+    "reason": "biome rewrites a literal's text, adding a leading zero and normalising quotes."
+  },
+  {
+    "fixture": "objects.ts",
+    "category": "biome-literal-normalisation",
+    "reason": "biome unquotes an object key that does not need quoting."
+  },
+  {
+    "fixture": "interfaces.ts",
+    "category": "biome-template-literals",
+    "reason": "The fixture carries a template-literal type, whose interpolation braces reach the emitter the same way, so the file is refused for the same reason."
+  },
+  {
+    "fixture": "templates.ts",
+    "category": "biome-template-literals",
+    "reason": "As the JavaScript fixture of the same name: a template literal's interpolation braces do not balance against the block stack, so the file is refused."
+  },
+  {
+    "fixture": "tsx_attributes.tsx",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` walks the `.tsx` fixtures under `Dialect::Tsx` and asserts the refusal per fixture."
+  },
+  {
+    "fixture": "tsx_dialect.tsx",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` walks the `.tsx` fixtures under `Dialect::Tsx` and asserts the refusal per fixture."
+  },
+  {
+    "fixture": "tsx_elements.tsx",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` walks the `.tsx` fixtures under `Dialect::Tsx` and asserts the refusal per fixture."
+  },
+  {
+    "fixture": "tsx_expressions.tsx",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` walks the `.tsx` fixtures under `Dialect::Tsx` and asserts the refusal per fixture."
+  },
+  {
+    "fixture": "tsx_names.tsx",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` walks the `.tsx` fixtures under `Dialect::Tsx` and asserts the refusal per fixture."
+  },
+  {
+    "fixture": "tsx_text.tsx",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` walks the `.tsx` fixtures under `Dialect::Tsx` and asserts the refusal per fixture."
+  }
+]

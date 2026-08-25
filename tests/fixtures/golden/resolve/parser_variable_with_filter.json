@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_variable_with_filter.html","tokens":[["VariableOpen",0,2],["Whitespace",2,3],["Identifier",3,11],["Pipe",11,12],["Identifier",12,19],["Colon",19,20],["String",20,22],["Whitespace",22,23],["VariableClose",23,25],["Text",25,26]],"tree":[["Document",0,26],["TemplateVariable",0,25],["FilterChain",11,23],["Filter",11,23]],"errors":[]}

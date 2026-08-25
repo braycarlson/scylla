@@ -1,0 +1,10 @@
+{# The first two reads keep `ghost` and `caller` off #}
+{# glue/dead-registration while views.py reports their bad targets. #}
+{% extends 'seeded/base.html' %}
+{% block content %}<div x-init="Glue.template.ghost.renderHtml()"></div><div x-init="Glue.function.caller.execute()"></div>
+{# lintcheck-expect: glue/unregistered-name #}
+<div x-init="Glue.function.missing_fn.execute()"></div>
+{# `render_inner` is django-glue 0.8's name for it; 1.0 calls it #}
+{# renderInnerHtml, and nothing says so at runtime. #}
+{# lintcheck-expect: glue/unknown-verb #}
+<div x-init="Glue.template.ghost.render_inner($refs.host)"></div>{% endblock %}

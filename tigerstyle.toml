@@ -1,0 +1,30 @@
+include = ["benches/**/*.rs", "src/**/*.rs", "tests/**/*.rs"]
+extend_exclude = ["tests/fixtures/**", "tools/**"]
+line-length-max = 100
+select = ["ALL"]
+
+ignore = [
+    "TS004",
+    "TS016",
+    "TS022",
+    "TS026",
+    "TS027",
+    "TS033",
+    "TS037",
+    "TS042",
+    "TS043",
+    "TS045",
+]
+
+[per-file-ignores]
+"benches/pipeline.rs" = ["TS015", "TS019"]
+"src/allocation/global.rs" = ["TS019"]
+"src/lex/go.rs" = ["TS002"]
+"src/syntax/css/parse.rs" = ["TS001"]
+"src/syntax/go/parse.rs" = ["TS001"]
+"src/syntax/javascript/parse.rs" = ["TS001"]
+"src/syntax/odin/parse.rs" = ["TS001"]
+"src/syntax/python/parse.rs" = ["TS001"]
+"src/syntax/rust/parse.rs" = ["TS001"]
+"src/syntax/typescript/parse.rs" = ["TS001"]
+"src/syntax/zig/parse.rs" = ["TS001"]

@@ -1,0 +1,9 @@
+const lower = <div />;
+const upper = <Widget />;
+const dollar = <$Root />;
+const under = <_Private />;
+const member = <Foo.Bar />;
+const deeper = <Foo.Bar.Baz />;
+const namespaced = <svg:rect />;
+const paired = <Foo.Bar>body</Foo.Bar>;
+const dashed = <my-element />;

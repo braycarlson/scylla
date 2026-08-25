@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_verbatim.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,11],["Whitespace",11,12],["TagClose",12,14],["VerbatimText",14,26],["TagOpen",26,28],["Whitespace",28,29],["TagName",29,40],["Whitespace",40,41],["TagClose",41,43],["Text",43,44]],"tree":[["Document",0,44],["TemplateTag",0,14],["TemplateTag",26,43]],"errors":[]}

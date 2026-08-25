@@ -1,0 +1,72 @@
+[
+  {
+    "fixture": "control_flow.js",
+    "category": "biome-line-breaking",
+    "reason": "biome indents the body of a braceless `if` and deletes an empty statement. The emitter neither moves a line break nor deletes a token."
+  },
+  {
+    "fixture": "declarations.js",
+    "category": "biome-line-breaking",
+    "reason": "biome explodes a multi-declarator `let` and a destructuring pattern across lines once they pass the width."
+  },
+  {
+    "fixture": "expressions.js",
+    "category": "biome-line-breaking",
+    "reason": "biome reflows a long chain and an optional-call chain across lines."
+  },
+  {
+    "fixture": "functions.js",
+    "category": "biome-line-breaking",
+    "reason": "biome parenthesises a single arrow parameter, reflows a parameter list, and splits a chained call, all of which move or add tokens the source did not write."
+  },
+  {
+    "fixture": "literals.js",
+    "category": "biome-literal-normalisation",
+    "reason": "biome rewrites a literal's text: `.5` gains its leading zero and a single-quoted string becomes double-quoted. The emitter rewrites no literal outside Python's quote swap."
+  },
+  {
+    "fixture": "objects.js",
+    "category": "biome-literal-normalisation",
+    "reason": "biome unquotes an object key that does not need quoting and normalises the quotes of one that does."
+  },
+  {
+    "fixture": "templates.js",
+    "category": "biome-template-literals",
+    "reason": "A template literal's interpolations reach the emitter as brace tokens whose opening brace belongs to the literal rather than to a block, so the bracket stack does not balance and the file is refused rather than reindented through a stack that is wrong."
+  },
+  {
+    "fixture": "jsx_attributes.js",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` asserts the refusal per fixture."
+  },
+  {
+    "fixture": "jsx_elements.js",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` asserts the refusal per fixture."
+  },
+  {
+    "fixture": "jsx_expressions.js",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` asserts the refusal per fixture."
+  },
+  {
+    "fixture": "jsx_fragments.js",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` asserts the refusal per fixture."
+  },
+  {
+    "fixture": "jsx_names.js",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` asserts the refusal per fixture."
+  },
+  {
+    "fixture": "jsx_positions.js",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` asserts the refusal per fixture."
+  },
+  {
+    "fixture": "jsx_text.js",
+    "category": "jsx-refused",
+    "reason": "A JSX element's text is whitespace-significant and its tags are not brace-family syntax, so the emitter refuses any file whose kinds carry a JSX node rather than reformatting one wrongly. Phase 7 of `plans/GAP.md` asserts the refusal per fixture."
+  }
+]

@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/battery_alpine_django_mixed.html","kind":"template","objects":[{"range":[13,129],"members":[{"name":"init","kind":"Init","is_async":false,"has_await":false,"range":[15,67]},{"name":"controller","kind":"Property","is_async":false,"has_await":false,"range":[69,127]}]}],"bindings":[]}

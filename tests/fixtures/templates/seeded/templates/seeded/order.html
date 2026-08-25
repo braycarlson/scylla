@@ -1,0 +1,7 @@
+{# lintcheck-expect: glue/init-order #}
+<script>console.log(Glue.model.early);</script>
+{% django_glue_init %}
+<div x-init="Glue.model.early.load()"></div>
+{# The value path and the metadata path name different fields. #}
+{# lintcheck-expect: glue/field-meta-mismatch #}
+{% include 'seeded/base.html' with glue_field='early.name' glue_field_meta='early.$fields.price' %}

@@ -1,0 +1,23 @@
+format_macro_bodies = false
+format_strings = true
+imports_layout = "HorizontalVertical"
+short_array_element_width_threshold = 0
+skip_macro_invocations = [
+    "assert",
+    "assert_eq",
+    "assert_ne",
+    "debug_assert",
+    "debug_assert_eq",
+    "debug_assert_ne",
+    "eprint",
+    "eprintln",
+    "format",
+    "format_args",
+    "panic",
+    "print",
+    "println",
+    "todo",
+    "unreachable",
+    "write",
+    "writeln",
+]

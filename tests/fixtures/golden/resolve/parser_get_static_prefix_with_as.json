@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_get_static_prefix_with_as.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,20],["Whitespace",20,21],["Identifier",21,23],["Whitespace",23,24],["Identifier",24,34],["Whitespace",34,35],["TagClose",35,37],["Text",37,38]],"tree":[["Document",0,38],["TemplateTag",0,37]],"errors":[]}

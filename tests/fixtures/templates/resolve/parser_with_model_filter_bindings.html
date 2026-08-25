@@ -1,0 +1,4 @@
+
+{% with app_label=obj|model_app_label model_name=obj|model_name %}
+    <p>{{ app_label }}.{{ model_name }}</p>
+{% endwith %}

@@ -1,0 +1,7 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Go/main.go",
+    "category": "not-go",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Go package. `go/parser` rejects it on the first escape byte, which is what makes it residue rather than a defect."
+  }
+]

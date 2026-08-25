@@ -1,0 +1,7 @@
+{% extends 'seeded/base.html' %}
+{% block content %}
+{# lintcheck-expect: glue/unregistered-name #}
+<div x-init="Glue.querySet.missing.all()"></div>
+{# lintcheck-expect: glue/namespace-mismatch #}
+<div x-init="Glue.model.products.load()"></div>
+{% endblock %}

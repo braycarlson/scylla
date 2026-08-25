@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_plural_tag.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,9],["Whitespace",9,10],["TagClose",10,12],["Text",12,13]],"tree":[["Document",0,13],["TemplateTag",0,12]],"errors":[]}

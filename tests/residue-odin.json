@@ -1,0 +1,92 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Odin/test.odin",
+    "category": "not-odin",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than an Odin source file. The tree-sitter grammar reports an error on the first escape byte, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "ols/builtin/builtin.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/builtin/intrinsics.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/src/server/ast.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/src/server/check.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/src/server/clone.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/src/testing/helpers.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/src/testing/testing.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/tests/hover_test.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/.snapshots/array.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/.snapshots/matrix_comp_lit.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/.snapshots/shebang.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/array.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/matrix_comp_lit.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/shebang.odin",
+    "category": "grammar",
+    "reason": "The tree-sitter-odin grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid Odin that `odin build` accepts; the grammar is the weakest oracle in the set, as the plan's language table records, and a file it cannot parse carries no expectation for scylla to match."
+  },
+  {
+    "fixture": "ols/src/server/completion.odin",
+    "category": "shape",
+    "reason": "The grammar reads `if !ok {\\n\\t\\treturn\\n\\t}` as a unary `!` over a composite literal `ok{...}`, so its `if_statement` ends at the brace the body opens and the body's `return` becomes a `struct_field`. Odin itself reads the brace as the if's block, which is what scylla parses; the difference is the tree-sitter grammar's GLR resolution of an ambiguity the language does not have."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/random/demo.odin",
+    "category": "shape",
+    "reason": "The formatter's stress fixture collects the grammar's remaining GLR resolutions: `for _, i in data {` and `#unroll for elem, idx in ([4]int{...}) {` bind the loop body's brace into the iterable as a composite literal, `Y : int : 123` reports a `var_declaration` where the same shape elsewhere reports a `const_type_declaration`, and a `#sparse[T]U` tag joins its `array_type` while a `#soa[N]T` tag does not. Each reading is the grammar's, not Odin's; scylla parses all four the way `odin build` does."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/random/.snapshots/demo.odin",
+    "category": "shape",
+    "reason": "The formatted snapshot of `random/demo.odin`, carrying the same GLR resolutions as its source."
+  }
+]

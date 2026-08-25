@@ -1,0 +1,11 @@
+@import "reset.css";
+@import url("theme.css");
+
+.card > .inner,
+#main .card:hover {
+	color: red;
+}
+
+#footer::before {
+	content: "";
+}
