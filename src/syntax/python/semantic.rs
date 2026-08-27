@@ -2502,7 +2502,7 @@ impl<'run> Builder<'run> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::syntax::python::bind::bind;
+    use crate::syntax::python::bind::{Outcome as BindOutcome, bind};
 
     const BUILTINS: [&[u8]; 6] = [b"len", b"list", b"print", b"str", b"sum", b"tuple"];
 
@@ -2531,7 +2531,10 @@ mod tests {
 
             parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
 
-            assert!(bind(source, tokens.as_slice(), &raw, &tree, &mut tables));
+            assert_eq!(
+                bind(source, tokens.as_slice(), &raw, &tree, &mut tables),
+                BindOutcome::Complete
+            );
 
             assert_eq!(
                 semantic.build(
@@ -2597,7 +2600,10 @@ mod tests {
 
             parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
 
-            assert!(bind(source, tokens.as_slice(), &raw, &tree, &mut tables));
+            assert_eq!(
+                bind(source, tokens.as_slice(), &raw, &tree, &mut tables),
+                BindOutcome::Complete
+            );
 
             semantic.build(
                 &SemanticInput {
@@ -3822,7 +3828,10 @@ mod tests {
 
         parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
 
-        assert!(bind(source, tokens.as_slice(), &raw, &tree, &mut tables));
+        assert_eq!(
+            bind(source, tokens.as_slice(), &raw, &tree, &mut tables),
+            BindOutcome::Complete
+        );
 
         assert_eq!(
             semantic.build(

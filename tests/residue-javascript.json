@@ -3,5 +3,10 @@
     "fixture": "bat/tests/syntax-tests/highlighted/JavaScript/test.js",
     "category": "not-javascript",
     "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a JavaScript module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "go/cmd/vendor/github.com/google/pprof/internal/driver/html/common.js",
+    "category": "not-javascript",
+    "reason": "The file is a Go `html/template` source that carries the `.js` extension: it writes template actions such as `{{range .}}` among its statements, and a template action is not JavaScript. The tree-sitter grammar reports an ERROR over each action, which is what makes it residue rather than a defect."
   }
 ]

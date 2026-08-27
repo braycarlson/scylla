@@ -71,6 +71,51 @@ def rows(text, held, broken):
         held.setdefault(name, []).append([code, offset])
 
 
+def run(prefix, batch):
+    held = subprocess.run(
+        prefix + batch,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    if held.returncode not in (0, 1):
+        print(held.stderr, file=sys.stderr)
+
+        return None
+
+    return held.stdout, payload(held.stdout).get("number_of_files", len(batch))
+
+
+def decline(prefix, batch):
+    found = set()
+    stack = [batch]
+
+    while stack:
+        held = stack.pop()
+        outcome = run(prefix, held)
+
+        if outcome is None:
+            continue
+
+        _, taken = outcome
+
+        if taken == len(held):
+            continue
+
+        if len(held) == 1:
+            found.add(held[0])
+
+            continue
+
+        middle = len(held) // 2
+
+        stack.append(held[:middle])
+        stack.append(held[middle:])
+
+    return found
+
+
 def main():
     if len(sys.argv) != 3:
         print("usage: dump.py <source-root> <destination>", file=sys.stderr)
@@ -103,26 +148,28 @@ def main():
 
     reported = {}
     broken = set()
+    declined = set()
 
     for start in range(0, len(found), BATCH):
         batch = [path for _, path in found[start : start + BATCH]]
-        held = subprocess.run(
-            prefix + batch,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        outcome = run(prefix, batch)
 
-        if held.returncode not in (0, 1):
-            print(held.stderr, file=sys.stderr)
+        if outcome is None:
+            return 2
 
-            return held.returncode
+        text, taken = outcome
 
-        rows(held.stdout, reported, broken)
+        rows(text, reported, broken)
+
+        if taken != len(batch):
+            declined |= decline(prefix, batch)
 
     written = 0
 
     for name, path in found:
+        if path in declined:
+            continue
+
         rendered = reported.get(path, [])
         rendered.sort()
         target = os.path.join(destination, f"{name}.json")

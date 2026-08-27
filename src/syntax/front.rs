@@ -29,7 +29,7 @@ use crate::syntax::odin::kind::OdinKind;
 use crate::syntax::odin::parse as odin_parse;
 use crate::syntax::odin::semantic::{Binding as OdinBinding, Semantic as OdinSemantic};
 use crate::syntax::python::ast as python;
-use crate::syntax::python::bind::{self, Tables as PythonTables};
+use crate::syntax::python::bind::{self, Outcome as BindOutcome, Tables as PythonTables};
 use crate::syntax::python::check::{self, CheckError as PythonCheckError, Completion};
 use crate::syntax::python::classify::classify as python_classify;
 use crate::syntax::python::kind::PythonKind;
@@ -186,6 +186,7 @@ pub struct Scratch {
     odin: Option<Events<OdinKind>>,
     python: Option<Events<PythonKind>>,
     python_annotation: Option<PythonAnnotationScratch>,
+    python_names: Option<BoundedVec<Span>>,
     rust: Option<Events<RustKind>>,
     typescript: Option<Events<TypeScriptKind>>,
     zig: Option<Events<ZigKind>>,
@@ -763,6 +764,8 @@ impl Scratch {
                     ANNOTATION_NODE_COUNT_MAX,
                 )
             }),
+            python_names: wanted[Language::Python.index()]
+                .then(|| BoundedVec::reserve(limits.binding_count_max)),
             rust: events_of(wanted[Language::Rust.index()], count),
             typescript: events_of(
                 wanted[Language::Tsx.index()] || wanted[Language::TypeScript.index()],
@@ -1009,6 +1012,7 @@ fn build_python_of(
             checks,
             events: events.python.as_mut(),
             lexed,
+            names: events.python_names.as_mut(),
             scopes,
             semantic,
             syntax,
@@ -1188,6 +1192,7 @@ struct PythonBuildInput<'run> {
     checks: &'run mut BoundedVec<PythonCheckError>,
     events: Option<&'run mut Events<PythonKind>>,
     lexed: &'run [Token],
+    names: Option<&'run mut BoundedVec<Span>>,
     scopes: &'run mut PythonTables,
     semantic: &'run mut PythonSemantic,
     syntax: &'run mut Syntax<PythonKind>,
@@ -1204,12 +1209,17 @@ fn build_python(
         checks,
         events,
         lexed,
+        names,
         scopes,
         semantic,
         syntax,
     } = input;
 
     let Some(held) = events else {
+        return Structure::Truncated;
+    };
+
+    let Some(seen) = names else {
         return Structure::Truncated;
     };
 
@@ -1223,13 +1233,14 @@ fn build_python(
         return parsed;
     }
 
-    if !bind::bind(
+    if bind::bind(
         source,
         syntax.tokens.as_slice(),
         &syntax.raw,
         &syntax.tree,
         scopes,
-    ) {
+    ) != BindOutcome::Complete
+    {
         return Structure::Truncated;
     }
 
@@ -1250,7 +1261,7 @@ fn build_python(
         return model;
     }
 
-    check_python(source, checks, semantic, syntax, version)
+    check_python(source, checks, seen, semantic, syntax, version)
 }
 
 fn parse_python(
@@ -1275,20 +1286,21 @@ fn parse_python(
 fn check_python(
     source: &[u8],
     checks: &mut BoundedVec<PythonCheckError>,
+    names: &mut BoundedVec<Span>,
     semantic: &PythonSemantic,
     syntax: &Syntax<PythonKind>,
     version: PythonVersion,
 ) -> Structure {
-    if check::check(
-        source,
-        syntax.tokens.as_slice(),
-        &syntax.raw,
-        &syntax.tree,
+    let input = check::Input {
+        raw: &syntax.raw,
         semantic,
+        source,
+        tokens: syntax.tokens.as_slice(),
+        tree: &syntax.tree,
         version,
-        checks,
-    ) == Completion::Complete
-    {
+    };
+
+    if check::check(&input, checks, names) == Completion::Complete {
         return Structure::Complete;
     }
 

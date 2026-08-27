@@ -6,7 +6,6 @@ use crate::token::Token;
 use crate::tree::{Kind, NONE, Step, Structure, Tree, walk};
 
 pub const PATTERN_DEPTH_MAX: u32 = 1 << 8;
-pub const PATTERN_STEP_MAX: u32 = 1 << 14;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum Role {
@@ -1269,6 +1268,10 @@ where
         self.tree.at(node).kind.role()
     }
 
+    fn steps(&self) -> u32 {
+        self.tree.count().saturating_mul(2).saturating_add(1)
+    }
+
     fn children(&self, node: u32) -> Children<'run, K> {
         Children {
             node: self.tree.at(node).child_first,
@@ -1762,19 +1765,26 @@ where
             return;
         }
 
-        let mut stack = [NONE; PATTERN_DEPTH_MAX as usize];
+        let mut stack = [(NONE, NONE); PATTERN_DEPTH_MAX as usize];
         let mut depth = 1;
 
-        stack[0] = node;
+        stack[0] = (node, self.tree.at(node).sibling_next);
 
-        for _ in 0..PATTERN_STEP_MAX {
+        for _ in 0..self.steps() {
             if depth == 0 {
                 return;
             }
 
             depth -= 1;
 
-            let held = stack[depth];
+            let (held, stop) = stack[depth];
+            let following = self.tree.at(held).sibling_next;
+
+            if following != NONE && following != stop {
+                stack[depth] = (following, stop);
+                depth += 1;
+            }
+
             let role = self.role_of(held);
 
             if matches!(role, Role::IdentifierNode | Role::ShorthandPatternName) {
@@ -1795,32 +1805,30 @@ where
                 Some(_) | None => continue,
             };
 
-            let Some(index) = inner else {
-                let from = depth;
-
-                for child in self.children(held) {
-                    if depth >= PATTERN_DEPTH_MAX as usize {
-                        self.outcome = Structure::TooDeep;
-
-                        return;
-                    }
-
-                    stack[depth] = child;
-                    depth += 1;
-                }
-
-                stack[from..depth].reverse();
-
-                continue;
-            };
-
             if depth >= PATTERN_DEPTH_MAX as usize {
                 self.outcome = Structure::TooDeep;
 
                 return;
             }
 
-            stack[depth] = self.child_at(held, index);
+            let Some(index) = inner else {
+                let child = self.tree.at(held).child_first;
+
+                if child != NONE {
+                    stack[depth] = (child, NONE);
+                    depth += 1;
+                }
+
+                continue;
+            };
+
+            let child = self.child_at(held, index);
+
+            if child == NONE {
+                continue;
+            }
+
+            stack[depth] = (child, self.tree.at(child).sibling_next);
             depth += 1;
         }
 

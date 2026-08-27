@@ -1,3 +1,6 @@
+#[path = "common/floor.rs"]
+mod floor;
+
 use std::path::{Path, PathBuf};
 
 const ERROR_COUNT_MAX: u32 = 1 << 10;
@@ -135,11 +138,12 @@ macro_rules! relations {
         $directory:literal,
         $extension:literal,
         $note:literal,
-        $carriage_returns_read_differently:expr
+        $carriage_returns_read_differently:expr,
+        $floor:ident
     ) => {
         mod $module {
             use super::{ERROR_COUNT_MAX, EVENT_COUNT_MAX, NODE_COUNT_MAX, TOKEN_COUNT_MAX};
-            use super::{fixtures, windows};
+            use super::{fixtures, floor, windows};
 
             use scylla::bounded::BoundedVec;
             use scylla::language::Lexer as _;
@@ -233,7 +237,11 @@ macro_rules! relations {
                     compared += 1;
                 }
 
-                assert!(compared > 0, "the fixtures went uncompared");
+                assert!(
+                    compared >= floor::$floor.every,
+                    "the fixtures went uncompared: {compared} compared, floor {}",
+                    floor::$floor.every
+                );
             }
 
             #[test]
@@ -319,7 +327,11 @@ macro_rules! relations {
                     compared += 1;
                 }
 
-                assert!(compared > 0, "the fixtures went uncompared");
+                assert!(
+                    compared >= floor::$floor.every,
+                    "the fixtures went uncompared: {compared} compared, floor {}",
+                    floor::$floor.every
+                );
             }
 
             #[test]
@@ -345,7 +357,11 @@ macro_rules! relations {
                     compared += 1;
                 }
 
-                assert!(compared > 0, "the fixtures went uncompared");
+                assert!(
+                    compared >= floor::$floor.window,
+                    "the fixtures went uncompared: {compared} compared, floor {}",
+                    floor::$floor.window
+                );
             }
         }
     };
@@ -360,7 +376,8 @@ relations!(
     "css",
     "css",
     b"/* relation */\n",
-    &[]
+    &[],
+    RELATION_CSS
 );
 
 relations!(
@@ -372,7 +389,8 @@ relations!(
     "go",
     "go",
     b"// relation\n",
-    &[]
+    &[],
+    RELATION_GO
 );
 
 relations!(
@@ -384,7 +402,8 @@ relations!(
     "javascript",
     "js",
     b"// relation\n",
-    &["jsx_text.js"]
+    &["jsx_text.js"],
+    RELATION_JAVASCRIPT
 );
 
 relations!(
@@ -396,7 +415,8 @@ relations!(
     "odin",
     "odin",
     b"// relation\n",
-    &[]
+    &[],
+    RELATION_ODIN
 );
 
 relations!(
@@ -408,7 +428,8 @@ relations!(
     "python",
     "py",
     b"# relation\n",
-    &[]
+    &[],
+    RELATION_PYTHON
 );
 
 relations!(
@@ -420,7 +441,8 @@ relations!(
     "rust",
     "rs",
     b"// relation\n",
-    &[]
+    &[],
+    RELATION_RUST
 );
 
 relations!(
@@ -432,7 +454,8 @@ relations!(
     "typescript",
     "ts",
     b"// relation\n",
-    &[]
+    &[],
+    RELATION_TYPESCRIPT
 );
 
 relations!(
@@ -444,7 +467,8 @@ relations!(
     "zig",
     "zig",
     b"// relation\n",
-    &[]
+    &[],
+    RELATION_ZIG
 );
 
 relations!(
@@ -456,5 +480,6 @@ relations!(
     "typescript",
     "tsx",
     b"// relation\n",
-    &["tsx_text.tsx"]
+    &["tsx_text.tsx"],
+    RELATION_TSX
 );

@@ -7,6 +7,7 @@ pub const NEST_DEPTH_MAX: u32 = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Policy {
+    pub arrow_after: &'static [&'static [u8]],
     pub blank_max: u32,
     pub block_words: &'static [&'static [u8]],
     pub brace_hugs: bool,
@@ -275,7 +276,7 @@ impl Emitter<'_> {
                 casts: self
                     .previous
                     .is_some_and(|held| self.word_is(held, self.policy.cast_words)),
-                index: self.indexes(),
+                index: self.indexes(position),
                 inside: kind == TokenKind::BlockStart
                     && (self.hugs_a_word()
                         || self.inline(position)
@@ -303,8 +304,12 @@ impl Emitter<'_> {
         true
     }
 
-    fn indexes(&self) -> bool {
+    fn indexes(&self, position: u32) -> bool {
         if self.starting {
+            return false;
+        }
+
+        if self.empties(position) {
             return false;
         }
 
@@ -450,7 +455,7 @@ impl Emitter<'_> {
             return held;
         }
 
-        if self.suppress_space {
+        if self.suppress_space || self.pointed(position) {
             return false;
         }
 
@@ -694,6 +699,10 @@ impl Emitter<'_> {
             return true;
         }
 
+        if self.empties(position) && !self.word_is(previous, self.policy.hug_words) {
+            return true;
+        }
+
         if self.word_is(previous, self.policy.hug_words)
             || self.tokens[previous as usize]
                 .text(self.source)
@@ -811,6 +820,26 @@ impl Emitter<'_> {
             && self.tokens[held as usize].end() == self.tokens[position as usize].offset
     }
 
+    fn pointed(&self, position: u32) -> bool {
+        self.pointing(position) || position > 0 && self.pointing(position - 1)
+    }
+
+    fn pointing(&self, position: u32) -> bool {
+        if self.policy.arrow_after.is_empty() || position == 0 || position + 1 >= self.count {
+            return false;
+        }
+
+        let held = self.tokens[position as usize];
+        let next = self.tokens[(position + 1) as usize];
+
+        held.length == 1
+            && next.length == 1
+            && held.end() == next.offset
+            && self.source[held.offset as usize] == b'-'
+            && self.source[next.offset as usize] == b'>'
+            && self.word_is(position - 1, self.policy.arrow_after)
+    }
+
     fn arrow(&self, position: u32) -> bool {
         let token = self.tokens[position as usize];
 
@@ -855,6 +884,27 @@ impl Emitter<'_> {
         ) > 0
     }
 
+    fn empties(&self, position: u32) -> bool {
+        if !self.policy.bracket_types {
+            return false;
+        }
+
+        if self.tokens[position as usize].kind != TokenKind::Punctuation(Punctuation::BracketOpen) {
+            return false;
+        }
+
+        self.next_of(position).is_some_and(|held| {
+            self.tokens[held as usize].kind == TokenKind::Punctuation(Punctuation::BracketClose)
+        })
+    }
+
+    fn types_at(&self, position: u32) -> bool {
+        self.policy.bracket_types
+            && self.tokens[position as usize].kind
+                == TokenKind::Punctuation(Punctuation::BracketClose)
+            && !self.closed.index
+    }
+
     fn next_of(&self, position: u32) -> Option<u32> {
         let count = self.count;
         let mut scan = position + 1;
@@ -875,6 +925,10 @@ impl Emitter<'_> {
     fn suppresses(&self, position: u32) -> bool {
         let token = self.tokens[position as usize];
         let frame = self.frame();
+
+        if self.pointed(position) {
+            return true;
+        }
 
         if self.is_dot(position) {
             return !self.doubled(position) && (position == 0 || !self.doubled(position - 1));
@@ -932,9 +986,9 @@ impl Emitter<'_> {
         }
 
         self.starting
-            || self
-                .previous
-                .is_none_or(|held| !ends_operand(self.tokens[held as usize].kind))
+            || self.previous.is_none_or(|held| {
+                !ends_operand(self.tokens[held as usize].kind) || self.types_at(held)
+            })
     }
 
     fn adjacent(&self, position: u32) -> bool {

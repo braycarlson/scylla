@@ -1,3 +1,8 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -100,6 +105,47 @@ impl Held {
         };
 
         self.formatter.format(&input, out)
+    }
+
+    fn words(&mut self, source: &[u8]) -> Vec<String> {
+        self.lexed.clear();
+        PYTHON.lex(source, &mut self.lexed);
+
+        let held: Vec<String> = self
+            .lexed
+            .as_slice()
+            .iter()
+            .filter(|token| {
+                !matches!(
+                    token.kind,
+                    TokenKind::BlockEnd | TokenKind::BlockStart | TokenKind::Newline
+                ) && token.length > 0
+            })
+            .map(|token| {
+                if token.kind == TokenKind::String {
+                    return "<string>".to_owned();
+                }
+
+                String::from_utf8_lossy(token.text(source)).into_owned()
+            })
+            .collect::<Vec<String>>();
+
+        let mut found = Vec::with_capacity(held.len());
+
+        for (index, word) in held.iter().enumerate() {
+            let trailing = word == ","
+                && held
+                    .get(index + 1)
+                    .is_some_and(|next| matches!(next.as_str(), ")" | "]" | "}"));
+
+            if trailing || word == "(" || word == ")" {
+                continue;
+            }
+
+            found.push(word.clone());
+        }
+
+        found
     }
 
     fn kinds(&mut self, source: &[u8]) -> Vec<PythonKind> {
@@ -329,7 +375,11 @@ fn the_formatted_output_matches_the_oracle_modulo_residue() {
         compared += 1;
     }
 
-    assert!(compared > 0, "every fixture is residue");
+    assert!(
+        compared >= floor::FIXTURE_FORMAT_PYTHON,
+        "the Python fixtures lost a formatting: {compared} compared, floor {}",
+        floor::FIXTURE_FORMAT_PYTHON
+    );
 }
 
 #[test]
@@ -418,12 +468,12 @@ fn a_range_reads_back_the_lines_it_names() {
 }
 
 fn corpus() -> Vec<(PathBuf, Vec<u8>)> {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(root) = corpus::root() else {
         return Vec::new();
     };
 
     let mut found = Vec::new();
-    let mut pending = vec![PathBuf::from(root)];
+    let mut pending = vec![root];
 
     while let Some(directory) = pending.pop() {
         let Ok(entries) = fs::read_dir(&directory) else {
@@ -893,4 +943,24 @@ fn a_range_that_meets_no_statement_reports_none() {
             )
             .is_none()
     );
+}
+
+#[test]
+fn formatting_keeps_every_word_it_was_given() {
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    for (path, source) in fixtures() {
+        let name = path.display().to_string();
+
+        if held.format(&source, &mut out) != Outcome::Complete {
+            continue;
+        }
+
+        let formatted = out.as_bytes().to_vec();
+        let before = held.words(&source);
+        let after = held.words(&formatted);
+
+        assert_eq!(before, after, "{name} split, joined, lost, or gained a word");
+    }
 }

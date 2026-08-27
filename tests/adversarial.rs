@@ -32,10 +32,13 @@ use scylla::trivia::{self, Gap};
 const BLOCK_COUNT_MAX: u32 = 1 << 13;
 const ERROR_COUNT_MAX: u32 = 1 << 10;
 const EVENT_COUNT_MAX: u32 = 1 << 19;
+const FLIP_BYTES: [u8; 8] = [0x00, b'\n', b'"', b'\'', b'\\', b'{', b'}', 0xFF];
+const FLIP_OFFSET_COUNT_MAX: u32 = 32;
 const FRAGMENT_COUNT_MAX: u32 = 8;
 const MARKUP_NODE_COUNT_MAX: u32 = 1 << 17;
 const MARKUP_TOKEN_COUNT_MAX: u32 = 1 << 18;
 const NODE_COUNT_MAX: u32 = 1 << 16;
+const PREFIX_COUNT_MAX: u32 = 64;
 const RAW_COUNT_MAX: u32 = 1 << 16;
 const ROUND_COUNT_DEFAULT: u32 = 256;
 const SEED_FRAGMENT: u64 = 0x2C4F_1E77_A93B_D501;
@@ -48,8 +51,10 @@ static SKIPPED: AtomicU32 = AtomicU32::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Generator {
+    Flip,
     Fragment,
     Mutation,
+    Prefix,
     Soup,
 }
 
@@ -135,6 +140,16 @@ fn fragment_soup_holds_every_invariant() {
 #[test]
 fn a_mutated_fixture_holds_every_invariant() {
     sweep(Generator::Mutation);
+}
+
+#[test]
+fn every_truncated_prefix_of_a_fixture_holds_every_invariant() {
+    sweep(Generator::Prefix);
+}
+
+#[test]
+fn every_single_byte_change_to_a_fixture_holds_every_invariant() {
+    sweep(Generator::Flip);
 }
 
 fn sweep(generator: Generator) {
@@ -605,6 +620,14 @@ fn tiles(source: &[u8], tokens: &[markup::Token], outcome: Lex, label: &str) {
 }
 
 fn inputs(generator: Generator, name: &str, held: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    if generator == Generator::Flip {
+        return flips(held);
+    }
+
+    if generator == Generator::Prefix {
+        return prefixes(held);
+    }
+
     let seed = seed_of(generator, name);
     let mut random = Random::new(seed);
     let rounds = rounds();
@@ -615,9 +638,63 @@ fn inputs(generator: Generator, name: &str, held: &[Vec<u8>]) -> Vec<Vec<u8>> {
             Generator::Fragment => fragment(&mut random, held),
             Generator::Mutation => mutation(&mut random, held),
             Generator::Soup => soup(&mut random),
+            Generator::Flip | Generator::Prefix => {
+                unreachable!("a deterministic sweep builds its own inputs")
+            }
         };
 
         found.push(source);
+    }
+
+    found
+}
+
+fn prefixes(held: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    let mut found = Vec::new();
+
+    for source in held {
+        let length = count_of(source.len());
+        let stride = (length / PREFIX_COUNT_MAX).max(1);
+        let mut offset = 0;
+
+        while offset < length {
+            found.push(source[..offset as usize].to_vec());
+            offset += stride;
+        }
+
+        found.push(source.clone());
+    }
+
+    found
+}
+
+fn flips(held: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    let mut found = Vec::new();
+
+    for source in held {
+        let length = count_of(source.len());
+
+        if length == 0 {
+            continue;
+        }
+
+        let stride = (length / FLIP_OFFSET_COUNT_MAX).max(1);
+        let mut offset = 0;
+
+        while offset < length {
+            for byte in FLIP_BYTES {
+                if source[offset as usize] == byte {
+                    continue;
+                }
+
+                let mut flipped = source.clone();
+
+                flipped[offset as usize] = byte;
+                found.push(flipped);
+            }
+
+            offset += stride;
+        }
     }
 
     found
@@ -688,6 +765,9 @@ fn seed_of(generator: Generator, name: &str) -> u64 {
         Generator::Fragment => SEED_FRAGMENT,
         Generator::Mutation => SEED_MUTATION,
         Generator::Soup => SEED_SOUP,
+        Generator::Flip | Generator::Prefix => {
+            unreachable!("a deterministic sweep draws no randomness")
+        }
     };
 
     let mut stride = 0_u64;

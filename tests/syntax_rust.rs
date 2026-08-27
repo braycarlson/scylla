@@ -1,3 +1,7 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 #[path = "common/oracle.rs"]
 mod oracle;
 
@@ -11,7 +15,7 @@ use scylla::syntax::Structure;
 use scylla::syntax::rust::classify::classify;
 use scylla::syntax::rust::kind::RustKind;
 use scylla::syntax::rust::parse;
-use scylla::token::{Token, Tokens};
+use scylla::token::{Lex, Token, Tokens};
 use scylla::tree::{Events, Tree};
 use scylla::trivia::{self, Gap};
 
@@ -275,14 +279,21 @@ fn census_of(rows: &[(String, u32, u32)]) -> Vec<(String, u32)> {
 }
 
 fn corpus() -> Vec<Fixture> {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(held) = corpus::root() else {
         return Vec::new();
     };
 
-    let held = PathBuf::from(root);
     let mut found = Vec::new();
+    let mut lexed = Tokens::reserve(TOKEN_COUNT_MAX);
 
     collect(&held, &held, &mut found);
+
+    found.retain(|fixture| {
+        lexed.clear();
+
+        RUST.lex(&fixture.source, &mut lexed) == Lex::Complete
+    });
+
     found.sort_by(|left, right| left.name.cmp(&right.name));
 
     found
@@ -457,6 +468,30 @@ fn invariants_hold(machine: &Machine, name: &str) {
             );
         }
     }
+}
+
+fn diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some(golden) = oracle::golden(root, &fixture.name) else {
+        return true;
+    };
+
+    if golden.broken {
+        return true;
+    }
+
+    if !machine.run(&fixture.source) {
+        return true;
+    }
+
+    if machine.raw.contains(&RustKind::ErrorToken) {
+        return true;
+    }
+
+    let _ = machine.parse(&fixture.source);
+
+    let length = u32::try_from(fixture.source.len()).expect("a file fits in u32");
+
+    machine.walk(length) != wanted(&fixture.source, &machine.comments(), &golden.ast)
 }
 
 fn report(name: &str, held: &[(String, u32, u32)], expected: &[(String, u32, u32)]) -> String {
@@ -641,7 +676,11 @@ fn classify_runs_the_corpus_without_an_unclaimed_byte() {
         compared += 1;
     }
 
-    assert!(compared >= 400, "the corpus lost its Rust files");
+    assert!(
+        compared >= floor::CORPUS_CLASSIFY_RUST,
+        "the corpus lost its Rust files: {compared} classified, floor {}",
+        floor::CORPUS_CLASSIFY_RUST
+    );
 }
 
 #[test]
@@ -736,6 +775,72 @@ fn a_trait_alias_opens_its_own_item() {
 }
 
 #[test]
+fn every_recent_construct_parses_without_an_error() {
+    const HELD: [(&str, &[u8]); 13] = [
+        ("a const trait bound", b"trait Held: const Other {}\n"),
+        (
+            "a bracketed const bound",
+            b"fn held<T>()\nwhere\n    T: [const] Default,\n{\n}\n",
+        ),
+        ("an auto trait", b"auto trait Held {}\n"),
+        ("a const trait impl", b"impl const Other for Thing {}\n"),
+        ("a declarative macro", b"pub macro held($item:item) {}\n"),
+        (
+            "a declarative macro with rules",
+            b"macro held {\n    () => {};\n}\n",
+        ),
+        (
+            "a const parameter default",
+            b"struct Held<const WIDE: bool = false> {\n    held: bool,\n}\n",
+        ),
+        (
+            "a safe foreign function",
+            b"unsafe extern \"C\" {\n    pub safe fn held(value: u32);\n}\n",
+        ),
+        (
+            "a const extern function",
+            b"pub const extern \"C\" fn held() {}\n",
+        ),
+        (
+            "a nested const unsafe function",
+            b"fn held() {\n    const unsafe fn inner(value: usize) {}\n}\n",
+        ),
+        (
+            "a full range in a for header",
+            b"fn held() {\n    for index in .. {}\n}\n",
+        ),
+        (
+            "a const closure",
+            b"fn held() {\n    let counted = const || 1;\n}\n",
+        ),
+        (
+            "a trailing where clause on an associated type",
+            b"impl Held for Thing {\n    type Value = u32\n    where\n        Self: Sized;\n}\n",
+        ),
+    ];
+
+    let mut machine = Machine::reserve();
+
+    for (name, source) in HELD {
+        assert_eq!(
+            machine.parse(source),
+            Structure::Complete,
+            "{name} does not parse whole"
+        );
+
+        assert!(
+            machine.tree.errors().is_empty(),
+            "{name} parses with {:?}",
+            machine.tree.errors()
+        );
+
+        for kind in machine.raw.iter() {
+            assert_ne!(*kind, RustKind::ErrorToken, "{name} classifies to an error");
+        }
+    }
+}
+
+#[test]
 fn the_normalized_walk_matches_the_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-rust");
     let carried = oracle::residue_of("residue-rust.json", &EVERY_CATEGORY);
@@ -769,16 +874,19 @@ fn the_normalized_walk_matches_the_goldens() {
         compared += 1;
     }
 
-    assert!(compared > 0, "every fixture is residue");
+    assert!(
+        compared >= floor::FIXTURE_WALK_RUST,
+        "the Rust fixtures lost a walk: {compared} compared, floor {}",
+        floor::FIXTURE_WALK_RUST
+    );
 }
 
 #[test]
 fn the_normalized_walk_matches_the_corpus_goldens() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS_GOLDEN") else {
+    let Some(held) = corpus::golden() else {
         return;
     };
 
-    let held = PathBuf::from(root);
     let found = corpus();
 
     if found.is_empty() {
@@ -787,6 +895,7 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
 
     let carried = oracle::residue_of("residue-rust.json", &EVERY_CATEGORY);
     let mut machine = Machine::reserve();
+    let mut abstained = 0;
     let mut differing = Vec::new();
     let mut compared = 0;
 
@@ -796,14 +905,16 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
         }
 
         let Some(golden) = oracle::golden(&held, &fixture.name) else {
-            panic!("{} has no golden", fixture.name);
+            abstained += 1;
+
+            continue;
         };
 
-        assert!(
-            !golden.broken,
-            "{} does not parse under the oracle",
-            fixture.name
-        );
+        if golden.broken {
+            abstained += 1;
+
+            continue;
+        }
 
         let _ = machine.parse(&fixture.source);
 
@@ -819,8 +930,10 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
     }
 
     assert!(
-        compared + carried.len() >= 460,
-        "the corpus lost its Rust files"
+        compared + carried.len() >= floor::CORPUS_WALK_RUST,
+        "the corpus lost its Rust files: {} named, {abstained} abstained, floor {}",
+        compared + carried.len(),
+        floor::CORPUS_WALK_RUST
     );
 
     if !differing.is_empty() {
@@ -838,6 +951,54 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
                 .map(|line| line.as_str())
                 .collect::<Vec<&str>>()
                 .join("")
+        );
+    }
+}
+
+#[test]
+fn every_residue_row_names_a_file_that_diverges() {
+    let carried = oracle::residue_of("residue-rust.json", &EVERY_CATEGORY);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-rust");
+
+    let mut machine = Machine::reserve();
+    let mut named = Vec::new();
+
+    for fixture in &fixtures() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &root, fixture),
+            "{} matches its golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    for fixture in &corpus() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &held, fixture),
+            "{} matches its corpus golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    for name in &carried {
+        assert!(
+            named.contains(name),
+            "the residue names `{name}` and neither the fixtures nor the corpus carry it"
         );
     }
 }

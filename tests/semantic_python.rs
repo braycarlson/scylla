@@ -1,3 +1,7 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 #[path = "common/oracle.rs"]
 mod oracle;
 
@@ -10,7 +14,7 @@ use scylla::language::Lexer as _;
 use scylla::lex::PYTHON;
 use scylla::lines;
 use scylla::suppress::{self, Suppressions};
-use scylla::syntax::python::bind::{self, ScopeKind, Tables};
+use scylla::syntax::python::bind::{self, Outcome as BindOutcome, ScopeKind, Tables};
 use scylla::syntax::python::check::{self, CheckError, Completion};
 use scylla::syntax::python::classify::classify;
 use scylla::syntax::python::kind::PythonKind;
@@ -54,6 +58,7 @@ struct Machine {
     events: Events<PythonKind>,
     index: lines::Index,
     lexed: Tokens,
+    names: BoundedVec<Span>,
     raw: BoundedVec<PythonKind>,
     semantic: Semantic,
     suppressions: Suppressions,
@@ -71,6 +76,7 @@ impl Machine {
             events: Events::reserve(EVENT_COUNT_MAX),
             index: lines::Index::reserve(LINE_COUNT_MAX),
             lexed: Tokens::reserve(TOKEN_COUNT_MAX),
+            names: BoundedVec::reserve(BINDING_COUNT_MAX),
             raw: BoundedVec::reserve(TOKEN_COUNT_MAX),
             semantic: Semantic::reserve(BINDING_COUNT_MAX, REFERENCE_COUNT_MAX, EXPORT_COUNT_MAX),
             tables: Tables::reserve(
@@ -133,13 +139,14 @@ impl Machine {
             return false;
         }
 
-        if !bind::bind(
+        if bind::bind(
             source,
             self.tokens.as_slice(),
             &self.raw,
             &self.tree,
             &mut self.tables,
-        ) {
+        ) != BindOutcome::Complete
+        {
             return false;
         }
 
@@ -168,13 +175,16 @@ impl Machine {
         }
 
         check::check(
-            source,
-            self.tokens.as_slice(),
-            &self.raw,
-            &self.tree,
-            &self.semantic,
-            CHECK_VERSION,
+            &check::Input {
+                raw: &self.raw,
+                semantic: &self.semantic,
+                source,
+                tokens: self.tokens.as_slice(),
+                tree: &self.tree,
+                version: CHECK_VERSION,
+            },
             &mut self.checks,
+            &mut self.names,
         ) == Completion::Complete
     }
 
@@ -399,7 +409,7 @@ fn every_fixture_reports_the_rows_ruff_reports() {
 
 #[test]
 fn the_corpus_reports_the_rows_ruff_reports() {
-    let Ok(named) = std::env::var("SCYLLA_CORPUS_GOLDEN") else {
+    let Some(named) = corpus::ruff() else {
         return;
     };
 
@@ -409,7 +419,7 @@ fn the_corpus_reports_the_rows_ruff_reports() {
         return;
     }
 
-    let goldens = PathBuf::from(named);
+    let goldens = named;
     let carried = oracle::residue_of("residue-semantic.json", &EVERY_CATEGORY);
     let mut machine = Machine::reserve();
     let mut compared = 0;
@@ -441,8 +451,10 @@ fn the_corpus_reports_the_rows_ruff_reports() {
     }
 
     assert!(
-        compared + carried.len() >= 100,
-        "the corpus lost its Python files"
+        compared + carried.len() >= floor::CORPUS_SEMANTIC_PYTHON,
+        "the corpus lost its Python files: {} named, floor {}",
+        compared + carried.len(),
+        floor::CORPUS_SEMANTIC_PYTHON
     );
 
     if !differing.is_empty() {
@@ -503,6 +515,22 @@ fn wanted(rows: &[(String, u32, u32)]) -> Vec<(String, u32, u32)> {
     found
 }
 
+fn diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some(golden) = oracle::golden(root, &fixture.name) else {
+        return true;
+    };
+
+    if golden.broken {
+        return true;
+    }
+
+    if !machine.run(&fixture.source) {
+        return true;
+    }
+
+    machine.rows(&fixture.source) != wanted(&golden.ast)
+}
+
 fn report(name: &str, held: &[(String, u32, u32)], expected: &[(String, u32, u32)]) -> String {
     use core::fmt::Write as _;
 
@@ -550,11 +578,10 @@ fn fixtures() -> Vec<Fixture> {
 }
 
 fn corpus() -> Vec<Fixture> {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(held) = corpus::root() else {
         return Vec::new();
     };
 
-    let held = PathBuf::from(root);
     let mut found = Vec::new();
 
     collect(&held, &held, &mut found);
@@ -598,5 +625,52 @@ fn collect(root: &Path, base: &Path, found: &mut Vec<Fixture>) {
             .replace('\\', "/");
 
         found.push(Fixture { name, source });
+    }
+}
+
+#[test]
+fn every_residue_row_names_a_file_that_diverges() {
+    let carried = oracle::residue_of("residue-semantic.json", &EVERY_CATEGORY);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-ruff");
+    let mut machine = Machine::reserve();
+    let mut named = Vec::new();
+
+    for fixture in &fixtures() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &root, fixture),
+            "{} matches its golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    for fixture in &corpus() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &held, fixture),
+            "{} matches its corpus golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    for name in &carried {
+        assert!(
+            named.contains(name),
+            "the residue names `{name}` and neither the fixtures nor the corpus carry it"
+        );
     }
 }

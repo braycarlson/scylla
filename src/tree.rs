@@ -328,7 +328,8 @@ impl<K: Kind> Events<K> {
 
     pub fn start_at(&mut self, checkpoint: Checkpoint, kind: K) {
         assert!(kind.is_node());
-        assert!(checkpoint.index < self.count());
+
+        assert!(checkpoint.index <= self.count());
 
         let index = self.count();
 
@@ -1089,6 +1090,24 @@ mod tests {
         events.start(TestKind::BinOp);
         events.token(0);
         events.token(1);
+        events.finish();
+
+        assert_eq!(events.outcome(), Structure::Truncated);
+        assert_eq!(replay(&mut events, &mut tree), Structure::Truncated);
+    }
+
+    #[test]
+    fn a_starved_event_buffer_carries_a_checkpoint_without_panicking() {
+        let mut events = Events::<TestKind>::reserve(1);
+        let mut tree = Tree::<TestKind>::reserve(32, 4);
+
+        events.token(0);
+
+        let checkpoint = events.checkpoint();
+
+        assert_eq!(checkpoint.index, events.count());
+
+        events.start_at(checkpoint, TestKind::BinOp);
         events.finish();
 
         assert_eq!(events.outcome(), Structure::Truncated);

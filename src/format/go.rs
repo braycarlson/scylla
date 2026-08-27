@@ -7,6 +7,7 @@ use crate::token::Token;
 use crate::tree::{Structure, Tree};
 
 pub const POLICY: Policy = Policy {
+    arrow_after: &[],
     blank_max: 1,
     block_words: &[],
     brace_hugs: true,

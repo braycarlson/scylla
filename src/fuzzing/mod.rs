@@ -1,3 +1,8 @@
+pub mod edits;
+pub mod format;
+pub mod markup;
+pub mod parse;
+
 use crate::bounded::count_of;
 use crate::language::Lexer;
 use crate::lex::{GO, JAVASCRIPT, ODIN, PYTHON, RUST, TYPESCRIPT, ZIG};

@@ -5,9 +5,9 @@
     "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a CSS source file. The tree-sitter grammar reports an error on the first escape byte, which is what makes it residue rather than a defect."
   },
   {
-    "fixture": "tigerbeetle/src/devhub/style.css",
-    "category": "grammar",
-    "reason": "The file writes `@keyframes blink { 0%, 49% { ... } 50%, 100% { ... } }`, and tree-sitter-css 0.23's `keyframe_block` takes exactly one of `from`, `to`, or an `integer_value` before its block, with no comma-separated selector list. The grammar reports an ERROR over each list, so the oracle has no walk to compare against; a comma-separated keyframe selector is ordinary CSS that every browser accepts."
+    "fixture": "go/cmd/vendor/github.com/google/pprof/internal/driver/html/common.css",
+    "category": "not-css",
+    "reason": "The file is a Go `html/template` source that carries the `.css` extension: it writes `{{/* Used to disable events when a modal dialog is displayed */}}` inside its rules, and a template action is not CSS. The tree-sitter grammar reports an ERROR over each action, which is what makes it residue rather than a defect."
   },
   {
     "fixture": "tigerbeetle/src/docs_website/assets/style/style.css",
@@ -18,5 +18,30 @@
     "fixture": "zod/packages/docs/app/global.css",
     "category": "grammar",
     "reason": "The file writes `@source '../node_modules/fumadocs-ui/dist/**/*.js';`, a Tailwind 4 at-rule whose only argument is a string. tree-sitter-css 0.23 accepts neither a string as an `at_rule` query nor a `postcss_statement` in top-level position, so it reports an ERROR that runs from the terminating semicolon into the next rule and the oracle has no walk to compare against."
+  },
+  {
+    "fixture": "vscode/src/vs/platform/files/test/node/fixtures/service/some_utf16le.css",
+    "category": "not-css",
+    "reason": "The file is a UTF-16 encoding fixture for the editor file service: every other byte is a NUL from the two-byte code units, so the bytes are not a UTF-8 CSS source at all. The lexer reports an error token on the first NUL, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/src/vs/workbench/services/search/test/node/fixtures/some_utf16be.css",
+    "category": "not-css",
+    "reason": "The file is a UTF-16 encoding fixture for the editor file service: every other byte is a NUL from the two-byte code units, so the bytes are not a UTF-8 CSS source at all. The lexer reports an error token on the first NUL, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/src/vs/workbench/services/search/test/node/fixtures/some_utf16le.css",
+    "category": "not-css",
+    "reason": "The file is a UTF-16 encoding fixture for the editor file service: every other byte is a NUL from the two-byte code units, so the bytes are not a UTF-8 CSS source at all. The lexer reports an error token on the first NUL, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/src/vs/workbench/services/textfile/test/node/encoding/fixtures/some_utf16be.css",
+    "category": "not-css",
+    "reason": "The file is a UTF-16 encoding fixture for the editor file service: every other byte is a NUL from the two-byte code units, so the bytes are not a UTF-8 CSS source at all. The lexer reports an error token on the first NUL, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/src/vs/workbench/services/textfile/test/node/encoding/fixtures/some_utf16le.css",
+    "category": "not-css",
+    "reason": "The file is a UTF-16 encoding fixture for the editor file service: every other byte is a NUL from the two-byte code units, so the bytes are not a UTF-8 CSS source at all. The lexer reports an error token on the first NUL, which is what makes it residue rather than a defect."
   }
 ]

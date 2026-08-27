@@ -16,7 +16,7 @@ def pin(root):
 def sources(root, extension):
     found = []
 
-    for directory, _, names in os.walk(root):
+    for directory, _, names in os.walk(root, followlinks=True):
         for name in names:
             if not name.endswith(extension):
                 continue

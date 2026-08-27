@@ -26,7 +26,6 @@ use crate::tree::{Checkpoint, Events, NONE, Structure, Tree, replay};
 
 const BALANCED_SLOT_COUNT: u32 = 1 << 8;
 const BALANCED_STACK_MAX: u32 = 1 << 6;
-const CHAIN_DEPTH_MAX: u32 = 4_096;
 const NEST_DEPTH_MAX: u32 = 128;
 const SCAN_STEP_MAX: u32 = 1 << 16;
 
@@ -104,6 +103,10 @@ const fn group_kind(variant: Variant) -> JavaScriptKind {
 impl Parser<'_, '_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<JavaScriptKind> {
@@ -1105,7 +1108,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(JavaScriptKind::Dot) {
                 return;
             }
@@ -1123,7 +1126,7 @@ impl Parser<'_, '_> {
     }
 
     fn jsx_attributes(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.current() {
                 Some(JavaScriptKind::BraceOpen) => self.jsx_expression(),
                 Some(JavaScriptKind::Identifier) => self.jsx_attribute(),
@@ -1286,6 +1289,8 @@ impl Parser<'_, '_> {
 
         self.frames[group as usize].elements += 1;
         self.frames[group as usize].element = self.anchor();
+
+        self.value_count = self.frames[group as usize].values;
         self.frames[group as usize].element_values = self.value_count;
 
         Step::Operand
@@ -1724,7 +1729,7 @@ impl Parser<'_, '_> {
         self.open(JavaScriptKind::FormalParameters);
         self.expect(JavaScriptKind::ParenOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(JavaScriptKind::ParenClose) || self.current().is_none() {
@@ -1804,7 +1809,7 @@ impl Parser<'_, '_> {
         self.open(JavaScriptKind::ArrayPattern);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(JavaScriptKind::BracketClose) || self.current().is_none() {
@@ -1832,7 +1837,7 @@ impl Parser<'_, '_> {
         self.open(JavaScriptKind::ObjectPattern);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(JavaScriptKind::BraceClose) || self.current().is_none() {
@@ -2028,7 +2033,7 @@ impl Parser<'_, '_> {
         self.open(kind);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.variable_declarator();
@@ -2106,7 +2111,7 @@ impl Parser<'_, '_> {
     }
 
     fn decorated(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(JavaScriptKind::At) {
                 break;
             }
@@ -2152,7 +2157,7 @@ impl Parser<'_, '_> {
         self.open(JavaScriptKind::ClassBody);
         self.expect(JavaScriptKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(JavaScriptKind::BraceClose) || self.current().is_none() {
@@ -2219,7 +2224,7 @@ impl Parser<'_, '_> {
     }
 
     fn member_decorators(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(JavaScriptKind::At) {
                 break;
             }
@@ -2396,7 +2401,7 @@ impl Parser<'_, '_> {
         self.open(JavaScriptKind::SwitchBody);
         self.expect(JavaScriptKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             let Some(kind) = self.current() else {
@@ -2436,7 +2441,7 @@ impl Parser<'_, '_> {
 
         self.expect(JavaScriptKind::Colon, SyntaxErrorKind::ExpectedColon);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             let Some(held) = self.current() else {
@@ -2547,10 +2552,15 @@ impl Parser<'_, '_> {
             self.wrap(JavaScriptKind::StringNode);
         } else {
             self.import_clause();
-            let _ = self.eat_word(b"from");
+
+            if !self.eat_word(b"from") {
+                self.record(SyntaxErrorKind::UnexpectedToken);
+            }
 
             if self.at(JavaScriptKind::String) {
                 self.wrap(JavaScriptKind::StringNode);
+            } else {
+                self.record(SyntaxErrorKind::UnexpectedToken);
             }
         }
 
@@ -2619,7 +2629,7 @@ impl Parser<'_, '_> {
         self.open(list);
         self.expect(JavaScriptKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(JavaScriptKind::BraceClose) || self.current().is_none() {

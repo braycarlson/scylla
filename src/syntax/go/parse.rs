@@ -17,7 +17,6 @@ use crate::syntax::{SyntaxError, SyntaxErrorKind};
 use crate::token::Token;
 use crate::tree::{Checkpoint, Events, Structure, Tree, replay};
 
-const CHAIN_DEPTH_MAX: u32 = 4_096;
 const NEST_DEPTH_MAX: u32 = 96;
 const SCAN_STEP_MAX: u32 = 1 << 16;
 
@@ -54,6 +53,19 @@ const fn is_opener(kind: GoKind) -> bool {
     )
 }
 
+const fn ends_operand(kind: GoKind) -> bool {
+    matches!(
+        kind,
+        GoKind::BraceClose
+            | GoKind::BracketClose
+            | GoKind::Identifier
+            | GoKind::Number
+            | GoKind::ParenClose
+            | GoKind::RuneLiteral
+            | GoKind::StringLiteral
+    )
+}
+
 const fn is_closer(kind: GoKind) -> bool {
     matches!(
         kind,
@@ -64,6 +76,10 @@ const fn is_closer(kind: GoKind) -> bool {
 impl Parser<'_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<GoKind> {
@@ -322,8 +338,16 @@ impl Parser<'_> {
 
         if self.at(GoKind::PackageKeyword) {
             self.bump();
-            self.identifier();
+
+            if self.at(GoKind::Identifier) {
+                self.identifier();
+            } else {
+                self.record(SyntaxErrorKind::ExpectedIdentifier);
+            }
+
             self.terminator();
+        } else {
+            self.record(SyntaxErrorKind::UnexpectedToken);
         }
 
         for _ in 0..u32::MAX {
@@ -406,7 +430,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(GoKind::ParenClose) || self.current().is_none() {
@@ -508,7 +532,7 @@ impl Parser<'_> {
     }
 
     fn name_list(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(GoKind::Identifier) {
                 break;
             }
@@ -593,7 +617,7 @@ impl Parser<'_> {
         self.open(GoKind::FieldList);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(closer) || self.current().is_none() {
@@ -728,7 +752,7 @@ impl Parser<'_> {
         self.open(GoKind::BlockStmt);
         self.expect(GoKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(GoKind::BraceClose) || self.current().is_none() {
@@ -822,7 +846,7 @@ impl Parser<'_> {
                 self.events.finish();
             }
             Some(_) => {
-                self.simple_statement(true);
+                self.simple_statement(1);
                 self.terminator();
             }
         }
@@ -836,10 +860,10 @@ impl Parser<'_> {
         self.terminator();
     }
 
-    fn simple_statement(&mut self, structures: bool) {
+    fn simple_statement(&mut self, stage: u8) {
         let checkpoint = self.anchor();
 
-        self.expression_list_with(structures);
+        self.expression_list_staged(stage);
 
         let Some(kind) = self.current() else {
             self.events.start_at(checkpoint, GoKind::ExprStmt);
@@ -855,7 +879,7 @@ impl Parser<'_> {
                 self.bump();
             }
 
-            self.expression_list_with(structures);
+            self.expression_list_staged(stage);
             self.events.start_at(checkpoint, GoKind::AssignStmt);
             self.events.finish();
 
@@ -864,7 +888,7 @@ impl Parser<'_> {
 
         if kind == GoKind::Arrow {
             self.bump();
-            self.expression_with(structures);
+            self.expression_staged(stage);
             self.events.start_at(checkpoint, GoKind::SendStmt);
             self.events.finish();
 
@@ -890,6 +914,7 @@ impl Parser<'_> {
     fn header_holds(&self, held: GoKind) -> bool {
         let mut position = self.significant(self.position);
         let mut previous = GoKind::ErrorToken;
+        let mut typed = false;
 
         for _ in 0..SCAN_STEP_MAX {
             let Some(kind) = self.kind_at(position) else {
@@ -897,12 +922,16 @@ impl Parser<'_> {
             };
 
             if kind == GoKind::BraceOpen {
-                if !matches!(previous, GoKind::InterfaceKeyword | GoKind::StructKeyword) {
+                let literal =
+                    typed || matches!(previous, GoKind::InterfaceKeyword | GoKind::StructKeyword);
+
+                if !literal {
                     return false;
                 }
 
                 position = self.balanced_end(position);
                 previous = GoKind::BraceClose;
+                typed = false;
 
                 continue;
             }
@@ -910,6 +939,10 @@ impl Parser<'_> {
             if is_opener(kind) {
                 if self.kind_at(self.significant(position + 1)) == Some(held) {
                     return true;
+                }
+
+                if kind == GoKind::BracketOpen && !ends_operand(previous) {
+                    typed = true;
                 }
 
                 position = self.balanced_end(position);
@@ -924,6 +957,10 @@ impl Parser<'_> {
 
             if kind == held {
                 return true;
+            }
+
+            if matches!(kind, GoKind::ChanKeyword | GoKind::MapKeyword) {
+                typed = true;
             }
 
             if kind != GoKind::Comment {
@@ -941,7 +978,7 @@ impl Parser<'_> {
         self.bump();
 
         if self.header_semicolon() {
-            self.simple_statement(false);
+            self.simple_statement(2);
             let _ = self.eat(GoKind::Semicolon);
         }
 
@@ -985,7 +1022,7 @@ impl Parser<'_> {
 
         if self.header_semicolon() {
             if !self.at(GoKind::Semicolon) {
-                self.simple_statement(false);
+                self.simple_statement(2);
             }
 
             let _ = self.eat(GoKind::Semicolon);
@@ -997,7 +1034,7 @@ impl Parser<'_> {
             let _ = self.eat(GoKind::Semicolon);
 
             if !self.at(GoKind::BraceOpen) {
-                self.simple_statement(false);
+                self.simple_statement(2);
             }
         } else {
             self.expression_header();
@@ -1013,7 +1050,7 @@ impl Parser<'_> {
         self.bump();
 
         if !self.at(GoKind::RangeKeyword) {
-            self.expression_list_with(false);
+            self.expression_list_staged(2);
 
             if assigns(self.current().unwrap_or(GoKind::ErrorToken)) {
                 self.bump();
@@ -1040,13 +1077,13 @@ impl Parser<'_> {
         self.bump();
 
         if self.header_semicolon() {
-            self.simple_statement(false);
+            self.simple_statement(2);
             let _ = self.eat(GoKind::Semicolon);
         }
 
         if !self.at(GoKind::BraceOpen) {
             if typed {
-                self.simple_statement(false);
+                self.simple_statement(2);
             } else {
                 self.expression_header();
             }
@@ -1069,7 +1106,7 @@ impl Parser<'_> {
         self.open(GoKind::BlockStmt);
         self.expect(GoKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(GoKind::BraceClose) || self.current().is_none() {
@@ -1094,7 +1131,7 @@ impl Parser<'_> {
 
         if self.eat(GoKind::CaseKeyword) {
             if kind == GoKind::CommClause {
-                self.simple_statement(true);
+                self.simple_statement(1);
             } else {
                 self.expression_list();
             }
@@ -1104,7 +1141,7 @@ impl Parser<'_> {
 
         self.expect(GoKind::Colon, SyntaxErrorKind::ExpectedColon);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             let Some(held) = self.current() else {
@@ -1174,14 +1211,14 @@ impl Parser<'_> {
     }
 
     fn expression_list(&mut self) {
-        self.expression_list_with(true);
+        self.expression_list_staged(1);
     }
 
-    fn expression_list_with(&mut self, structures: bool) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+    fn expression_list_staged(&mut self, stage: u8) {
+        for _ in 0..self.steps() {
             let before = self.position;
 
-            self.expression_with(structures);
+            self.expression_staged(stage);
 
             if !self.eat(GoKind::Comma) {
                 break;
@@ -1199,6 +1236,13 @@ impl Parser<'_> {
         self.expression_with(false);
     }
 
+    fn heads_a_clause(&self, base: u32) -> bool {
+        let group = self.innermost_group(base);
+
+        self.frames[group as usize].variant == Variant::Top
+            && self.frames[group as usize].stage == 2
+    }
+
     fn structures(&self, base: u32) -> bool {
         let group = self.innermost_group(base);
 
@@ -1207,13 +1251,6 @@ impl Parser<'_> {
         }
 
         self.frames[group as usize].stage == 1
-    }
-
-    fn heads_a_clause(&self, base: u32) -> bool {
-        let group = self.innermost_group(base);
-
-        self.frames[group as usize].variant == Variant::Top
-            && self.frames[group as usize].stage == 2
     }
 
     fn machine(&mut self, base: u32) {

@@ -8,5 +8,15 @@
     "fixture": "type_params.py",
     "category": "pep-695-type-parameter-scopes",
     "reason": "PEP 695 gives a `def f[T]` or a `type A[T] = ...` its own CPython scope. The binder now opens one too, a `ScopeKind::Type` on the `TypeParams` node standing between the definition and the scope it was written in, so the parameters bind there and the annotations and bases read them. What still differs is the synthetic symbols CPython carries in that scope to hold the compiler's own state: `.defaults`, `.generic_base`, `.type_params`, and `__type_params__`. The binder models the language's scopes, not those."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/test/simulation/fixtures/fixing/python/pyright_badtoken.py",
+    "category": "not-python",
+    "reason": "The file is a Copilot fixing fixture built to trigger tokenizer errors: it writes a U+00A0 non-breaking space between `import` and `sys`. CPython's own `ast.parse` rejects it with `invalid non-printable character U+00A0`, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/vscode-colorize-tests/test/colorize-fixtures/test-freeze-56377.py",
+    "category": "not-python",
+    "reason": "The file is a colorizer freeze regression fixture: it writes a backslash continuation with a space behind it inside a `cmd = \"...\" \\ \"...\"` line. CPython's own `ast.parse` rejects it with `unexpected character after line continuation character`, which is what makes it residue rather than a defect."
   }
 ]

@@ -25,7 +25,6 @@ use crate::syntax::{SyntaxError, SyntaxErrorKind};
 use crate::token::Token;
 use crate::tree::{Checkpoint, Events, Structure, Tree, replay};
 
-const CHAIN_DEPTH_MAX: u32 = 4_096;
 const NEST_DEPTH_MAX: u32 = 96;
 const SCAN_STEP_MAX: u32 = 1 << 16;
 
@@ -110,6 +109,10 @@ const fn group_kind(variant: Variant) -> RustKind {
 impl Parser<'_, '_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<RustKind> {
@@ -430,7 +433,7 @@ impl Parser<'_, '_> {
     }
 
     fn inner_attributes(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(RustKind::Pound) || self.ahead(1) != Some(RustKind::Bang) {
                 break;
             }
@@ -440,7 +443,7 @@ impl Parser<'_, '_> {
     }
 
     fn attributes(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(RustKind::Pound) {
                 break;
             }
@@ -566,6 +569,7 @@ impl Parser<'_, '_> {
             Some(RustKind::UnsafeKeyword) if self.ahead(1) == Some(RustKind::ImplKeyword) => {
                 self.item_impl(checkpoint);
             }
+            Some(_) if self.opens_a_trait() => self.item_trait(checkpoint),
             Some(RustKind::ModKeyword) => self.item_mod(checkpoint),
             Some(RustKind::TypeKeyword) => self.item_type(checkpoint),
             Some(RustKind::MacroKeyword)
@@ -577,7 +581,7 @@ impl Parser<'_, '_> {
                 self.item_extern_crate(checkpoint);
             }
             Some(RustKind::StaticKeyword) => self.item_static(checkpoint, RustKind::ItemStatic),
-            Some(RustKind::ConstKeyword) if self.ahead(1) != Some(RustKind::FnKeyword) => {
+            Some(RustKind::ConstKeyword) if !self.opens_a_function() => {
                 self.item_static(checkpoint, RustKind::ItemConst);
             }
             Some(_) if self.opens_a_foreign_module(self.position) => {
@@ -590,6 +594,30 @@ impl Parser<'_, '_> {
                 self.emit();
             }
         }
+    }
+
+    fn opens_a_trait(&self) -> bool {
+        let mut position = self.significant(self.position);
+
+        for _ in 0..8 {
+            let Some(kind) = self.kind_at(position) else {
+                return false;
+            };
+
+            if kind == RustKind::TraitKeyword {
+                return true;
+            }
+
+            if !matches!(kind, RustKind::ConstKeyword | RustKind::UnsafeKeyword)
+                && !self.word_at(position, b"auto")
+            {
+                return false;
+            }
+
+            position = self.significant(position + 1);
+        }
+
+        false
     }
 
     fn opens_a_function(&self) -> bool {
@@ -611,6 +639,7 @@ impl Parser<'_, '_> {
                     | RustKind::ExternKeyword
                     | RustKind::UnsafeKeyword
             ) && !self.word_at(position, b"default")
+                && !self.word_at(position, b"safe")
             {
                 return false;
             }
@@ -660,7 +689,7 @@ impl Parser<'_, '_> {
 
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let Some(kind) = self.kind_at(position) else {
                 return false;
             };
@@ -775,7 +804,7 @@ impl Parser<'_, '_> {
         self.open(RustKind::UseGroup);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::BraceClose) || self.current().is_none() {
@@ -833,7 +862,7 @@ impl Parser<'_, '_> {
         self.where_clause();
         self.expect(RustKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::BraceClose) || self.current().is_none() {
@@ -887,7 +916,7 @@ impl Parser<'_, '_> {
         self.open(kind);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(closer) || self.current().is_none() {
@@ -928,7 +957,20 @@ impl Parser<'_, '_> {
     }
 
     fn item_trait(&mut self, checkpoint: Checkpoint) {
-        let _ = self.eat(RustKind::UnsafeKeyword);
+        for _ in 0..8 {
+            if self.eat(RustKind::UnsafeKeyword) || self.eat(RustKind::ConstKeyword) {
+                continue;
+            }
+
+            if self.word(b"auto") {
+                self.bump();
+
+                continue;
+            }
+
+            break;
+        }
+
         self.bump();
         self.identifier();
         self.generics();
@@ -959,6 +1001,7 @@ impl Parser<'_, '_> {
         let _ = self.eat(RustKind::UnsafeKeyword);
         self.bump();
         self.generics();
+        let _ = self.eat(RustKind::ConstKeyword);
         let _ = self.eat(RustKind::Bang);
         let path = self.trait_ahead();
 
@@ -1042,6 +1085,8 @@ impl Parser<'_, '_> {
 
         if self.eat(RustKind::Equal) {
             self.type_of();
+
+            self.where_clause();
         }
 
         let _ = self.eat(RustKind::Semicolon);
@@ -1099,6 +1144,11 @@ impl Parser<'_, '_> {
         if self.at(RustKind::MacroKeyword) {
             self.bump();
             self.identifier();
+
+            if self.at(RustKind::ParenOpen) {
+                self.skip_group();
+            }
+
             self.skip_group();
             self.events.start_at(held, RustKind::Macro);
             self.events.finish();
@@ -1148,7 +1198,7 @@ impl Parser<'_, '_> {
     fn member_list(&mut self, family: RustKind) {
         self.inner_attributes();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::BraceClose) || self.current().is_none() {
@@ -1203,7 +1253,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        if kind == RustKind::ConstKeyword && self.ahead(1) != Some(RustKind::FnKeyword) {
+        if kind == RustKind::ConstKeyword && !self.opens_a_function() {
             self.member_const(checkpoint, family);
 
             return;
@@ -1280,6 +1330,8 @@ impl Parser<'_, '_> {
 
         if self.eat(RustKind::Equal) {
             self.type_of();
+
+            self.where_clause();
         }
 
         let _ = self.eat(RustKind::Semicolon);
@@ -1340,7 +1392,7 @@ impl Parser<'_, '_> {
                 continue;
             }
 
-            if self.word(b"default") {
+            if self.word(b"default") || self.word(b"safe") {
                 self.bump();
 
                 continue;
@@ -1373,7 +1425,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::ParenClose) || self.current().is_none() {
@@ -1546,7 +1598,7 @@ impl Parser<'_, '_> {
         self.open(RustKind::Generics);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::Greater) || self.current().is_none() {
@@ -1596,7 +1648,7 @@ impl Parser<'_, '_> {
             self.type_of();
 
             if self.eat(RustKind::Equal) {
-                self.expression_single();
+                self.constant_default();
             }
 
             self.events.finish();
@@ -1626,7 +1678,7 @@ impl Parser<'_, '_> {
         self.open(RustKind::WhereClause);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if matches!(
@@ -1691,7 +1743,7 @@ impl Parser<'_, '_> {
 
             self.bump();
 
-            for _ in 0..CHAIN_DEPTH_MAX {
+            for _ in 0..self.steps() {
                 self.skip_trivia();
 
                 if self.position >= end || self.at(RustKind::Greater) || self.current().is_none() {
@@ -1751,7 +1803,7 @@ impl Parser<'_, '_> {
     }
 
     fn type_bounds(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::Apostrophe) {
@@ -1763,6 +1815,7 @@ impl Parser<'_, '_> {
             } else {
                 let checkpoint = self.anchor();
                 let _ = self.eat(RustKind::Question);
+                self.constness_bound();
                 self.bound_lifetimes();
 
                 if !opens_a_path(self.current().unwrap_or(RustKind::ErrorToken)) {
@@ -1780,12 +1833,26 @@ impl Parser<'_, '_> {
         }
     }
 
+    fn constness_bound(&mut self) {
+        if self.eat(RustKind::ConstKeyword) {
+            return;
+        }
+
+        if !self.at(RustKind::BracketOpen) || self.ahead(1) != Some(RustKind::ConstKeyword) {
+            return;
+        }
+
+        self.bump();
+        self.bump();
+        let _ = self.eat(RustKind::BracketClose);
+    }
+
     fn precise_capture(&mut self) {
         self.open(RustKind::PreciseCapture);
         self.bump();
         let _ = self.eat(RustKind::Less);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::Greater) || self.current().is_none() {
@@ -1920,7 +1987,7 @@ impl Parser<'_, '_> {
         self.expect(RustKind::FnKeyword, SyntaxErrorKind::UnexpectedToken);
 
         if self.eat(RustKind::ParenOpen) {
-            for _ in 0..CHAIN_DEPTH_MAX {
+            for _ in 0..self.steps() {
                 self.skip_trivia();
 
                 if self.at(RustKind::ParenClose) || self.current().is_none() {
@@ -2003,7 +2070,7 @@ impl Parser<'_, '_> {
 
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::ParenClose) || self.current().is_none() {
@@ -2096,7 +2163,7 @@ impl Parser<'_, '_> {
     fn path_segments(&mut self, expression: bool, qualified: bool) {
         let mut typed = qualified;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             let Some(kind) = self.current() else {
@@ -2155,7 +2222,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::ParenClose) || self.current().is_none() {
@@ -2187,7 +2254,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::Greater) || self.current().is_none() {
@@ -2274,6 +2341,16 @@ impl Parser<'_, '_> {
         self.literal_expression();
     }
 
+    fn constant_default(&mut self) {
+        if self.constant_ahead() {
+            self.constant_argument();
+
+            return;
+        }
+
+        self.type_of();
+    }
+
     fn constant_ahead(&self) -> bool {
         let kind = self.current().unwrap_or(RustKind::ErrorToken);
 
@@ -2302,7 +2379,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.eat(RustKind::Or) {
                 break;
             }
@@ -2404,7 +2481,7 @@ impl Parser<'_, '_> {
         self.open(RustKind::PatSlice);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::BracketClose) || self.current().is_none() {
@@ -2440,7 +2517,7 @@ impl Parser<'_, '_> {
 
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::ParenClose) || self.current().is_none() {
@@ -2546,7 +2623,7 @@ impl Parser<'_, '_> {
     fn pattern_struct(&mut self, checkpoint: Checkpoint) {
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::BraceClose) || self.current().is_none() {
@@ -2615,7 +2692,7 @@ impl Parser<'_, '_> {
         self.expect(RustKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
         self.inner_attributes();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::BraceClose) || self.current().is_none() {
@@ -2691,7 +2768,7 @@ impl Parser<'_, '_> {
     fn attribute_end(&self) -> u32 {
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if self.kind_at(position) != Some(RustKind::Pound) {
                 break;
             }
@@ -2793,7 +2870,7 @@ impl Parser<'_, '_> {
             return false;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let Some(kind) = self.kind_at(position) else {
                 return false;
             };
@@ -2857,7 +2934,7 @@ impl Parser<'_, '_> {
             }
 
             if kind == RustKind::ConstKeyword
-                && self.kind_at(self.significant(position + 1)) != Some(RustKind::FnKeyword)
+                && self.kind_at(self.significant(position + 1)) == Some(RustKind::BraceOpen)
             {
                 return false;
             }
@@ -2885,7 +2962,7 @@ impl Parser<'_, '_> {
             return false;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let Some(kind) = self.kind_at(position) else {
                 return false;
             };
@@ -3327,7 +3404,7 @@ impl Parser<'_, '_> {
                 self.unary(RustKind::ExprUnary, POWER_UNARY)
             }
             Some(RustKind::Ampersand) => self.reference(),
-            Some(RustKind::DotDot | RustKind::DotDotEqual) => self.range_prefix(),
+            Some(RustKind::DotDot | RustKind::DotDotEqual) => self.range_prefix(base),
             Some(RustKind::Underscore) => {
                 let checkpoint = self.anchor();
 
@@ -3342,6 +3419,14 @@ impl Parser<'_, '_> {
             Some(RustKind::ContinueKeyword) => self.jump(RustKind::ExprContinue, true),
             Some(RustKind::YieldKeyword) => self.jump(RustKind::ExprYield, false),
             Some(RustKind::MoveKeyword | RustKind::Or | RustKind::OrOr) => self.closure(),
+            Some(RustKind::ConstKeyword)
+                if matches!(
+                    self.ahead(1),
+                    Some(RustKind::MoveKeyword | RustKind::Or | RustKind::OrOr)
+                ) =>
+            {
+                self.closure()
+            }
             Some(RustKind::Apostrophe) => self.labelled(),
             Some(RustKind::ParenOpen) => {
                 let checkpoint = self.anchor();
@@ -3504,12 +3589,12 @@ impl Parser<'_, '_> {
         Step::Operand
     }
 
-    fn range_prefix(&mut self) -> Step {
+    fn range_prefix(&mut self, base: u32) -> Step {
         let checkpoint = self.anchor();
 
         self.bump();
 
-        if !self.opens_an_expression() {
+        if !self.opens_a_range_end(base) {
             self.events.start_at(checkpoint, RustKind::ExprRange);
             self.events.finish();
             self.push_value(checkpoint);
@@ -3531,6 +3616,14 @@ impl Parser<'_, '_> {
         }
 
         Step::Operand
+    }
+
+    fn opens_a_range_end(&self, base: u32) -> bool {
+        if self.at(RustKind::BraceOpen) && !self.structures(base) {
+            return false;
+        }
+
+        self.opens_an_expression()
     }
 
     fn opens_an_expression(&self) -> bool {
@@ -3597,6 +3690,7 @@ impl Parser<'_, '_> {
 
     fn closure(&mut self) -> Step {
         let checkpoint = self.anchor();
+        let _ = self.eat(RustKind::ConstKeyword);
         let _ = self.eat(RustKind::MoveKeyword);
 
         if self.eat(RustKind::OrOr) {
@@ -3605,7 +3699,7 @@ impl Parser<'_, '_> {
 
         let _ = self.eat(RustKind::Or);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::Or) || self.current().is_none() {
@@ -3783,7 +3877,7 @@ impl Parser<'_, '_> {
         self.expression_no_struct();
         self.expect(RustKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(RustKind::BraceClose) || self.current().is_none() {
@@ -3921,7 +4015,7 @@ impl Parser<'_, '_> {
         }
 
         if matches!(kind, RustKind::DotDot | RustKind::DotDotEqual) {
-            return self.range_infix();
+            return self.range_infix(base);
         }
 
         self.operator_of(kind)
@@ -3987,6 +4081,8 @@ impl Parser<'_, '_> {
         self.reduce_above(group + 1);
         self.bump();
         self.frames[group as usize].elements += 1;
+
+        self.value_count = self.frames[group as usize].values;
         self.frames[group as usize].element_values = self.value_count;
 
         Step::Operand
@@ -4023,7 +4119,7 @@ impl Parser<'_, '_> {
         Step::Operator
     }
 
-    fn range_infix(&mut self) -> Step {
+    fn range_infix(&mut self, base: u32) -> Step {
         self.reduce_for(POWER_RANGE_LEFT);
 
         if self.value_count == 0 {
@@ -4034,7 +4130,7 @@ impl Parser<'_, '_> {
 
         self.bump();
 
-        if !self.opens_an_expression() {
+        if !self.opens_a_range_end(base) {
             self.events.start_at(checkpoint, RustKind::ExprRange);
             self.events.finish();
 

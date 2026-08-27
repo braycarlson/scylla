@@ -43,7 +43,6 @@ const AUGMENTED: [PythonKind; 13] = [
     PythonKind::StarStarEqual,
 ];
 
-const CHAIN_DEPTH_MAX: u32 = 256;
 const PATTERN_STEP_MAX: u32 = 4_096;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -107,7 +106,7 @@ const fn group_kind(frame: &Frame, seen: u32) -> PythonKind {
                 } else {
                     PythonKind::SetComp
                 }
-            } else if frame.dictionary || seen == 0 {
+            } else if frame.dictionary || (seen == 0 && frame.elements == 0) {
                 PythonKind::Dict
             } else {
                 PythonKind::Set
@@ -151,6 +150,10 @@ const fn group_kind(frame: &Frame, seen: u32) -> PythonKind {
 impl Parser<'_, '_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<PythonKind> {
@@ -825,7 +828,7 @@ impl Parser<'_, '_> {
     fn run_has_format(&self) -> bool {
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.kind_at(position) {
                 Some(PythonKind::FStringStart) => return true,
                 Some(held) if is_string(held) => position = self.significant(position + 1),
@@ -839,7 +842,7 @@ impl Parser<'_, '_> {
     fn literal_continues(&self) -> bool {
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.kind_at(position) {
                 Some(PythonKind::FStringEnd | PythonKind::FStringStart) => {
                     position = self.significant(position + 1);
@@ -1331,6 +1334,8 @@ impl Parser<'_, '_> {
         self.bump();
         self.frames[group as usize].elements += 1;
         self.frames[group as usize].element = self.anchor();
+
+        self.value_count = self.frames[group as usize].values;
         self.frames[group as usize].element_values = self.value_count;
 
         Step::Operand
@@ -1394,14 +1399,42 @@ impl Parser<'_, '_> {
     }
 
     fn comprehension_for(&mut self, group: u32) -> Step {
-        let frame = self.frames[group as usize];
+        let mut held = group;
+
+        for _ in 0..EXPRESSION_DEPTH_MAX {
+            if held >= self.frame_count {
+                return Step::Done;
+            }
+
+            if self.frames[held as usize].variant != Variant::Lambda {
+                break;
+            }
+
+            if held == 0 {
+                return Step::Done;
+            }
+
+            self.reduce_above(held);
+
+            if self.frame_count == 0 {
+                return Step::Done;
+            }
+
+            held = self.innermost_group(0);
+        }
+
+        let innermost = held;
+        let frame = self.frames[innermost as usize];
 
         if frame.variant == Variant::Top || frame.variant == Variant::Lambda {
             return Step::Done;
         }
 
-        self.reduce_above(group + 1);
-        self.close_clause(group);
+        self.reduce_above(innermost + 1);
+        self.close_clause(innermost);
+
+        self.value_count = self.frames[innermost as usize].values;
+        self.frames[innermost as usize].element_values = self.value_count;
 
         let clause = self.anchor();
         let _ = self.eat(PythonKind::AsyncKeyword);
@@ -1409,11 +1442,11 @@ impl Parser<'_, '_> {
 
         let element = self.anchor();
 
-        self.frames[group as usize].clause = clause;
-        self.frames[group as usize].comprehension = true;
-        self.frames[group as usize].element = element;
-        self.frames[group as usize].slice = false;
-        self.frames[group as usize].stage = 1;
+        self.frames[innermost as usize].clause = clause;
+        self.frames[innermost as usize].comprehension = true;
+        self.frames[innermost as usize].element = element;
+        self.frames[innermost as usize].slice = false;
+        self.frames[innermost as usize].stage = 1;
 
         Step::Operand
     }
@@ -1723,7 +1756,7 @@ impl Parser<'_, '_> {
             self.bump();
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.events.start(PythonKind::WithItem);
             self.expression_single();
 
@@ -1786,7 +1819,7 @@ impl Parser<'_, '_> {
         self.colon_block();
         self.skip_trivia();
 
-        while self.at(PythonKind::ElifKeyword) && opened < CHAIN_DEPTH_MAX {
+        while self.at(PythonKind::ElifKeyword) && opened < self.steps() {
             self.events.start(PythonKind::ElseClause);
             self.events.start(PythonKind::If);
             self.bump();
@@ -1864,7 +1897,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.eat(PythonKind::Comma) {
                 break;
             }
@@ -1889,7 +1922,7 @@ impl Parser<'_, '_> {
     fn argument_list(&mut self) {
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(PythonKind::ParenClose) || self.current().is_none() {
@@ -1948,7 +1981,7 @@ impl Parser<'_, '_> {
         self.events.start(PythonKind::Arguments);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(PythonKind::ParenClose) || self.current().is_none() {
@@ -2000,7 +2033,7 @@ impl Parser<'_, '_> {
         self.events.start(PythonKind::TypeParams);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(PythonKind::BracketClose) || self.current().is_none() {
@@ -2311,6 +2344,12 @@ impl Parser<'_, '_> {
         let group = self.innermost_group(base);
         let frame = self.frames[group as usize];
 
+        if frame.is_pattern() && kind == frame.closer {
+            self.close_pattern_group(group);
+
+            return Step::Operator;
+        }
+
         if frame.variant == Variant::Mapping && frame.stage == 0 {
             return self.mapping_key(group, kind);
         }
@@ -2502,10 +2541,14 @@ impl Parser<'_, '_> {
     }
 
     fn simple_line(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.simple_statement();
+
+            if self.position == before {
+                self.record(SyntaxErrorKind::UnexpectedToken);
+            }
 
             if !self.eat(PythonKind::Semicolon) {
                 break;
@@ -2559,7 +2602,7 @@ impl Parser<'_, '_> {
         self.events.start(PythonKind::Delete);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.expression_single();
 
             if !self.eat(PythonKind::Comma) {
@@ -2614,7 +2657,7 @@ impl Parser<'_, '_> {
     }
 
     fn alias_list(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if !matches!(
@@ -2692,7 +2735,7 @@ impl Parser<'_, '_> {
         if shape.assign != NONE {
             self.events.start(PythonKind::Assign);
 
-            for _ in 0..CHAIN_DEPTH_MAX {
+            for _ in 0..self.steps() {
                 self.expression();
 
                 if !self.eat(PythonKind::Equal) {

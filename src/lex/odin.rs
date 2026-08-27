@@ -350,6 +350,32 @@ fn string_raw_scan(source: &[u8], start: usize) -> usize {
     source.len()
 }
 
+fn string_triple_scan(source: &[u8], start: usize, quote: u8) -> usize {
+    assert!(quote == b'"' || quote == b'`');
+    assert!(source[start..].starts_with(&[quote, quote, quote]));
+
+    let escapes = quote == b'"';
+    let mut offset = start + 3;
+
+    while offset < source.len() {
+        let byte = source[offset];
+
+        if escapes && byte == b'\\' {
+            offset += 2;
+
+            continue;
+        }
+
+        if byte == quote && source[offset + 1..].starts_with(&[quote, quote]) {
+            return offset + 3;
+        }
+
+        offset += 1;
+    }
+
+    source.len()
+}
+
 fn marked_scan(source: &[u8], start: usize) -> (TokenKind, usize) {
     assert!(source[start] == b'#' || source[start] == b'@');
 
@@ -417,6 +443,10 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
     }
 
     if byte == b'"' {
+        if source[offset + 1..].starts_with(b"\"\"") {
+            return (TokenKind::String, string_triple_scan(source, offset, b'"'));
+        }
+
         return (TokenKind::String, string_scan(source, offset, b'"'));
     }
 
@@ -425,6 +455,10 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
     }
 
     if byte == b'`' {
+        if source[offset + 1..].starts_with(b"``") {
+            return (TokenKind::String, string_triple_scan(source, offset, b'`'));
+        }
+
         return (TokenKind::String, string_raw_scan(source, offset));
     }
 
@@ -541,6 +575,33 @@ mod tests {
             .collect();
 
         assert_eq!(ends, vec![9], "{tokens:?}");
+    }
+
+    #[test]
+    fn a_triple_quoted_string_runs_to_its_closing_triple() {
+        assert_eq!(string_triple_scan(b"\"\"\"a\nb\"\"\"", 0, b'"'), 9);
+        assert_eq!(string_triple_scan(b"\"\"\"\"\"\"", 0, b'"'), 6);
+        assert_eq!(string_triple_scan(b"```a\\`b```", 0, b'`'), 10);
+    }
+
+    #[test]
+    fn an_escaped_quote_does_not_close_a_triple_quoted_string() {
+        assert_eq!(string_triple_scan(b"\"\"\"\\\"\"\"\"", 0, b'"'), 8);
+        assert_eq!(string_triple_scan(b"\"\"\"a\\\"\"\"", 0, b'"'), 8);
+    }
+
+    #[test]
+    fn an_unclosed_triple_quoted_string_runs_to_the_source_end() {
+        assert_eq!(string_triple_scan(b"\"\"\"a\"\"", 0, b'"'), 6);
+        assert_eq!(string_triple_scan(b"\"\"\"", 0, b'"'), 3);
+        assert_eq!(string_triple_scan(b"```a", 0, b'`'), 4);
+    }
+
+    #[test]
+    fn a_triple_quoted_string_lexes_as_one_token_across_lines() {
+        assert_eq!(counted(b"s := \"\"\"\na \" b\n\"\"\"\n", TokenKind::String), 1);
+        assert_eq!(counted(b"s := ```\na ` b\n```\n", TokenKind::String), 1);
+        assert_eq!(counted(b"s := \"\" + \"a\"\n", TokenKind::String), 2);
     }
 
     #[test]

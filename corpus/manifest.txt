@@ -1,0 +1,13 @@
+git	bat	multi	Apache-2.0/MIT	https://github.com/sharkdp/bat	b671e53c2cd0177beb357cf6cb997ee4215c7155
+git	ols	odin	MIT	https://github.com/DanielGavin/ols	eefe8133c832bcd42699de0d3acceab89752b84b
+git	zod	typescript	MIT	https://github.com/colinhacks/zod	43f729db4aa0cedff6d6b3261f33f8556b3c7102
+git	tigerbeetle	zig	Apache-2.0	https://github.com/tigerbeetle/tigerbeetle	9d2f5d625ab6ec0367f88402ef03612f36fc00a4
+
+local	go	go	BSD-3-Clause	go env GOROOT	go1.26.5
+local	rust	rust	Apache-2.0/MIT	rustup run 1.97.1 rustc --print sysroot	1.97.1
+local	python	python	PSF-2.0	"$(uv python find 3.13.14)" -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"])'	3.13.14
+git	bootstrap	multi	MIT	https://github.com/twbs/bootstrap	ae7d4c5313121f9da1f63974c7bbc373665a979b
+git	django	python	BSD-3-Clause	https://github.com/django/django	0b40210e4808937a7c0922e8b7502bff4752faa3
+git	odin	odin	BSD-3-Clause	https://github.com/odin-lang/Odin	897c99a9a388ff7ef71a3fc083cf785610ae498a
+git	ripgrep	rust	MIT/Unlicense	https://github.com/BurntSushi/ripgrep	3fce3b5bb0236da2df6d99672afb8a719642eca7
+git	vscode	multi	MIT	https://github.com/microsoft/vscode	a3c9dc6db053698c3459977384b73f4ca3248cbd

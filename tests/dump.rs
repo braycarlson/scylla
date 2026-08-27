@@ -95,6 +95,15 @@ fn dump() {
 
     println!("outcome {outcome:?}");
 
+    for error in front.errors() {
+        println!(
+            "error {:?} at {}..{}",
+            error.kind,
+            error.span.offset,
+            error.span.end()
+        );
+    }
+
     if let Some(root) = front.root() {
         show(&front, source, root, 0);
     }

@@ -30,7 +30,7 @@ def version():
 def sources(root):
     found = []
 
-    for directory, _, names in os.walk(root):
+    for directory, _, names in os.walk(root, followlinks=True):
         for name in names:
             if not name.endswith(".zig"):
                 continue

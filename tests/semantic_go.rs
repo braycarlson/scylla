@@ -1,3 +1,7 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 #[path = "common/oracle.rs"]
 mod oracle;
 
@@ -158,11 +162,10 @@ impl Machine {
 }
 
 fn corpus() -> Vec<Fixture> {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(held) = corpus::root() else {
         return Vec::new();
     };
 
-    let held = PathBuf::from(root);
     let mut found = Vec::new();
 
     collect(&held, &held, &mut found);
@@ -373,6 +376,28 @@ fn placed(held: &[(u32, i64)], expected: &[(u32, i64)]) -> Vec<(u32, i64)> {
     found
 }
 
+fn fixture_diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some(expected) = golden(root, &fixture.name) else {
+        return true;
+    };
+
+    let _ = machine.run(&fixture.source);
+
+    machine.rows() != expected
+}
+
+fn corpus_diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some(expected) = golden(root, &fixture.name) else {
+        return true;
+    };
+
+    if machine.run(&fixture.source) != Structure::Complete {
+        return true;
+    }
+
+    placed(&machine.rows(), &expected) != expected
+}
+
 fn report(name: &str, held: &[(u32, i64)], expected: &[(u32, i64)]) -> String {
     use core::fmt::Write as _;
 
@@ -520,16 +545,19 @@ fn every_fixture_names_what_go_types_names() {
         compared += 1;
     }
 
-    assert!(compared > 3, "too few fixtures compared");
+    assert!(
+        compared >= floor::FIXTURE_SEMANTIC_GO,
+        "the Go fixtures lost a binding table: {compared} compared, floor {}",
+        floor::FIXTURE_SEMANTIC_GO
+    );
 }
 
 #[test]
 fn the_corpus_names_what_go_types_names() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS_GOTYPES") else {
+    let Some(held) = corpus::gotypes() else {
         return;
     };
 
-    let held = PathBuf::from(root);
     let found = corpus();
 
     if found.is_empty() {
@@ -563,7 +591,11 @@ fn the_corpus_names_what_go_types_names() {
         compared += 1;
     }
 
-    assert!(compared >= 100, "the corpus lost its Go files");
+    assert!(
+        compared >= floor::CORPUS_SEMANTIC_GO,
+        "the corpus lost its Go files: {compared} compared, floor {}",
+        floor::CORPUS_SEMANTIC_GO
+    );
 
     if !differing.is_empty() {
         if let Ok(path) = std::env::var("SCYLLA_REPORT") {
@@ -580,6 +612,53 @@ fn the_corpus_names_what_go_types_names() {
                 .map(|line| line.as_str())
                 .collect::<Vec<&str>>()
                 .join("")
+        );
+    }
+}
+
+#[test]
+fn every_residue_row_names_a_file_that_diverges() {
+    let carried = oracle::residue_of("residue-go-semantic.json", &EVERY_CATEGORY);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-gotypes");
+    let mut machine = Machine::reserve();
+    let mut named = Vec::new();
+
+    for fixture in &fixtures() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            fixture_diverges(&mut machine, &root, fixture),
+            "{} matches its golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    let Some(held) = corpus::gotypes() else {
+        return;
+    };
+
+    for fixture in &corpus() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            corpus_diverges(&mut machine, &held, fixture),
+            "{} matches its corpus golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    for name in &carried {
+        assert!(
+            named.contains(name),
+            "the residue names `{name}` and neither the fixtures nor the corpus carry it"
         );
     }
 }

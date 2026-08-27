@@ -20,7 +20,6 @@ use crate::syntax::{SyntaxError, SyntaxErrorKind};
 use crate::token::Token;
 use crate::tree::{Checkpoint, Events, Structure, Tree, replay};
 
-const CHAIN_DEPTH_MAX: u32 = 4_096;
 const NEST_DEPTH_MAX: u32 = 96;
 const STAGE_VALUE: u8 = 0;
 const CONTEXT_HEADER: u8 = 2;
@@ -79,6 +78,10 @@ const fn is_trivia(kind: OdinKind) -> bool {
 impl Parser<'_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<OdinKind> {
@@ -400,7 +403,7 @@ impl Parser<'_> {
     }
 
     fn name_list(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at_name() {
                 break;
             }
@@ -448,7 +451,7 @@ impl Parser<'_> {
 
         let checkpoint = self.anchor();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(OdinKind::At) {
                 if !self.marks_an_attribute() {
                     break;
@@ -479,7 +482,7 @@ impl Parser<'_> {
     fn marks_an_attribute(&self) -> bool {
         let mut position = self.position;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.kind_at(position) {
                 Some(OdinKind::At) => return true,
                 Some(kind) if is_layout(kind) => position += 1,
@@ -493,7 +496,7 @@ impl Parser<'_> {
     fn attribute_arguments(&mut self) {
         let _ = self.eat(OdinKind::ParenOpen);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::ParenClose) || self.current().is_none() {
@@ -579,7 +582,7 @@ impl Parser<'_> {
     fn binder(&self) -> Option<OdinKind> {
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.kind_at(position).is_some_and(is_name) {
                 return None;
             }
@@ -629,7 +632,7 @@ impl Parser<'_> {
     fn constant_kind(&self) -> OdinKind {
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let Some(kind) = self.kind_at(position) else {
                 return OdinKind::ConstDeclaration;
             };
@@ -668,7 +671,7 @@ impl Parser<'_> {
     }
 
     fn overloaded(&mut self, checkpoint: Checkpoint) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(OdinKind::Directive) {
                 break;
             }
@@ -679,7 +682,7 @@ impl Parser<'_> {
         self.bump();
         let _ = self.eat(OdinKind::BraceOpen);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::BraceClose) || self.current().is_none() {
@@ -778,7 +781,7 @@ impl Parser<'_> {
     }
 
     fn qualifiers(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if self.at(OdinKind::Directive) {
                 self.wrap(OdinKind::Tag);
 
@@ -804,7 +807,7 @@ impl Parser<'_> {
     fn reach_a_where(&mut self) {
         let mut position = self.position;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.kind_at(position) {
                 Some(OdinKind::WhereKeyword) => break,
                 Some(kind) if is_layout(kind) => position += 1,
@@ -816,7 +819,7 @@ impl Parser<'_> {
     }
 
     fn directives(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(OdinKind::Directive) {
                 break;
             }
@@ -843,7 +846,7 @@ impl Parser<'_> {
 
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::ParenClose) || self.current().is_none() {
@@ -912,7 +915,7 @@ impl Parser<'_> {
     fn names_a_parameter(&self) -> bool {
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.kind_at(position).is_some_and(is_name) {
                 return false;
             }
@@ -960,7 +963,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let checkpoint = self.anchor();
 
             self.name();
@@ -1026,7 +1029,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::BraceClose) || self.current().is_none() {
@@ -1065,7 +1068,7 @@ impl Parser<'_> {
 
         self.name();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.eat(OdinKind::Dot) {
                 break;
             }
@@ -1082,7 +1085,7 @@ impl Parser<'_> {
 
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::ParenClose) || self.current().is_none() {
@@ -1111,7 +1114,7 @@ impl Parser<'_> {
     }
 
     fn polymorphic_group(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let _ = self.eat(OdinKind::Dollar);
 
             if !self.at_name() {
@@ -1150,7 +1153,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::BraceClose) || self.current().is_none() {
@@ -1204,7 +1207,7 @@ impl Parser<'_> {
         self.reach_a_brace();
         let _ = self.eat(OdinKind::BraceOpen);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::BraceClose) || self.current().is_none() {
@@ -1242,7 +1245,7 @@ impl Parser<'_> {
         self.reach_a_brace();
         let _ = self.eat(OdinKind::BraceOpen);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::BraceClose) || self.current().is_none() {
@@ -1289,7 +1292,7 @@ impl Parser<'_> {
 
         self.expect(OdinKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::BraceClose) || self.current().is_none() {
@@ -1449,7 +1452,7 @@ impl Parser<'_> {
     fn tags_an_assignment(&self) -> bool {
         let start = self.significant(self.position + 1);
 
-        for step in 0..CHAIN_DEPTH_MAX {
+        for step in 0..self.steps() {
             let position = start + step;
 
             let Some(kind) = self.kind_at(position) else {
@@ -1549,7 +1552,7 @@ impl Parser<'_> {
     fn brace_follows(&self) -> bool {
         let mut position = self.position;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.kind_at(position) {
                 Some(OdinKind::BraceOpen) => return true,
                 Some(kind) if is_layout(kind) => position += 1,
@@ -1581,7 +1584,7 @@ impl Parser<'_> {
     }
 
     fn else_tail(&mut self, whenever: bool) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.reach_an_else();
 
             if !self.at(OdinKind::ElseKeyword) {
@@ -1625,7 +1628,7 @@ impl Parser<'_> {
 
         let mut position = self.position;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.kind_at(position) {
                 Some(OdinKind::ElseKeyword) => break,
                 Some(kind) if is_layout(kind) => position += 1,
@@ -1637,7 +1640,7 @@ impl Parser<'_> {
     }
 
     fn header(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
             let checkpoint = self.anchor();
 
@@ -1717,7 +1720,7 @@ impl Parser<'_> {
         self.reach_a_brace();
         let _ = self.eat(OdinKind::BraceOpen);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::BraceClose) || self.current().is_none() {
@@ -1815,7 +1818,7 @@ impl Parser<'_> {
 
         let _ = self.eat(OdinKind::Colon);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             let Some(held) = self.current() else {
@@ -1892,7 +1895,7 @@ impl Parser<'_> {
     }
 
     fn expression_list_iteration(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.expression_iteration();
@@ -1955,7 +1958,7 @@ impl Parser<'_> {
     }
 
     fn expression_list_with(&mut self, structures: bool) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.expression_with(structures);
@@ -2347,7 +2350,7 @@ impl Parser<'_> {
         if kind == OdinKind::ParenOpen && self.in_a_type(base) {
             self.bump();
 
-            for _ in 0..CHAIN_DEPTH_MAX {
+            for _ in 0..self.steps() {
                 if self.at(OdinKind::ParenClose) || self.current().is_none() {
                     break;
                 }
@@ -2402,7 +2405,7 @@ impl Parser<'_> {
         let mut position = self.significant(self.position);
         let mut depth = 0_u32;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.kind_at(position) {
                 None => return false,
                 Some(OdinKind::ParenOpen) => depth += 1,
@@ -2456,7 +2459,7 @@ impl Parser<'_> {
 
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::ParenClose) || self.current().is_none() {
@@ -2881,7 +2884,7 @@ impl Parser<'_> {
         self.events.finish();
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_breaks();
 
             if self.at(OdinKind::ParenClose) || self.current().is_none() {
@@ -2944,7 +2947,7 @@ impl Parser<'_> {
 
         let checkpoint = self.values[self.value_count as usize - 1];
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.eat(OdinKind::Dot) {
                 break;
             }

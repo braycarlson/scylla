@@ -1,6 +1,5 @@
 use crate::bounded::{Span, count_of};
 use crate::syntax::css::expression::{
-    CHAIN_DEPTH_MAX,
     NEST_DEPTH_MAX,
     NTH_LITERALS,
     QUERY_JOINS,
@@ -62,6 +61,10 @@ const fn closes_a_group(kind: CSSKind) -> bool {
 impl Parser<'_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<CSSKind> {
@@ -198,7 +201,7 @@ impl Parser<'_> {
     }
 
     fn skip_layout(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if !self.at_line_comment() {
@@ -310,7 +313,7 @@ impl Parser<'_> {
 
         let before = self.position;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let Some(token) = self.tokens.get(self.position as usize) else {
                 break;
             };
@@ -432,7 +435,7 @@ impl Parser<'_> {
         self.open(CSSKind::Block);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_layout();
 
             match self.current() {
@@ -457,7 +460,7 @@ impl Parser<'_> {
     fn selectors(&mut self) {
         self.open(CSSKind::Selectors);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.selector();
@@ -494,7 +497,7 @@ impl Parser<'_> {
 
         let mut inner = left;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let separated = self.separated();
 
             let Some(kind) = self.current() else {
@@ -546,7 +549,7 @@ impl Parser<'_> {
     }
 
     fn tight_suffixes(&mut self, checkpoint: Checkpoint) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if self.separated() {
                 break;
             }
@@ -601,7 +604,7 @@ impl Parser<'_> {
     fn class_name(&mut self, literal: bool) {
         self.open(CSSKind::ClassName);
 
-        for seen in 0..CHAIN_DEPTH_MAX {
+        for seen in 0..self.steps() {
             let Some(kind) = self.kind_at(self.position) else {
                 break;
             };
@@ -688,7 +691,7 @@ impl Parser<'_> {
         self.open(CSSKind::Arguments);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             match self.current() {
@@ -728,7 +731,7 @@ impl Parser<'_> {
             self.nth_notation();
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.current() {
                 None | Some(CSSKind::ParenClose) => break,
                 Some(CSSKind::Identifier) if self.current_text() == b"of" => {
@@ -751,7 +754,7 @@ impl Parser<'_> {
 
         self.open(CSSKind::PlainValue);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.current() {
                 None | Some(CSSKind::ParenClose) => break,
                 Some(CSSKind::Identifier) if self.current_text() == b"of" => break,
@@ -780,7 +783,7 @@ impl Parser<'_> {
     fn attribute_name(&mut self) {
         self.open(CSSKind::AttributeName);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.current() {
                 Some(CSSKind::Identifier | CSSKind::Pipe | CSSKind::Star) => self.bump(),
                 _ => break,
@@ -791,7 +794,7 @@ impl Parser<'_> {
     }
 
     fn value_list(&mut self, stop: &[CSSKind]) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             let Some(kind) = self.current() else {
@@ -837,7 +840,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let Some(kind) = self.current() else {
                 break;
             };
@@ -979,7 +982,7 @@ impl Parser<'_> {
         self.open(CSSKind::Arguments);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             match self.current() {
@@ -1156,7 +1159,7 @@ impl Parser<'_> {
         self.open(CSSKind::KeyframeBlockList);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_layout();
 
             match self.current() {
@@ -1296,7 +1299,7 @@ impl Parser<'_> {
     }
 
     fn query_list(&mut self, stop: &[CSSKind]) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             let Some(kind) = self.current() else {
@@ -1339,7 +1342,7 @@ impl Parser<'_> {
 
         self.query_unary();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if self.current() != Some(CSSKind::Identifier) {
                 break;
             }

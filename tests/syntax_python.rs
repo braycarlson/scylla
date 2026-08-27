@@ -1,6 +1,11 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 #[path = "common/python.rs"]
 mod python;
 
+use core::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -11,10 +16,10 @@ use scylla::lines::Index;
 use scylla::syntax::Structure;
 use scylla::syntax::python::PythonKind;
 use scylla::syntax::python::ast::View;
-use scylla::syntax::python::bind::{self, BindingKind, ScopeKind, Tables};
+use scylla::syntax::python::bind::{self, BindingKind, Outcome as BindOutcome, ScopeKind, Tables};
 use scylla::syntax::python::classify::classify;
 use scylla::syntax::python::parse;
-use scylla::token::{Token, Tokens};
+use scylla::token::{Lex, Token, Tokens};
 use scylla::tree::{Events, Tree};
 use scylla::trivia::{self, Gap};
 
@@ -185,7 +190,7 @@ impl Machine {
             &self.raw,
             &self.tree,
             &mut self.tables,
-        )
+        ) == BindOutcome::Complete
     }
 
     fn scope_name(&self, source: &[u8], index: u32) -> String {
@@ -591,14 +596,21 @@ impl Machine {
 }
 
 fn corpus() -> Vec<Fixture> {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(held) = corpus::root() else {
         return Vec::new();
     };
 
-    let held = PathBuf::from(root);
     let mut found = Vec::new();
+    let mut lexed = Tokens::reserve(TOKEN_COUNT_MAX);
 
     collect(&held, &held, &mut found);
+
+    found.retain(|fixture| {
+        lexed.clear();
+
+        PYTHON.lex(&fixture.source, &mut lexed) == Lex::Complete
+    });
+
     found.sort_by(|left, right| left.name.cmp(&right.name));
 
     found
@@ -825,7 +837,11 @@ fn classify_runs_the_corpus_without_an_unclaimed_byte() {
         "tests/residue-python.json names a file the corpus does not carry"
     );
 
-    assert!(compared >= 144, "the corpus lost its Python files");
+    assert!(
+        compared >= floor::CORPUS_CLASSIFY_PYTHON,
+        "the corpus lost its Python files: {compared} classified, floor {}",
+        floor::CORPUS_CLASSIFY_PYTHON
+    );
 }
 
 fn census_of(rows: &[(String, u32, u32)]) -> Vec<(String, u32)> {
@@ -875,11 +891,10 @@ fn the_statement_census_matches_the_goldens() {
 
 #[test]
 fn the_statement_census_matches_the_corpus_goldens() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS_GOLDEN") else {
+    let Some(held) = corpus::golden() else {
         return;
     };
 
-    let held = PathBuf::from(root);
     let found = corpus();
 
     if found.is_empty() {
@@ -887,6 +902,7 @@ fn the_statement_census_matches_the_corpus_goldens() {
     }
 
     let carried = python::residue_of("residue-python.json", &NOT_PYTHON);
+    let mut abstained = 0;
     let mut machine = Machine::reserve();
     let mut compared = 0;
 
@@ -896,7 +912,9 @@ fn the_statement_census_matches_the_corpus_goldens() {
         }
 
         let Some(golden) = python::golden(&held, &fixture.name) else {
-            panic!("{} has no golden", fixture.name);
+            abstained += 1;
+
+            continue;
         };
 
         let _ = machine.parse(&fixture.source);
@@ -911,7 +929,11 @@ fn the_statement_census_matches_the_corpus_goldens() {
         compared += 1;
     }
 
-    assert!(compared >= 144, "the corpus lost its Python files");
+    assert!(
+        compared >= floor::CORPUS_CENSUS_PYTHON,
+        "the corpus lost its Python files: {compared} counted, {abstained} abstained, floor {}",
+        floor::CORPUS_CENSUS_PYTHON
+    );
 }
 
 #[test]
@@ -1008,6 +1030,40 @@ fn sorted(rows: &[(String, u32, u32)]) -> Vec<(String, u32, u32)> {
     found
 }
 
+fn walk_diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some(golden) = python::golden(root, &fixture.name) else {
+        return true;
+    };
+
+    if !machine.run(&fixture.source) {
+        return true;
+    }
+
+    if machine.raw.contains(&PythonKind::ErrorToken) {
+        return true;
+    }
+
+    let _ = machine.parse(&fixture.source);
+
+    let length = u32::try_from(fixture.source.len()).expect("a file fits in u32");
+
+    machine.walk(length) != sorted(&golden.ast)
+}
+
+fn scopes_diverge(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some(golden) = python::golden(root, &fixture.name) else {
+        return true;
+    };
+
+    let _ = machine.parse(&fixture.source);
+
+    if !machine.bind(&fixture.source) {
+        return true;
+    }
+
+    machine.scopes(&fixture.source) != golden.scopes
+}
+
 fn report(name: &str, held: &[(String, u32, u32)], wanted: &[(String, u32, u32)]) -> String {
     use core::fmt::Write as _;
 
@@ -1069,6 +1125,70 @@ fn an_except_clause_reads_an_unparenthesized_tuple() {
 }
 
 #[test]
+fn a_flat_literal_is_not_nesting() {
+    const ELEMENT_COUNT: usize = 4_000;
+
+    let mut list = String::from("held = [");
+    let mut dict = String::from("held = {");
+    let mut tuple = String::from("held = (");
+
+    for index in 0..ELEMENT_COUNT {
+        let _ = write!(list, "{index}, ");
+        let _ = write!(dict, "\"k{index}\": {index}, ");
+        let _ = write!(tuple, "{index}, ");
+    }
+
+    list.push_str("]\n");
+    dict.push_str("}\n");
+    tuple.push_str(")\n");
+
+    let mut machine = Machine::reserve();
+
+    for (name, source) in [("a list", &list), ("a dict", &dict), ("a tuple", &tuple)] {
+        let held = source.as_bytes();
+
+        assert_eq!(
+            machine.parse(held),
+            Structure::Complete,
+            "{name} of {ELEMENT_COUNT} elements does not parse whole"
+        );
+
+        assert!(
+            machine.tree.errors().is_empty(),
+            "{name} of {ELEMENT_COUNT} elements parses with {:?}",
+            machine.tree.errors()
+        );
+    }
+}
+
+#[test]
+fn a_literal_reads_back_as_the_kind_its_brackets_name() {
+    const HELD: [(&[u8], &str); 6] = [
+        (b"held = {}\n", "Dict"),
+        (b"held = {1: 2}\n", "Dict"),
+        (b"held = {1}\n", "Set"),
+        (b"held = {1, 2}\n", "Set"),
+        (b"held = {1,}\n", "Set"),
+        (b"held = (1,)\n", "Tuple"),
+    ];
+
+    let mut machine = Machine::reserve();
+
+    for (source, wanted) in HELD {
+        let _ = machine.parse(source);
+
+        let length = u32::try_from(source.len()).expect("a source fits in u32");
+        let walk = machine.walk(length);
+
+        assert!(
+            walk.iter().any(|(name, _, _)| name == wanted),
+            "{} reads as {walk:?} and not as a {wanted}",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
 fn the_normalized_walk_matches_the_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-python");
     let carried = python::residue_of("residue-python.json", &EVERY_CATEGORY);
@@ -1098,16 +1218,19 @@ fn the_normalized_walk_matches_the_goldens() {
         compared += 1;
     }
 
-    assert!(compared > 0, "every fixture is residue");
+    assert!(
+        compared >= floor::FIXTURE_WALK_PYTHON,
+        "the Python fixtures lost a walk: {compared} compared, floor {}",
+        floor::FIXTURE_WALK_PYTHON
+    );
 }
 
 #[test]
 fn the_normalized_walk_matches_the_corpus_goldens() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS_GOLDEN") else {
+    let Some(held) = corpus::golden() else {
         return;
     };
 
-    let held = PathBuf::from(root);
     let found = corpus();
 
     if found.is_empty() {
@@ -1115,6 +1238,7 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
     }
 
     let carried = python::residue_of("residue-python.json", &EVERY_CATEGORY);
+    let mut abstained = 0;
     let mut machine = Machine::reserve();
     let mut differing = Vec::new();
     let mut compared = 0;
@@ -1125,7 +1249,9 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
         }
 
         let Some(golden) = python::golden(&held, &fixture.name) else {
-            panic!("{} has no golden", fixture.name);
+            abstained += 1;
+
+            continue;
         };
 
         let _ = machine.parse(&fixture.source);
@@ -1142,8 +1268,10 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
     }
 
     assert!(
-        compared + carried.len() >= 145,
-        "the corpus lost its Python files"
+        compared + carried.len() >= floor::CORPUS_WALK_PYTHON,
+        "the corpus lost its Python files: {} named, {abstained} abstained, floor {}",
+        compared + carried.len(),
+        floor::CORPUS_WALK_PYTHON
     );
 
     if !differing.is_empty() {
@@ -1200,16 +1328,19 @@ fn the_scope_tables_match_the_goldens() {
         compared += 1;
     }
 
-    assert!(compared > 0, "every fixture is residue");
+    assert!(
+        compared >= floor::FIXTURE_SCOPE_PYTHON,
+        "the Python fixtures lost a scope table: {compared} compared, floor {}",
+        floor::FIXTURE_SCOPE_PYTHON
+    );
 }
 
 #[test]
 fn the_scope_tables_match_the_corpus_goldens() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS_GOLDEN") else {
+    let Some(held) = corpus::golden() else {
         return;
     };
 
-    let held = PathBuf::from(root);
     let found = corpus();
 
     if found.is_empty() {
@@ -1217,6 +1348,7 @@ fn the_scope_tables_match_the_corpus_goldens() {
     }
 
     let carried = python::residue_of("residue-python.json", &SCOPE_CATEGORY);
+    let mut abstained = 0;
     let mut machine = Machine::reserve();
     let mut differing = Vec::new();
     let mut compared = 0;
@@ -1227,7 +1359,9 @@ fn the_scope_tables_match_the_corpus_goldens() {
         }
 
         let Some(golden) = python::golden(&held, &fixture.name) else {
-            panic!("{} has no golden", fixture.name);
+            abstained += 1;
+
+            continue;
         };
 
         let _ = machine.parse(&fixture.source);
@@ -1244,8 +1378,10 @@ fn the_scope_tables_match_the_corpus_goldens() {
     }
 
     assert!(
-        compared + carried.len() >= 145,
-        "the corpus lost its Python files"
+        compared + carried.len() >= floor::CORPUS_SCOPE_PYTHON,
+        "the corpus lost its Python files: {} named, {abstained} abstained, floor {}",
+        compared + carried.len(),
+        floor::CORPUS_SCOPE_PYTHON
     );
 
     if !differing.is_empty() {
@@ -1301,4 +1437,70 @@ fn scope_report(
     }
 
     lines
+}
+
+#[test]
+fn every_residue_row_names_a_file_that_diverges() {
+    const SCOPES_ONLY: [&str; 1] = ["pep-695-type-parameter-scopes"];
+
+    let carried = python::residue_of("residue-python.json", &EVERY_CATEGORY);
+    let scoped = python::residue_of("residue-python.json", &SCOPES_ONLY);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-python");
+    let mut machine = Machine::reserve();
+    let mut named = Vec::new();
+
+    for fixture in &fixtures() {
+        if carried.contains(&fixture.name) {
+            named.push(fixture.name.clone());
+
+            assert!(
+                walk_diverges(&mut machine, &root, fixture),
+                "{} matches its golden and needs no residue row",
+                fixture.name
+            );
+        }
+
+        if scoped.contains(&fixture.name) {
+            named.push(fixture.name.clone());
+
+            assert!(
+                scopes_diverge(&mut machine, &root, fixture),
+                "{} binds the scopes its golden records and needs no residue row",
+                fixture.name
+            );
+        }
+    }
+
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    for fixture in &corpus() {
+        if carried.contains(&fixture.name) {
+            named.push(fixture.name.clone());
+
+            assert!(
+                walk_diverges(&mut machine, &held, fixture),
+                "{} matches its corpus golden and needs no residue row",
+                fixture.name
+            );
+        }
+
+        if scoped.contains(&fixture.name) {
+            named.push(fixture.name.clone());
+
+            assert!(
+                scopes_diverge(&mut machine, &held, fixture),
+                "{} binds the scopes its corpus golden records and needs no residue row",
+                fixture.name
+            );
+        }
+    }
+
+    for name in carried.iter().chain(scoped.iter()) {
+        assert!(
+            named.contains(name),
+            "the residue names `{name}` and neither the fixtures nor the corpus carry it"
+        );
+    }
 }

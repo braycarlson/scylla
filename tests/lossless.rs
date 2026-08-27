@@ -1,3 +1,8 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -105,16 +110,18 @@ fn every_fixture_is_tiled_by_its_tokens_and_gaps() {
         }
     }
 
-    assert!(compared > 32, "the fixture tree lost its sources");
+    assert!(
+        compared >= floor::FIXTURE_LOSSLESS,
+        "the fixture tree lost its sources: {compared} tiled, floor {}",
+        floor::FIXTURE_LOSSLESS
+    );
 }
 
 #[test]
 fn every_corpus_file_is_tiled_by_its_tokens_and_gaps() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(held) = corpus::root() else {
         return;
     };
-
-    let held = PathBuf::from(root);
     let mut buffer = Buffer::reserve(SOURCE_BYTES_MAX);
     let mut tokens = Tokens::reserve(TOKEN_COUNT_MAX);
     let mut compared = 0;
@@ -146,7 +153,11 @@ fn every_corpus_file_is_tiled_by_its_tokens_and_gaps() {
         }
     }
 
-    assert!(compared > 2_000, "SCYLLA_CORPUS lost its sources");
+    assert!(
+        compared >= floor::CORPUS_LOSSLESS,
+        "SCYLLA_CORPUS lost its sources: {compared} tiled, floor {}",
+        floor::CORPUS_LOSSLESS
+    );
 }
 
 #[test]

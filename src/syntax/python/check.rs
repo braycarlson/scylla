@@ -9,8 +9,6 @@ use crate::token::Token;
 use crate::tree::{NONE, Step, Tree, walk, walk_from};
 
 pub const ERROR_COUNT_MAX_DEFAULT: u32 = 1 << 10;
-const PARAMETER_COUNT_MAX: usize = 1 << 8;
-const TARGET_COUNT_MAX: usize = 1 << 5;
 const TARGET_STACK_MAX: usize = 1 << 8;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -51,9 +49,8 @@ pub enum Completion {
     Complete,
     ErrorsFull,
     FramesFull,
-    ParametersFull,
+    ScratchFull,
     TargetStackFull,
-    TargetsFull,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -84,6 +81,7 @@ struct Checker<'run> {
     frames: [Frame; SCOPE_DEPTH_MAX as usize],
     future_allowed: bool,
     raw: &'run [PythonKind],
+    scratch: &'run mut BoundedVec<Span>,
     semantic: &'run Semantic,
     source: &'run [u8],
     target_stack: [u32; TARGET_STACK_MAX],
@@ -693,8 +691,8 @@ impl<'run> Checker<'run> {
         }
 
         let source = self.source;
-        let mut seen = [Span::EMPTY; PARAMETER_COUNT_MAX];
-        let mut count = 0;
+
+        self.scratch.clear();
 
         for child in self.view(node).children_of(PythonKind::Arg) {
             let Some(position) = child.as_argument().and_then(Arg::name_token) else {
@@ -703,23 +701,22 @@ impl<'run> Checker<'run> {
 
             let name = child.token_at(position).span();
 
-            if seen[..count]
+            let seen = self
+                .scratch
                 .iter()
-                .any(|held| source[held.range()] == source[name.range()])
-            {
+                .any(|held| source[held.range()] == source[name.range()]);
+
+            if seen {
                 self.report(CheckKind::DuplicateParameter, name);
 
                 continue;
             }
 
-            if count == PARAMETER_COUNT_MAX {
-                self.overrun(Completion::ParametersFull);
+            if !self.scratch.push(name) {
+                self.overrun(Completion::ScratchFull);
 
                 return;
             }
-
-            seen[count] = name;
-            count += 1;
         }
     }
 
@@ -756,8 +753,8 @@ impl<'run> Checker<'run> {
     }
 
     fn walrus_rebind(&mut self, node: u32) {
-        let mut names = [Span::EMPTY; TARGET_COUNT_MAX];
-        let count = self.comprehension_targets(node, &mut names);
+        self.comprehension_targets(node);
+
         let source = self.source;
         let tree = self.tree;
 
@@ -776,10 +773,12 @@ impl<'run> Checker<'run> {
 
             let name = target.span();
 
-            if names[..count]
+            let written = self
+                .scratch
                 .iter()
-                .any(|written| source[written.range()] == source[name.range()])
-            {
+                .any(|seen| source[seen.range()] == source[name.range()]);
+
+            if written {
                 self.report(
                     CheckKind::WalrusRebindsComprehensionVariable,
                     self.span_of(held),
@@ -788,9 +787,10 @@ impl<'run> Checker<'run> {
         }
     }
 
-    fn comprehension_targets(&mut self, node: u32, out: &mut [Span; TARGET_COUNT_MAX]) -> usize {
+    fn comprehension_targets(&mut self, node: u32) {
         let tree = self.tree;
-        let mut count = 0;
+
+        self.scratch.clear();
 
         for clause in self.view(node).children_of(PythonKind::Comprehension) {
             let Some(target) = clause.child_first() else {
@@ -806,18 +806,15 @@ impl<'run> Checker<'run> {
                     continue;
                 }
 
-                if count == TARGET_COUNT_MAX {
-                    self.overrun(Completion::TargetsFull);
+                let span = self.span_of(held);
 
-                    return count;
+                if !self.scratch.push(span) {
+                    self.overrun(Completion::ScratchFull);
+
+                    return;
                 }
-
-                out[count] = self.span_of(held);
-                count += 1;
             }
         }
-
-        count
     }
 
     fn gate(&mut self, node: u32, kind: PythonKind) {
@@ -982,18 +979,33 @@ impl<'run> Checker<'run> {
     }
 }
 
+pub struct Input<'run> {
+    pub raw: &'run [PythonKind],
+    pub semantic: &'run Semantic,
+    pub source: &'run [u8],
+    pub tokens: &'run [Token],
+    pub tree: &'run Tree<PythonKind>,
+    pub version: PythonVersion,
+}
+
 pub fn check(
-    source: &[u8],
-    tokens: &[Token],
-    raw: &[PythonKind],
-    tree: &Tree<PythonKind>,
-    semantic: &Semantic,
-    version: PythonVersion,
+    input: &Input<'_>,
     errors: &mut BoundedVec<CheckError>,
+    scratch: &mut BoundedVec<Span>,
 ) -> Completion {
+    let Input {
+        raw,
+        semantic,
+        source,
+        tokens,
+        tree,
+        version,
+    } = *input;
+
     assert_eq!(tokens.len(), raw.len());
 
     errors.clear();
+    scratch.clear();
 
     assert_eq!(errors.count(), 0);
 
@@ -1012,6 +1024,7 @@ pub fn check(
         }; SCOPE_DEPTH_MAX as usize],
         future_allowed: true,
         raw,
+        scratch,
         semantic,
         source,
         target_stack: [NONE; TARGET_STACK_MAX],
@@ -1094,7 +1107,7 @@ mod tests {
     use super::*;
     use crate::language::Lexer as _;
     use crate::lex::PYTHON;
-    use crate::syntax::python::bind::{Tables, bind};
+    use crate::syntax::python::bind::{Outcome as BindOutcome, Tables, bind};
     use crate::syntax::python::classify::classify;
     use crate::syntax::python::parse;
     use crate::syntax::python::semantic::{AnnotationScratch, SemanticInput};
@@ -1117,6 +1130,7 @@ mod tests {
             let mut semantic = Semantic::reserve(1 << 10, 1 << 12, 1 << 8);
             let mut scratch = AnnotationScratch::reserve(1 << 8, 1 << 8);
             let mut errors = BoundedVec::reserve(ERROR_COUNT_MAX_DEFAULT);
+            let mut names = BoundedVec::reserve(ERROR_COUNT_MAX_DEFAULT);
 
             PYTHON.lex(source, &mut lexed);
 
@@ -1127,7 +1141,10 @@ mod tests {
                 Structure::Complete
             );
 
-            assert!(bind(source, tokens.as_slice(), &raw, &tree, &mut tables));
+            assert_eq!(
+                bind(source, tokens.as_slice(), &raw, &tree, &mut tables),
+                BindOutcome::Complete
+            );
 
             assert_eq!(
                 semantic.build(
@@ -1147,13 +1164,16 @@ mod tests {
 
             assert_eq!(
                 check(
-                    source,
-                    tokens.as_slice(),
-                    &raw,
-                    &tree,
-                    &semantic,
-                    version,
+                    &Input {
+                        raw: &raw,
+                        semantic: &semantic,
+                        source,
+                        tokens: tokens.as_slice(),
+                        tree: &tree,
+                        version,
+                    },
                     &mut errors,
+                    &mut names,
                 ),
                 Completion::Complete
             );
@@ -1769,6 +1789,7 @@ mod tests {
         let mut semantic = Semantic::reserve(1 << 10, 1 << 12, 1 << 8);
         let mut scratch = AnnotationScratch::reserve(1 << 8, 1 << 8);
         let mut errors = BoundedVec::reserve(1);
+        let mut names = BoundedVec::reserve(1 << 10);
         let mut source = Vec::from(b"return 1\n".as_slice());
 
         source.extend_from_slice(b"return 2\n");
@@ -1779,7 +1800,10 @@ mod tests {
 
         parse::build(&source, tokens.as_slice(), &raw, &mut events, &mut tree);
 
-        assert!(bind(&source, tokens.as_slice(), &raw, &tree, &mut tables));
+        assert_eq!(
+            bind(&source, tokens.as_slice(), &raw, &tree, &mut tables),
+            BindOutcome::Complete
+        );
 
         semantic.build(
             &SemanticInput {
@@ -1796,13 +1820,16 @@ mod tests {
 
         assert_eq!(
             check(
-                &source,
-                tokens.as_slice(),
-                &raw,
-                &tree,
-                &semantic,
-                PythonVersion::Py310,
+                &Input {
+                    raw: &raw,
+                    semantic: &semantic,
+                    source: &source,
+                    tokens: tokens.as_slice(),
+                    tree: &tree,
+                    version: PythonVersion::Py310,
+                },
                 &mut errors,
+                &mut names,
             ),
             Completion::ErrorsFull
         );

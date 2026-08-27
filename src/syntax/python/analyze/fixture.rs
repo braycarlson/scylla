@@ -2,7 +2,7 @@ use crate::bounded::BoundedVec;
 use crate::language::Lexer as _;
 use crate::lex::PYTHON;
 use crate::syntax::python::ast::View;
-use crate::syntax::python::bind::{Tables, bind};
+use crate::syntax::python::bind::{Outcome as BindOutcome, Tables, bind};
 use crate::syntax::python::classify::classify;
 use crate::syntax::python::kind::PythonKind;
 use crate::syntax::python::parse;
@@ -39,7 +39,10 @@ impl Fixture {
             Structure::Complete
         );
 
-        assert!(bind(source, tokens.as_slice(), &raw, &tree, &mut tables));
+        assert_eq!(
+            bind(source, tokens.as_slice(), &raw, &tree, &mut tables),
+            BindOutcome::Complete
+        );
 
         assert_eq!(
             semantic.build(

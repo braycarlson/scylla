@@ -1,3 +1,8 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
+
 use std::fs;
 use std::path::PathBuf;
 
@@ -10,7 +15,7 @@ use scylla::syntax::typescript::classify::classify;
 use scylla::syntax::typescript::dialect::Dialect;
 use scylla::syntax::typescript::kind::TypeScriptKind;
 use scylla::syntax::typescript::parse;
-use scylla::token::Tokens;
+use scylla::token::{TokenKind, Tokens};
 use scylla::tree::{Events, Tree};
 
 const ELEMENT_COUNT_MAX: u32 = 1 << 18;
@@ -117,6 +122,29 @@ impl Held {
         };
 
         self.formatter.range(&input, lines, out)
+    }
+
+    fn words(&mut self, source: &[u8]) -> Vec<String> {
+        self.lexed.clear();
+        TYPESCRIPT.lex(source, &mut self.lexed);
+
+        self.lexed
+            .as_slice()
+            .iter()
+            .filter(|token| {
+                !matches!(
+                    token.kind,
+                    TokenKind::BlockEnd | TokenKind::BlockStart | TokenKind::Newline
+                ) && token.length > 0
+            })
+            .map(|token| {
+                if token.kind == TokenKind::String {
+                    return "<string>".to_owned();
+                }
+
+                String::from_utf8_lossy(token.text(source)).into_owned()
+            })
+            .collect()
     }
 
     fn kinds(&mut self, source: &[u8]) -> Vec<TypeScriptKind> {
@@ -367,7 +395,11 @@ fn the_formatted_output_matches_the_oracle_modulo_residue() {
         compared += 1;
     }
 
-    assert!(compared > 0, "every fixture is residue");
+    assert!(
+        compared >= floor::FIXTURE_FORMAT_TYPESCRIPT,
+        "the TypeScript fixtures lost a formatting: {compared} compared, floor {}",
+        floor::FIXTURE_FORMAT_TYPESCRIPT
+    );
 }
 
 #[test]
@@ -432,13 +464,13 @@ fn a_range_reads_back_the_lines_it_names() {
 
 #[test]
 fn the_three_relations_hold_over_the_corpus() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(root) = corpus::root() else {
         return;
     };
 
     let mut first = Buffer::reserve(OUT_BYTES_MAX);
     let mut held = Held::reserve();
-    let mut pending = vec![PathBuf::from(root)];
+    let mut pending = vec![root];
     let mut second = Buffer::reserve(OUT_BYTES_MAX);
 
     while let Some(directory) = pending.pop() {
@@ -528,4 +560,22 @@ fn dialect_of(name: &str) -> Dialect {
     let extension = name.rsplit('.').next().unwrap_or("ts");
 
     Dialect::of_extension(extension).expect("the fixture is TypeScript")
+}
+
+#[test]
+fn formatting_keeps_every_word_it_was_given() {
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    for (name, source) in fixtures() {
+        if held.format(&source, &mut out) != Outcome::Complete {
+            continue;
+        }
+
+        let formatted = out.as_bytes().to_vec();
+        let before = held.words(&source);
+        let after = held.words(&formatted);
+
+        assert_eq!(before, after, "{name} split, joined, lost, or gained a word");
+    }
 }

@@ -55,7 +55,7 @@ use crate::syntax::odin::kind::OdinKind;
 use crate::syntax::odin::parse as odin_parse;
 use crate::syntax::odin::semantic::Semantic as OdinSemantic;
 use crate::syntax::python::ast::View;
-use crate::syntax::python::bind::{self, Tables};
+use crate::syntax::python::bind::{self, Outcome as BindOutcome, Tables};
 use crate::syntax::python::classify::classify;
 use crate::syntax::python::kind::PythonKind;
 use crate::syntax::python::parse;
@@ -369,13 +369,10 @@ fn the_syntax_layer_runs_on_a_frozen_thread() {
 
         assert!(seen > 0);
 
-        assert!(bind::bind(
-            source,
-            tokens.as_slice(),
-            &raw,
-            &built,
-            &mut tables
-        ));
+        assert_eq!(
+            bind::bind(source, tokens.as_slice(), &raw, &built, &mut tables),
+            BindOutcome::Complete
+        );
 
         assert!(tables.scopes.count() > 0);
     }
@@ -1006,13 +1003,10 @@ fn the_python_semantic_model_runs_on_a_frozen_thread() {
 
         parse::build(source, tokens.as_slice(), &raw, &mut events, &mut built);
 
-        assert!(bind::bind(
-            source,
-            tokens.as_slice(),
-            &raw,
-            &built,
-            &mut tables
-        ));
+        assert_eq!(
+            bind::bind(source, tokens.as_slice(), &raw, &built, &mut tables),
+            BindOutcome::Complete
+        );
 
         let outcome = semantic.build(
             &SemanticInput {

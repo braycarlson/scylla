@@ -1,3 +1,7 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 #[path = "common/oracle.rs"]
 mod oracle;
 
@@ -530,11 +534,10 @@ const fn reportable(kind: BindingKind) -> bool {
 }
 
 fn corpus() -> Vec<Fixture> {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(held) = corpus::root() else {
         return Vec::new();
     };
 
-    let held = PathBuf::from(root);
     let mut found = Vec::new();
 
     collect(&held, &held, &mut found);
@@ -705,6 +708,22 @@ fn quoted(text: &[u8], from: usize) -> Option<(String, usize)> {
     None
 }
 
+fn diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some((expected, broken)) = golden(root, &fixture.name) else {
+        return true;
+    };
+
+    if broken {
+        return true;
+    }
+
+    if machine.run_fixture(fixture) != Structure::Complete {
+        return true;
+    }
+
+    machine.rows(&fixture.source) != expected
+}
+
 fn report(name: &str, held: &[(String, u32)], expected: &[(String, u32)]) -> String {
     use core::fmt::Write as _;
 
@@ -867,16 +886,19 @@ fn every_fixture_reports_the_rows_oxlint_reports() {
         compared += 1;
     }
 
-    assert!(compared > 6, "too few fixtures compared");
+    assert!(
+        compared >= floor::FIXTURE_SEMANTIC_JAVASCRIPT,
+        "the JavaScript fixtures lost a binding table: {compared} compared, floor {}",
+        floor::FIXTURE_SEMANTIC_JAVASCRIPT
+    );
 }
 
 #[test]
 fn the_corpus_reports_the_rows_oxlint_reports() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS_OXLINT") else {
+    let Some(held) = corpus::oxlint() else {
         return;
     };
 
-    let held = PathBuf::from(root);
     let found = corpus();
 
     if found.is_empty() {
@@ -884,6 +906,7 @@ fn the_corpus_reports_the_rows_oxlint_reports() {
     }
 
     let carried = oracle::residue_of("residue-javascript-semantic.json", &EVERY_CATEGORY);
+    let mut abstained = 0;
     let mut machine = Machine::reserve();
     let mut differing = Vec::new();
     let mut compared = 0;
@@ -894,7 +917,9 @@ fn the_corpus_reports_the_rows_oxlint_reports() {
         }
 
         let Some((expected, broken)) = golden(&held, &fixture.name) else {
-            panic!("{} has no golden", fixture.name);
+            abstained += 1;
+
+            continue;
         };
 
         if broken {
@@ -914,7 +939,11 @@ fn the_corpus_reports_the_rows_oxlint_reports() {
         compared += 1;
     }
 
-    assert!(compared >= 100, "the corpus lost its JavaScript files");
+    assert!(
+        compared >= floor::CORPUS_SEMANTIC_JAVASCRIPT,
+        "the corpus lost its JavaScript files: {compared} compared, {abstained} abstained, floor {}",
+        floor::CORPUS_SEMANTIC_JAVASCRIPT
+    );
 
     if !differing.is_empty() {
         if let Ok(path) = std::env::var("SCYLLA_REPORT") {
@@ -931,6 +960,53 @@ fn the_corpus_reports_the_rows_oxlint_reports() {
                 .map(|line| line.as_str())
                 .collect::<Vec<&str>>()
                 .join("")
+        );
+    }
+}
+
+#[test]
+fn every_residue_row_names_a_file_that_diverges() {
+    let carried = oracle::residue_of("residue-javascript-semantic.json", &EVERY_CATEGORY);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-oxlint");
+    let mut machine = Machine::reserve();
+    let mut named = Vec::new();
+
+    for fixture in &fixtures() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &root, fixture),
+            "{} matches its golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    let Some(held) = corpus::oxlint() else {
+        return;
+    };
+
+    for fixture in &corpus() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &held, fixture),
+            "{} matches its corpus golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    for name in &carried {
+        assert!(
+            named.contains(name),
+            "the residue names `{name}` and neither the fixtures nor the corpus carry it"
         );
     }
 }

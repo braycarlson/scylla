@@ -440,7 +440,7 @@ fn wrapping_a_body_in_one_block_adds_one_scope_and_moves_no_resolution() {
 }
 
 fn python(source: &[u8]) -> Option<Summary> {
-    use scylla::syntax::python::bind::{self, Tables};
+    use scylla::syntax::python::bind::{self, Outcome as BindOutcome, Tables};
     use scylla::syntax::python::classify::classify;
     use scylla::syntax::python::kind::PythonKind;
     use scylla::syntax::python::parse;
@@ -465,7 +465,7 @@ fn python(source: &[u8]) -> Option<Summary> {
 
     parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
 
-    if !bind::bind(source, tokens.as_slice(), &raw, &tree, &mut tables) {
+    if bind::bind(source, tokens.as_slice(), &raw, &tree, &mut tables) != BindOutcome::Complete {
         return None;
     }
 

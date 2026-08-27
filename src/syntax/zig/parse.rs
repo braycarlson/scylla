@@ -17,7 +17,6 @@ use crate::syntax::{SyntaxError, SyntaxErrorKind};
 use crate::token::Token;
 use crate::tree::{Checkpoint, Events, Structure, Tree, replay};
 
-const CHAIN_DEPTH_MAX: u32 = 4_096;
 const NEST_DEPTH_MAX: u32 = 96;
 const SCAN_STEP_MAX: u32 = 1 << 16;
 const CONTEXT_EXPRESSION: u8 = 1;
@@ -94,6 +93,10 @@ const fn opens_a_container(kind: ZigKind) -> bool {
 impl Parser<'_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<ZigKind> {
@@ -413,7 +416,7 @@ impl Parser<'_> {
     }
 
     fn modifiers(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let held = match self.current() {
                 Some(
                     ZigKind::ComptimeKeyword
@@ -487,7 +490,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(ZigKind::ParenClose) || self.current().is_none() {
@@ -529,7 +532,7 @@ impl Parser<'_> {
     }
 
     fn callable_attributes(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let held = matches!(
                 self.current(),
                 Some(
@@ -559,7 +562,7 @@ impl Parser<'_> {
     }
 
     fn pointer_attributes(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.current() {
                 Some(
                     ZigKind::ConstKeyword | ZigKind::VolatileKeyword | ZigKind::AllowzeroKeyword,
@@ -637,7 +640,7 @@ impl Parser<'_> {
     fn block_of(&mut self, checkpoint: Checkpoint) {
         self.expect(ZigKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(ZigKind::BraceClose) || self.current().is_none() {
@@ -806,7 +809,7 @@ impl Parser<'_> {
     }
 
     fn destructure(&mut self, checkpoint: Checkpoint) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let held = self.anchor();
 
             if self.at(ZigKind::ComptimeKeyword)
@@ -874,7 +877,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let _ = self.eat(ZigKind::Star);
 
             if !self.eat(ZigKind::Identifier) {
@@ -1203,7 +1206,7 @@ impl Parser<'_> {
 
         self.open(ZigKind::MultilineStringLiteral);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(ZigKind::TextLine) {
                 break;
             }
@@ -1270,7 +1273,7 @@ impl Parser<'_> {
         self.bump();
 
         if self.eat(ZigKind::BraceOpen) {
-            for _ in 0..CHAIN_DEPTH_MAX {
+            for _ in 0..self.steps() {
                 self.skip_trivia();
 
                 if self.at(ZigKind::BraceClose) || self.current().is_none() {
@@ -1507,7 +1510,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(ZigKind::ParenClose) || self.current().is_none() {
@@ -1600,7 +1603,7 @@ impl Parser<'_> {
         let _ = self.eat(ZigKind::ParenClose);
         self.expect(ZigKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(ZigKind::BraceClose) || self.current().is_none() {
@@ -1643,7 +1646,7 @@ impl Parser<'_> {
         let _ = self.eat(ZigKind::InlineKeyword);
 
         if !self.eat(ZigKind::ElseKeyword) {
-            for _ in 0..CHAIN_DEPTH_MAX {
+            for _ in 0..self.steps() {
                 let held = self.anchor();
 
                 self.expression();
@@ -1756,7 +1759,7 @@ impl Parser<'_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(ZigKind::BraceClose) || self.current().is_none() {
@@ -1822,7 +1825,7 @@ impl Parser<'_> {
     }
 
     fn assembly_operands(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if !self.at(ZigKind::BracketOpen) && !self.at(ZigKind::Text) {

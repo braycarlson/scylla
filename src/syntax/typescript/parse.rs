@@ -31,7 +31,6 @@ use crate::tree::{Checkpoint, Events, NONE, Structure, Tree, replay};
 
 const BALANCED_SLOT_COUNT: u32 = 1 << 8;
 const BALANCED_STACK_MAX: u32 = 1 << 6;
-const CHAIN_DEPTH_MAX: u32 = 4_096;
 const NEST_DEPTH_MAX: u32 = 128;
 const NONE_POSITION: u32 = u32::MAX;
 const SCAN_STEP_MAX: u32 = 1 << 16;
@@ -174,6 +173,10 @@ const fn group_kind(variant: Variant) -> TypeScriptKind {
 impl Parser<'_, '_> {
     fn count(&self) -> u32 {
         count_of(self.raw.len())
+    }
+
+    fn steps(&self) -> u32 {
+        self.count() + 1
     }
 
     fn kind_at(&self, position: u32) -> Option<TypeScriptKind> {
@@ -1248,7 +1251,7 @@ impl Parser<'_, '_> {
             return;
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(TypeScriptKind::Dot) {
                 return;
             }
@@ -1266,7 +1269,7 @@ impl Parser<'_, '_> {
     }
 
     fn jsx_attributes(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             match self.current() {
                 Some(TypeScriptKind::BraceOpen) => self.jsx_expression(),
                 Some(TypeScriptKind::Identifier) => self.jsx_attribute(),
@@ -1453,6 +1456,8 @@ impl Parser<'_, '_> {
 
         self.frames[group as usize].elements += 1;
         self.frames[group as usize].element = self.anchor();
+
+        self.value_count = self.frames[group as usize].values;
         self.frames[group as usize].element_values = self.value_count;
 
         Step::Operand
@@ -2077,7 +2082,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::FormalParameters);
         self.expect(TypeScriptKind::ParenOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::ParenClose) || self.current().is_none() {
@@ -2157,7 +2162,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::ArrayPattern);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::BracketClose) || self.current().is_none() {
@@ -2185,7 +2190,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::ObjectPattern);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::BraceClose) || self.current().is_none() {
@@ -2451,7 +2456,7 @@ impl Parser<'_, '_> {
         self.open(kind);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.variable_declarator();
@@ -2567,7 +2572,7 @@ impl Parser<'_, '_> {
     }
 
     fn decorators(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(TypeScriptKind::At) {
                 break;
             }
@@ -2614,7 +2619,7 @@ impl Parser<'_, '_> {
 
         self.open(TypeScriptKind::ClassHeritage);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if self.at(TypeScriptKind::ExtendsKeyword) {
                 self.open(TypeScriptKind::ExtendsClause);
                 self.bump();
@@ -2657,7 +2662,7 @@ impl Parser<'_, '_> {
 
         let mut position = self.significant(self.position);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let after = self.significant(position + 1);
 
             if self.kind_at(after) != Some(TypeScriptKind::Dot) {
@@ -2677,7 +2682,7 @@ impl Parser<'_, '_> {
     }
 
     fn type_list(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.type_expression();
@@ -2693,7 +2698,7 @@ impl Parser<'_, '_> {
     }
 
     fn heritage_list(&mut self) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let before = self.position;
 
             self.heritage_item();
@@ -2712,7 +2717,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::ClassBody);
         self.expect(TypeScriptKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::BraceClose) || self.current().is_none() {
@@ -2945,7 +2950,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::SwitchBody);
         self.expect(TypeScriptKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             let Some(kind) = self.current() else {
@@ -2985,7 +2990,7 @@ impl Parser<'_, '_> {
 
         self.expect(TypeScriptKind::Colon, SyntaxErrorKind::ExpectedColon);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             let Some(held) = self.current() else {
@@ -3110,10 +3115,15 @@ impl Parser<'_, '_> {
             self.events.finish();
         } else {
             self.import_clause();
-            let _ = self.eat_word(b"from");
+
+            if !self.eat_word(b"from") {
+                self.record(SyntaxErrorKind::UnexpectedToken);
+            }
 
             if self.at(TypeScriptKind::String) {
                 self.wrap(TypeScriptKind::StringNode);
+            } else {
+                self.record(SyntaxErrorKind::UnexpectedToken);
             }
         }
 
@@ -3203,7 +3213,7 @@ impl Parser<'_, '_> {
         self.open(list);
         self.expect(TypeScriptKind::BraceOpen, SyntaxErrorKind::UnexpectedToken);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::BraceClose) || self.current().is_none() {
@@ -3417,7 +3427,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::EnumBody);
         let _ = self.eat(TypeScriptKind::BraceOpen);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::BraceClose) || self.current().is_none() {
@@ -3587,7 +3597,7 @@ impl Parser<'_, '_> {
             self.events.finish();
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(TypeScriptKind::Bar) {
                 break;
             }
@@ -3611,7 +3621,7 @@ impl Parser<'_, '_> {
             self.events.finish();
         }
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(TypeScriptKind::Ampersand) {
                 break;
             }
@@ -3717,7 +3727,7 @@ impl Parser<'_, '_> {
     }
 
     fn type_trailers(&mut self, checkpoint: Checkpoint) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(TypeScriptKind::BracketOpen) {
                 break;
             }
@@ -3931,7 +3941,7 @@ impl Parser<'_, '_> {
 
         self.wrap(TypeScriptKind::IdentifierNode);
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             if !self.at(TypeScriptKind::Dot) {
                 break;
             }
@@ -3952,7 +3962,7 @@ impl Parser<'_, '_> {
         let mut position = self.significant(self.position);
         let mut count = 1;
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let after = self.significant(position + 1);
 
             if self.kind_at(after) != Some(TypeScriptKind::Dot) {
@@ -3980,7 +3990,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::TypeArguments);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::Greater) || self.current().is_none() {
@@ -4012,7 +4022,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::TypeParameters);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::Greater) || self.current().is_none() {
@@ -4089,7 +4099,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::TupleType);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(TypeScriptKind::BracketClose) || self.current().is_none() {
@@ -4171,7 +4181,7 @@ impl Parser<'_, '_> {
     }
 
     fn signature_list(&mut self, closer: TypeScriptKind) {
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             self.skip_trivia();
 
             if self.at(closer) || self.current().is_none() {
@@ -4360,7 +4370,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::TemplateLiteralType);
         self.bump();
 
-        for _ in 0..CHAIN_DEPTH_MAX {
+        for _ in 0..self.steps() {
             let Some(kind) = self.current() else {
                 break;
             };

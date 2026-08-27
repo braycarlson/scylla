@@ -1,0 +1,105 @@
+[package]
+name = "scylla-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.scylla]
+path = ".."
+features = ["fuzzing"]
+
+[workspace]
+
+[profile.release]
+debug = 1
+overflow-checks = true
+
+[[bin]]
+name = "edits"
+path = "fuzz_targets/edits.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "lex"
+path = "fuzz_targets/lex.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "markup"
+path = "fuzz_targets/markup.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_css"
+path = "fuzz_targets/parse_css.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_go"
+path = "fuzz_targets/parse_go.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_javascript"
+path = "fuzz_targets/parse_javascript.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_odin"
+path = "fuzz_targets/parse_odin.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_python"
+path = "fuzz_targets/parse_python.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_rust"
+path = "fuzz_targets/parse_rust.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_tsx"
+path = "fuzz_targets/parse_tsx.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_typescript"
+path = "fuzz_targets/parse_typescript.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_zig"
+path = "fuzz_targets/parse_zig.rs"
+test = false
+doc = false
+bench = false

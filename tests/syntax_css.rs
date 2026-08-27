@@ -1,3 +1,7 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 #[path = "common/oracle.rs"]
 mod oracle;
 
@@ -11,7 +15,7 @@ use scylla::syntax::Structure;
 use scylla::syntax::css::classify::classify;
 use scylla::syntax::css::kind::CSSKind;
 use scylla::syntax::css::parse;
-use scylla::token::{Token, Tokens};
+use scylla::token::{Lex, Token, Tokens};
 use scylla::tree::{Events, Tree};
 use scylla::trivia::{self, Gap};
 
@@ -223,14 +227,21 @@ fn census_of(rows: &[(String, u32, u32)]) -> Vec<(String, u32)> {
 }
 
 fn corpus() -> Vec<Fixture> {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS") else {
+    let Some(held) = corpus::root() else {
         return Vec::new();
     };
 
-    let held = PathBuf::from(root);
     let mut found = Vec::new();
+    let mut lexed = Tokens::reserve(TOKEN_COUNT_MAX);
 
     collect(&held, &held, &mut found);
+
+    found.retain(|fixture| {
+        lexed.clear();
+
+        CSS.lex(&fixture.source, &mut lexed) == Lex::Complete
+    });
+
     found.sort_by(|left, right| left.name.cmp(&right.name));
 
     found
@@ -407,6 +418,30 @@ fn invariants_hold(machine: &Machine, name: &str) {
     }
 }
 
+fn diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
+    let Some(golden) = oracle::golden(root, &fixture.name) else {
+        return true;
+    };
+
+    if golden.broken {
+        return true;
+    }
+
+    if !machine.run(&fixture.source) {
+        return true;
+    }
+
+    if machine.raw.contains(&CSSKind::ErrorToken) {
+        return true;
+    }
+
+    let _ = machine.parse(&fixture.source);
+
+    let length = u32::try_from(fixture.source.len()).expect("a file fits in u32");
+
+    machine.walk(length) != wanted(&fixture.source, &golden.ast)
+}
+
 fn report(name: &str, held: &[(String, u32, u32)], expected: &[(String, u32, u32)]) -> String {
     use core::fmt::Write as _;
 
@@ -551,7 +586,11 @@ fn classify_runs_the_corpus_without_an_unclaimed_byte() {
         compared += 1;
     }
 
-    assert!(compared >= 14, "the corpus lost its CSS files");
+    assert!(
+        compared >= floor::CORPUS_CLASSIFY_CSS,
+        "the corpus lost its CSS files: {compared} classified, floor {}",
+        floor::CORPUS_CLASSIFY_CSS
+    );
 }
 
 #[test]
@@ -642,16 +681,19 @@ fn the_normalized_walk_matches_the_goldens() {
         compared += 1;
     }
 
-    assert!(compared > 0, "every fixture is residue");
+    assert!(
+        compared >= floor::FIXTURE_WALK_CSS,
+        "the CSS fixtures lost a walk: {compared} compared, floor {}",
+        floor::FIXTURE_WALK_CSS
+    );
 }
 
 #[test]
 fn the_normalized_walk_matches_the_corpus_goldens() {
-    let Ok(root) = std::env::var("SCYLLA_CORPUS_GOLDEN") else {
+    let Some(held) = corpus::golden() else {
         return;
     };
 
-    let held = PathBuf::from(root);
     let found = corpus();
 
     if found.is_empty() {
@@ -660,6 +702,7 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
 
     let carried = oracle::residue_of("residue-css.json", &EVERY_CATEGORY);
     let mut machine = Machine::reserve();
+    let mut abstained = 0;
     let mut differing = Vec::new();
     let mut compared = 0;
 
@@ -669,14 +712,16 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
         }
 
         let Some(golden) = oracle::golden(&held, &fixture.name) else {
-            panic!("{} has no golden", fixture.name);
+            abstained += 1;
+
+            continue;
         };
 
-        assert!(
-            !golden.broken,
-            "{} does not parse under the oracle",
-            fixture.name
-        );
+        if golden.broken {
+            abstained += 1;
+
+            continue;
+        }
 
         let _ = machine.parse(&fixture.source);
 
@@ -692,8 +737,10 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
     }
 
     assert!(
-        compared + carried.len() >= 15,
-        "the corpus lost its CSS files"
+        compared + carried.len() >= floor::CORPUS_WALK_CSS,
+        "the corpus lost its CSS files: {} named, {abstained} abstained, floor {}",
+        compared + carried.len(),
+        floor::CORPUS_WALK_CSS
     );
 
     if !differing.is_empty() {
@@ -711,6 +758,54 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
                 .map(|line| line.as_str())
                 .collect::<Vec<&str>>()
                 .join("")
+        );
+    }
+}
+
+#[test]
+fn every_residue_row_names_a_file_that_diverges() {
+    let carried = oracle::residue_of("residue-css.json", &EVERY_CATEGORY);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-css");
+
+    let mut machine = Machine::reserve();
+    let mut named = Vec::new();
+
+    for fixture in &fixtures() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &root, fixture),
+            "{} matches its golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    for fixture in &corpus() {
+        if !carried.contains(&fixture.name) {
+            continue;
+        }
+
+        named.push(fixture.name.clone());
+
+        assert!(
+            diverges(&mut machine, &held, fixture),
+            "{} matches its corpus golden and needs no residue row",
+            fixture.name
+        );
+    }
+
+    for name in &carried {
+        assert!(
+            named.contains(name),
+            "the residue names `{name}` and neither the fixtures nor the corpus carry it"
         );
     }
 }

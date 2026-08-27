@@ -73,20 +73,47 @@ func kindOf(object types.Object) string {
 func packages(root string) ([]string, map[string][]string) {
 	held := map[string][]string{}
 
-	_ = filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
+	stack := []string{root}
+	seen := map[string]bool{}
+
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		resolved, err := filepath.EvalSymlinks(current)
+
+		if err != nil || seen[resolved] {
+			continue
 		}
 
-		if filepath.Ext(path) != ".go" {
-			return nil
+		seen[resolved] = true
+		entries, err := os.ReadDir(current)
+
+		if err != nil {
+			continue
 		}
 
-		directory := filepath.Dir(path)
-		held[directory] = append(held[directory], path)
+		for _, entry := range entries {
+			path := filepath.Join(current, entry.Name())
+			info, err := os.Stat(path)
 
-		return nil
-	})
+			if err != nil {
+				continue
+			}
+
+			if info.IsDir() {
+				stack = append(stack, path)
+
+				continue
+			}
+
+			if filepath.Ext(path) != ".go" {
+				continue
+			}
+
+			held[filepath.Dir(path)] = append(held[filepath.Dir(path)], path)
+		}
+	}
 
 	names := []string{}
 

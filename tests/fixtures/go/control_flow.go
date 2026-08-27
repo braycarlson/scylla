@@ -74,3 +74,55 @@ func run(value int) int {
 done:
 	return value
 }
+
+func headers(names map[string]int) int {
+	count := 0
+
+	if held := []string{}; len(held) == 0 {
+		count++
+	}
+
+	named := []string{}
+
+	if named = []string{"one"}; len(named) == 1 {
+		count++
+	}
+
+	if held := map[string]int{}; len(held) == 0 {
+		count++
+	}
+
+	if held := [2]int{1, 2}; held[0] == 1 {
+		count++
+	}
+
+	for _, held := range []pair{{left: 1}} {
+		count += held.left
+	}
+
+	switch held := []int{3}; len(held) {
+	case 1:
+		count++
+	}
+
+	return count
+}
+
+func typed(values []*pair) []string {
+	var named []string
+	var pairs []*pair
+
+	for _, held := range values {
+		pairs = append(pairs, held)
+	}
+
+	for range pairs {
+		named = append(named, "held")
+	}
+
+	return named
+}
+
+type pair struct {
+	left int
+}

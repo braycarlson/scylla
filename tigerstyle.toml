@@ -1,5 +1,5 @@
 include = ["benches/**/*.rs", "src/**/*.rs", "tests/**/*.rs"]
-extend_exclude = ["tests/fixtures/**", "tools/**"]
+extend_exclude = ["corpus/**", "fuzz/**", "tests/fixtures/**", "tools/**"]
 line-length-max = 100
 select = ["ALL"]
 

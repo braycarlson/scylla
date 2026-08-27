@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -73,24 +72,47 @@ func walk(fset *token.FileSet, file *ast.File, length int) []row {
 
 func sources(root string) []string {
 	found := []string{}
+	stack := []string{root}
+	seen := map[string]bool{}
 
-	filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+	for len(stack) > 0 {
+		current := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		resolved, err := filepath.EvalSymlinks(current)
+
+		if err != nil || seen[resolved] {
+			continue
+		}
+
+		seen[resolved] = true
+		entries, err := os.ReadDir(current)
+
 		if err != nil {
-			return nil
+			continue
 		}
 
-		if entry.IsDir() {
-			return nil
+		for _, entry := range entries {
+			path := filepath.Join(current, entry.Name())
+			info, err := os.Stat(path)
+
+			if err != nil {
+				continue
+			}
+
+			if info.IsDir() {
+				stack = append(stack, path)
+
+				continue
+			}
+
+			if filepath.Ext(path) != ".go" {
+				continue
+			}
+
+			found = append(found, path)
 		}
-
-		if filepath.Ext(path) != ".go" {
-			return nil
-		}
-
-		found = append(found, path)
-
-		return nil
-	})
+	}
 
 	sort.Strings(found)
 

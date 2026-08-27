@@ -1,6 +1,5 @@
 use crate::syntax::css::kind::CSSKind;
 
-pub const CHAIN_DEPTH_MAX: u32 = 4_096;
 pub const ESCAPE_DIGIT_MAX: usize = 6;
 pub const HEX_WIDTH_MAX: usize = 8;
 pub const HEX_WIDTH_MIN: usize = 3;
