@@ -1,9 +1,10 @@
 use crate::bounded::BoundedVec;
+use crate::lex::javascript_token_at as typescript_token_at;
 use crate::syntax::typescript::dialect::Dialect;
 use crate::syntax::typescript::jsx;
 use crate::syntax::typescript::kind::TypeScriptKind;
 use crate::syntax::typescript::template;
-use crate::token::{Token, TokenKind, Tokens};
+use crate::token::{Punctuation, Token, TokenKind, Tokens, operator_limit_of};
 
 #[cfg(test)]
 const KEYWORDS: [(&[u8], TypeScriptKind); 42] = [
@@ -148,10 +149,21 @@ pub fn classify(
             previous = Some(TypeScriptKind::JsxTagEnd);
             position = past(tokens, position + 1, stop);
 
+            if position < tokens.len() && (tokens[position].offset as usize) < stop {
+                let Some(held) = resume(source, tokens, position, stop, out, raw, &mut previous)
+                else {
+                    return false;
+                };
+
+                position = held;
+            }
+
             continue;
         }
 
-        let Some(stop) = split(source, token, out, raw, &mut previous) else {
+        let limit = operator_limit_of(tokens, position, token.end());
+
+        let Some(stop) = split(source, token, limit, out, raw, &mut previous) else {
             return false;
         };
 
@@ -159,6 +171,98 @@ pub fn classify(
     }
 
     true
+}
+
+fn resume(
+    source: &[u8],
+    tokens: &[Token],
+    from: usize,
+    stop: usize,
+    out: &mut Tokens,
+    raw: &mut BoundedVec<TypeScriptKind>,
+    previous: &mut Option<TypeScriptKind>,
+) -> Option<usize> {
+    let mut coarse = TokenKind::Punctuation(Punctuation::Greater);
+    let mut cursor = stop;
+    let mut position = from;
+
+    for _ in 0..source.len() {
+        while cursor < source.len() && source[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        if cursor >= source.len() {
+            return Some(tokens.len());
+        }
+
+        while position < tokens.len() && (tokens[position].offset as usize) < cursor {
+            position += 1;
+        }
+
+        if position < tokens.len() && tokens[position].offset as usize == cursor {
+            return Some(position);
+        }
+
+        if jsx::opens_at(*previous, source, cursor) {
+            let held = jsx::expand(source, cursor, out, raw)?;
+
+            *previous = Some(TypeScriptKind::JsxTagEnd);
+            coarse = TokenKind::Punctuation(Punctuation::Greater);
+            cursor = held;
+
+            continue;
+        }
+
+        let (kind, reach) = typescript_token_at(source, cursor, coarse);
+
+        let token = Token {
+            kind,
+            length: u32::try_from(reach - cursor).ok()?,
+            offset: u32::try_from(cursor).ok()?,
+        };
+
+        if kind == TokenKind::String && source.get(cursor) == Some(&b'`') {
+            if !template::expand(source, token.span(), out, raw) {
+                return None;
+            }
+
+            *previous = Some(TypeScriptKind::TemplateEnd);
+            coarse = kind;
+            cursor = reach;
+
+            continue;
+        }
+
+        let limit = operator_reach(source, reach, kind);
+        let held = split(source, token, u32::try_from(limit).ok()?, out, raw, previous)?;
+
+        coarse = kind;
+        cursor = held.max(reach);
+    }
+
+    Some(tokens.len())
+}
+
+fn operator_reach(source: &[u8], from: usize, coarse: TokenKind) -> usize {
+    let mut previous = coarse;
+    let mut reach = from;
+
+    for _ in 0..source.len() {
+        if reach >= source.len() || source[reach].is_ascii_whitespace() {
+            break;
+        }
+
+        let (kind, stop) = typescript_token_at(source, reach, previous);
+
+        if stop <= reach || !matches!(kind, TokenKind::Number | TokenKind::Punctuation(_)) {
+            break;
+        }
+
+        previous = kind;
+        reach = stop;
+    }
+
+    reach
 }
 
 fn past(tokens: &[Token], from: usize, stop: usize) -> usize {
@@ -174,6 +278,7 @@ fn past(tokens: &[Token], from: usize, stop: usize) -> usize {
 fn split(
     source: &[u8],
     token: Token,
+    limit: u32,
     out: &mut Tokens,
     raw: &mut BoundedVec<TypeScriptKind>,
     previous: &mut Option<TypeScriptKind>,
@@ -184,7 +289,7 @@ fn split(
     let mut stop = offset;
 
     for _ in 0..=(end - offset) {
-        let (kind, reach) = kind_of(source, token.kind, cursor, end);
+        let (kind, reach) = kind_of(&source[..limit as usize], token.kind, cursor, end);
 
         if !push(source, out, raw, token.kind, kind, cursor, reach) {
             return None;

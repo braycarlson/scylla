@@ -59,6 +59,7 @@ struct Frame {
     kind: Kind,
     magic: bool,
     magic_source: bool,
+    trailed: bool,
 }
 
 #[derive(Debug)]
@@ -187,6 +188,26 @@ const fn is_close(kind: Kind) -> bool {
     matches!(
         kind,
         Kind::BraceClose | Kind::BracketClose | Kind::ParenClose
+    )
+}
+
+const fn opens_suite(kind: Option<Kind>) -> bool {
+    matches!(
+        kind,
+        Some(
+            Kind::AsyncKeyword
+                | Kind::ClassKeyword
+                | Kind::DefKeyword
+                | Kind::ElifKeyword
+                | Kind::ElseKeyword
+                | Kind::ExceptKeyword
+                | Kind::FinallyKeyword
+                | Kind::ForKeyword
+                | Kind::IfKeyword
+                | Kind::TryKeyword
+                | Kind::WhileKeyword
+                | Kind::WithKeyword
+        )
     )
 }
 
@@ -554,6 +575,7 @@ impl Formatter {
                 kind: Kind::ParenOpen,
                 magic: false,
                 magic_source: false,
+                trailed: false,
             }; BRACKET_DEPTH_MAX as usize],
             indent: 0,
             indent_width: input.options.indent_width,
@@ -756,22 +778,31 @@ impl Emitter<'_> {
 
         let comma = self.document.literal_span(self.literals.0);
 
+        let started = self.starting;
+
         let separator = if held.magic {
             Element::HardLine
         } else {
             Element::SoftLine
         };
 
-        let listed = held.commas || (held.call && held.kind == Kind::ParenOpen);
+        let listed = !started
+            && !held.trailed
+            && (held.commas || (held.call && held.kind == Kind::ParenOpen));
 
         if listed && !self.document.push(Element::IfBroken(comma)) {
             return false;
         }
 
-        self.document.push(Element::Dedent)
-            && self.document.push(separator)
-            && self.text(position, false)
-            && self.document.push(Element::GroupClose)
+        if !self.document.push(Element::Dedent) {
+            return false;
+        }
+
+        if !started && !self.document.push(separator) {
+            return false;
+        }
+
+        self.text(position, false) && self.document.push(Element::GroupClose)
     }
 
     const fn frame(&self) -> Frame {
@@ -783,6 +814,7 @@ impl Emitter<'_> {
                 kind: Kind::ParenOpen,
                 magic: false,
                 magic_source: false,
+                trailed: false,
             };
         }
 
@@ -976,6 +1008,13 @@ impl Emitter<'_> {
 
         while scan <= end && scan < count_of(self.tokens.len()) {
             let kind = self.raw[scan as usize];
+
+            if scan == self.skip {
+                self.skip = NONE;
+                scan += 1;
+
+                continue;
+            }
 
             if kind == Kind::Indent {
                 self.line_first = Some(self.line_opener(scan));
@@ -1214,6 +1253,7 @@ impl Emitter<'_> {
             kind,
             magic,
             magic_source,
+            trailed: false,
         };
 
         self.depth += 1;
@@ -1366,9 +1406,13 @@ impl Emitter<'_> {
         self.frames[self.depth as usize - 1].commas = true;
 
         if self.trails(position) {
-            if held.magic || (!self.magic_trailing_comma && held.magic_source) {
+            let commented = self.commented(position);
+
+            if !commented && (held.magic || (!self.magic_trailing_comma && held.magic_source)) {
                 return true;
             }
+
+            self.frames[self.depth as usize - 1].trailed = true;
 
             return self.text(position, false);
         }
@@ -1784,7 +1828,7 @@ impl Emitter<'_> {
         if kind == Kind::Semicolon {
             let held = self.text(position, false);
 
-            self.pending_break = true;
+            self.pending_break = !opens_suite(self.line_first);
 
             return held;
         }
@@ -1824,8 +1868,33 @@ impl Emitter<'_> {
         self.wrap(position)
     }
 
+    fn commented(&self, position: u32) -> bool {
+        let count = count_of(self.tokens.len());
+        let from = self.tokens[position as usize].end() as usize;
+        let mut scan = position + 1;
+
+        while scan < count {
+            let kind = self.raw[scan as usize];
+
+            if kind == Kind::Comment {
+                let to = self.tokens[scan as usize].offset as usize;
+
+                return !self.source[from..to].contains(&b'\n');
+            }
+
+            if !is_layout(kind) {
+                return false;
+            }
+
+            scan += 1;
+        }
+
+        false
+    }
+
     fn trails(&self, position: u32) -> bool {
         let count = count_of(self.tokens.len());
+        let riding = self.commented(position);
         let mut scan = position + 1;
 
         while scan < count {
@@ -1834,6 +1903,10 @@ impl Emitter<'_> {
             scan += 1;
 
             if is_layout(kind) {
+                continue;
+            }
+
+            if kind == Kind::Comment && riding {
                 continue;
             }
 

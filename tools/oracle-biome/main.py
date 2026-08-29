@@ -4,14 +4,11 @@ import subprocess
 import sys
 import tempfile
 
-
 PACKAGE = "@biomejs/biome"
-
 
 def pin(root):
     with open(os.path.join(root, "PIN"), encoding="utf-8") as held:
         return held.read().strip()
-
 
 def sources(root, extension):
     found = []
@@ -27,7 +24,6 @@ def sources(root, extension):
     found.sort()
 
     return found
-
 
 def main():
     if len(sys.argv) != 4:
@@ -89,7 +85,6 @@ def main():
     print(f"wrote {written} files for biome {version}")
 
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

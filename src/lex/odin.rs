@@ -294,7 +294,9 @@ fn ends_statement(kind: TokenKind, text: &[u8]) -> bool {
                     | b"typeid"
             )
         }
-        TokenKind::Punctuation(_) => matches!(text, b")" | b"]" | b"^" | b"?" | b"---"),
+        TokenKind::Punctuation(_) => {
+            matches!(text, b")" | b"]" | b"^" | b"?" | b"---" | b"++" | b"--")
+        }
         TokenKind::Comment | TokenKind::BlockStart | TokenKind::Newline => false,
     }
 }
@@ -486,7 +488,7 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
     if byte.is_ascii_digit() || leads {
         return (
             TokenKind::Number,
-            number_scan_bounded(source, offset, Numbers::ONE_SIDED),
+            number_scan_bounded(source, offset, Numbers::RANGED),
         );
     }
 

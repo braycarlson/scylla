@@ -1,6 +1,8 @@
 use crate::bounded::{Buffer, Bytes as _, count_of};
 
 pub const PADDING_MAX: u32 = 128;
+const BLOCK_CLOSE: &[u8] = b"*/";
+const BLOCK_OPEN: &[u8] = b"/*";
 const COMMENT: &[u8] = b"//";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13,6 +15,57 @@ pub enum Target {
 struct Cut {
     head: u32,
     tail: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Quotes {
+    backtick: bool,
+    double: bool,
+    single: bool,
+    skip: bool,
+}
+
+impl Quotes {
+    const NONE: Self = Self {
+        backtick: false,
+        double: false,
+        single: false,
+        skip: false,
+    };
+
+    const fn inside(self) -> bool {
+        self.backtick || self.double || self.single
+    }
+
+    fn opens(&mut self, byte: u8) {
+        match byte {
+            b'"' => self.double = true,
+            b'\'' => self.single = true,
+            b'`' => self.backtick = true,
+            _ => (),
+        }
+    }
+
+    fn step(&mut self, byte: u8) {
+        if self.skip {
+            self.skip = false;
+
+            return;
+        }
+
+        if self.double && byte == b'\\' {
+            self.skip = true;
+
+            return;
+        }
+
+        match byte {
+            b'"' if !self.single && !self.backtick => self.double = !self.double,
+            b'\'' if !self.double && !self.backtick => self.single = !self.single,
+            b'`' if !self.double && !self.single => self.backtick = !self.backtick,
+            _ => (),
+        }
+    }
 }
 
 fn indent_of(line: &[u8]) -> u32 {
@@ -66,37 +119,59 @@ fn crosses(line: &[u8], inside: bool) -> bool {
     held
 }
 
+fn cuts_at(line: &[u8], target: Target, held: usize, indent: usize) -> bool {
+    match target {
+        Target::Assign => {
+            line[held] == b'='
+                && held > indent
+                && line[held - 1] == b' '
+                && line.get(held + 1) != Some(&b'=')
+                && line.get(held.wrapping_sub(2)) != Some(&b'=')
+                && line.get(held.wrapping_sub(2)) != Some(&b'!')
+                && line.get(held.wrapping_sub(2)) != Some(&b'<')
+                && line.get(held.wrapping_sub(2)) != Some(&b'>')
+                && line.get(held.wrapping_sub(2)) != Some(&b':')
+        }
+        Target::Comment => line[held..].starts_with(COMMENT) && held > indent,
+    }
+}
+
 fn cut_of(line: &[u8], target: Target) -> Option<Cut> {
     let indent = indent_of(line) as usize;
-    let mut backtick = false;
-    let mut double = false;
+    let mut block = false;
     let mut held = indent;
-    let mut single = false;
-    let mut skip = false;
+    let mut quotes = Quotes::NONE;
 
     while held < line.len() {
         let byte = line[held];
 
-        if skip {
-            skip = false;
+        if block {
+            if line[held..].starts_with(BLOCK_CLOSE) {
+                block = false;
+                held += BLOCK_CLOSE.len();
+
+                continue;
+            }
+
             held += 1;
 
             continue;
         }
 
-        if backtick || double || single {
-            if double && byte == b'\\' {
-                skip = true;
-            } else {
-                match byte {
-                    b'"' if !single && !backtick => double = !double,
-                    b'\'' if !double && !backtick => single = !single,
-                    b'`' if !double && !single => backtick = !backtick,
-                    _ => (),
-                }
+        if quotes.inside() {
+            quotes.step(byte);
+            held += 1;
+
+            continue;
+        }
+
+        if line[held..].starts_with(BLOCK_OPEN) {
+            if target == Target::Assign || held == indent {
+                return None;
             }
 
-            held += 1;
+            block = true;
+            held += BLOCK_OPEN.len();
 
             continue;
         }
@@ -107,29 +182,8 @@ fn cut_of(line: &[u8], target: Target) -> Option<Cut> {
             }
         }
 
-        let found = match target {
-            Target::Assign => {
-                line[held] == b'='
-                    && held > indent
-                    && line[held - 1] == b' '
-                    && line.get(held + 1) != Some(&b'=')
-                    && line.get(held.wrapping_sub(2)) != Some(&b'=')
-                    && line.get(held.wrapping_sub(2)) != Some(&b'!')
-                    && line.get(held.wrapping_sub(2)) != Some(&b'<')
-                    && line.get(held.wrapping_sub(2)) != Some(&b'>')
-                    && line.get(held.wrapping_sub(2)) != Some(&b':')
-            }
-            Target::Comment => line[held..].starts_with(COMMENT) && held > indent,
-        };
-
-        if !found {
-            match byte {
-                b'"' => double = true,
-                b'\'' => single = true,
-                b'`' => backtick = true,
-                _ => (),
-            }
-
+        if !cuts_at(line, target, held, indent) {
+            quotes.opens(byte);
             held += 1;
 
             continue;

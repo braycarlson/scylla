@@ -26,6 +26,7 @@ pub enum Feature {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CheckKind {
     AwaitOutsideAsync,
+    AwaitOutsideFunction,
     DuplicateParameter,
     ExceptNotLast,
     FutureImportLate,
@@ -133,13 +134,13 @@ impl CheckKind {
     pub const fn code(self) -> &'static str {
         match self {
             Self::AwaitOutsideAsync => "PLE1142",
+            Self::AwaitOutsideFunction | Self::YieldOutsideFunction => "F704",
             Self::ExceptNotLast => "F707",
             Self::FutureImportLate => "F404",
             Self::GlobalAfterUse => "PLE0118",
             Self::NonlocalWithoutBinding => "PLE0117",
             Self::ReturnOutsideFunction => "F706",
             Self::StarredMultiple => "F622",
-            Self::YieldOutsideFunction => "F704",
             Self::DuplicateParameter
             | Self::IrrefutableCaseNotLast
             | Self::NonlocalAtModule
@@ -155,6 +156,7 @@ impl CheckKind {
     pub const fn message(self) -> &'static str {
         match self {
             Self::AwaitOutsideAsync => "`await` should be used within an async function",
+            Self::AwaitOutsideFunction => "`await` statement outside of a function",
             Self::DuplicateParameter => "Duplicate parameter",
             Self::ExceptNotLast => "An `except` block as not the last exception handler",
             Self::FutureImportLate => {
@@ -273,8 +275,15 @@ impl<'run> Checker<'run> {
             return;
         }
 
-        if kind != PythonKind::Await {
+        if !matches!(
+            kind,
+            PythonKind::AsyncFor | PythonKind::AsyncWith | PythonKind::Await
+        ) {
             return;
+        }
+
+        if kind == PythonKind::Await {
+            self.flow_report(node, CheckKind::AwaitOutsideFunction);
         }
 
         let held = self.enclosing();
@@ -1841,6 +1850,7 @@ mod tests {
     fn every_kind_carries_a_code_and_a_message() {
         let kinds = [
             CheckKind::AwaitOutsideAsync,
+            CheckKind::AwaitOutsideFunction,
             CheckKind::DuplicateParameter,
             CheckKind::ExceptNotLast,
             CheckKind::FutureImportLate,

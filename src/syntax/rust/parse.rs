@@ -474,13 +474,23 @@ impl Parser<'_, '_> {
     }
 
     fn meta(&mut self, limit: u32) {
-        if !opens_a_path(self.current().unwrap_or(RustKind::ErrorToken)) {
+        let held = self.current().unwrap_or(RustKind::ErrorToken);
+
+        if !opens_a_path(held) && held != RustKind::UnsafeKeyword {
             return;
         }
 
         let checkpoint = self.anchor();
 
-        self.path(true);
+        if held == RustKind::UnsafeKeyword {
+            self.open(RustKind::Path);
+            self.open(RustKind::PathSegment);
+            self.wrap(RustKind::Ident);
+            self.events.finish();
+            self.events.finish();
+        } else {
+            self.path(true);
+        }
 
         if self.at(RustKind::Equal) {
             self.events.start_at(checkpoint, RustKind::MetaNameValue);
@@ -1002,7 +1012,11 @@ impl Parser<'_, '_> {
         self.bump();
         self.generics();
         let _ = self.eat(RustKind::ConstKeyword);
-        let _ = self.eat(RustKind::Bang);
+
+        if self.at(RustKind::Bang) && opens_a_path(self.ahead(1).unwrap_or(RustKind::ErrorToken)) {
+            self.bump();
+        }
+
         let path = self.trait_ahead();
 
         if path {
@@ -1382,6 +1396,10 @@ impl Parser<'_, '_> {
     }
 
     fn signature(&mut self) {
+        if self.word(b"default") {
+            self.bump();
+        }
+
         self.open(RustKind::Signature);
 
         for _ in 0..8 {
@@ -1392,7 +1410,7 @@ impl Parser<'_, '_> {
                 continue;
             }
 
-            if self.word(b"default") || self.word(b"safe") {
+            if self.word(b"safe") {
                 self.bump();
 
                 continue;
@@ -1811,7 +1829,22 @@ impl Parser<'_, '_> {
             } else if self.at(RustKind::UseKeyword) && self.ahead(1) == Some(RustKind::Less) {
                 self.precise_capture();
             } else if self.at(RustKind::ParenOpen) {
-                self.skip_group();
+                let checkpoint = self.anchor();
+                let end = self.balanced_end(self.significant(self.position));
+
+                self.bump();
+                self.bound_lifetimes();
+
+                if opens_a_path(self.current().unwrap_or(RustKind::ErrorToken)) {
+                    self.path(false);
+                }
+
+                while self.position < end && self.position < self.count() {
+                    self.emit();
+                }
+
+                self.events.start_at(checkpoint, RustKind::TraitBound);
+                self.events.finish();
             } else {
                 let checkpoint = self.anchor();
                 let _ = self.eat(RustKind::Question);
@@ -2022,24 +2055,36 @@ impl Parser<'_, '_> {
 
         self.attributes();
 
-        if self.at(RustKind::DotDotDot) {
-            self.events.start_at(checkpoint, RustKind::BareVariadic);
-            self.bump();
-            self.events.finish();
+        let held = self.current().unwrap_or(RustKind::ErrorToken);
 
-            return;
+        let names = (is_name(held) || held == RustKind::Underscore)
+            && self.ahead(1) == Some(RustKind::Colon);
+
+        let variadic = if names {
+            self.ahead(2) == Some(RustKind::DotDotDot)
+        } else {
+            held == RustKind::DotDotDot
+        };
+
+        let kind = if variadic {
+            RustKind::BareVariadic
+        } else {
+            RustKind::BareFnArg
+        };
+
+        self.events.start_at(checkpoint, kind);
+
+        if names {
+            self.wrap(RustKind::Ident);
+            self.bump();
         }
 
-        self.events.start_at(checkpoint, RustKind::BareFnArg);
-
-        if is_name(self.current().unwrap_or(RustKind::ErrorToken))
-            && self.ahead(1) == Some(RustKind::Colon)
-        {
-            self.identifier();
+        if variadic {
             self.bump();
+        } else {
+            self.type_of();
         }
 
-        self.type_of();
         self.events.finish();
     }
 
@@ -2161,6 +2206,7 @@ impl Parser<'_, '_> {
     }
 
     fn path_segments(&mut self, expression: bool, qualified: bool) {
+        let mut closing = qualified;
         let mut typed = qualified;
 
         for _ in 0..self.steps() {
@@ -2197,7 +2243,8 @@ impl Parser<'_, '_> {
 
             self.events.finish();
 
-            if qualified && self.at(RustKind::Greater) {
+            if closing && self.at(RustKind::Greater) {
+                closing = false;
                 typed = false;
 
                 self.bump();
@@ -2284,13 +2331,24 @@ impl Parser<'_, '_> {
             return;
         }
 
+        let behind = if self.ahead(1) == Some(RustKind::Less) {
+            self.kind_at(self.balanced_generic(self.ahead_position(1)))
+        } else {
+            self.ahead(1)
+        };
+
         if is_name(self.current().unwrap_or(RustKind::ErrorToken))
-            && matches!(self.ahead(1), Some(RustKind::Equal | RustKind::Colon))
+            && matches!(behind, Some(RustKind::Equal | RustKind::Colon))
         {
             let checkpoint = self.anchor();
-            let associated = self.ahead(1) == Some(RustKind::Equal);
+            let associated = behind == Some(RustKind::Equal);
 
             self.identifier();
+
+            if self.at(RustKind::Less) {
+                self.generic_arguments();
+            }
+
             self.bump();
 
             if !associated {
@@ -2398,7 +2456,7 @@ impl Parser<'_, '_> {
         match held {
             None => {}
             Some(RustKind::Underscore) => self.wrap(RustKind::PatWild),
-            Some(RustKind::DotDot) => self.wrap(RustKind::PatRest),
+            Some(RustKind::DotDot | RustKind::DotDotEqual) => self.pattern_rest(),
             Some(RustKind::Ampersand) => {
                 self.open(RustKind::PatReference);
                 self.bump();
@@ -2559,6 +2617,23 @@ impl Parser<'_, '_> {
         self.events.finish();
     }
 
+    fn pattern_rest(&mut self) {
+        let checkpoint = self.anchor();
+        let behind = self.ahead(1).unwrap_or(RustKind::ErrorToken);
+
+        if self.at(RustKind::DotDot)
+            && !is_literal(behind)
+            && !opens_a_path(behind)
+            && behind != RustKind::Minus
+        {
+            self.wrap(RustKind::PatRest);
+
+            return;
+        }
+
+        self.pattern_range(checkpoint);
+    }
+
     fn pattern_path(&mut self) {
         let checkpoint = self.anchor();
 
@@ -2566,7 +2641,8 @@ impl Parser<'_, '_> {
             && !matches!(
                 self.ahead(1),
                 Some(
-                    RustKind::BraceOpen
+                    RustKind::Bang
+                        | RustKind::BraceOpen
                         | RustKind::ColonColon
                         | RustKind::DotDot
                         | RustKind::DotDotEqual
@@ -3642,6 +3718,8 @@ impl Parser<'_, '_> {
                     | RustKind::BracketOpen
                     | RustKind::BreakKeyword
                     | RustKind::ContinueKeyword
+                    | RustKind::DotDot
+                    | RustKind::DotDotEqual
                     | RustKind::Less
                     | RustKind::Minus
                     | RustKind::MoveKeyword
@@ -3988,6 +4066,7 @@ impl Parser<'_, '_> {
         }
 
         if kind == RustKind::Semicolon && frame.variant == Variant::Array {
+            self.reduce_above(group + 1);
             self.frames[group as usize].stage = 1;
             self.bump();
 

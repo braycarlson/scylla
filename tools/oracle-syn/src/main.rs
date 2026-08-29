@@ -8,6 +8,7 @@ struct Walker {
     columns: Vec<Vec<usize>>,
     length: usize,
     rows: Vec<(&'static str, usize, usize)>,
+    verbatim: bool,
 }
 
 impl Walker {
@@ -45,6 +46,54 @@ macro_rules! record {
 }
 
 impl<'ast> Visit<'ast> for Walker {
+    fn visit_expr(&mut self, node: &'ast syn::Expr) {
+        self.verbatim |= matches!(node, syn::Expr::Verbatim(_));
+
+        syn::visit::visit_expr(self, node);
+    }
+
+    fn visit_foreign_item(&mut self, node: &'ast syn::ForeignItem) {
+        self.verbatim |= matches!(node, syn::ForeignItem::Verbatim(_));
+
+        syn::visit::visit_foreign_item(self, node);
+    }
+
+    fn visit_impl_item(&mut self, node: &'ast syn::ImplItem) {
+        self.verbatim |= matches!(node, syn::ImplItem::Verbatim(_));
+
+        syn::visit::visit_impl_item(self, node);
+    }
+
+    fn visit_item(&mut self, node: &'ast syn::Item) {
+        self.verbatim |= matches!(node, syn::Item::Verbatim(_));
+
+        syn::visit::visit_item(self, node);
+    }
+
+    fn visit_pat(&mut self, node: &'ast syn::Pat) {
+        self.verbatim |= matches!(node, syn::Pat::Verbatim(_));
+
+        syn::visit::visit_pat(self, node);
+    }
+
+    fn visit_trait_item(&mut self, node: &'ast syn::TraitItem) {
+        self.verbatim |= matches!(node, syn::TraitItem::Verbatim(_));
+
+        syn::visit::visit_trait_item(self, node);
+    }
+
+    fn visit_type(&mut self, node: &'ast syn::Type) {
+        self.verbatim |= matches!(node, syn::Type::Verbatim(_));
+
+        syn::visit::visit_type(self, node);
+    }
+
+    fn visit_type_param_bound(&mut self, node: &'ast syn::TypeParamBound) {
+        self.verbatim |= matches!(node, syn::TypeParamBound::Verbatim(_));
+
+        syn::visit::visit_type_param_bound(self, node);
+    }
+
     fn visit_ident(&mut self, node: &'ast proc_macro2::Ident) {
         self.push("Ident", node.span());
     }
@@ -331,6 +380,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             columns: char_columns(&text, &starts),
             length: text.len(),
             rows: Vec::new(),
+            verbatim: false,
         };
 
         walker.visit_file(&parsed);
@@ -344,7 +394,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         body.push_str(&format!(
-            "],\"broken\":false,\"path\":\"{}\"}}\n",
+            "],\"broken\":{},\"path\":\"{}\"}}\n",
+            walker.verbatim,
             escape(&relative)
         ));
 

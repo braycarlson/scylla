@@ -4,14 +4,13 @@ use crate::syntax::typescript::expression::{
     EXPRESSION_DEPTH_MAX,
     Frame,
     POWER_ARROW,
+    POWER_ASSIGN_RIGHT,
     POWER_BARRIER,
-    POWER_NULLISH_LEFT,
     POWER_RELATIONAL_LEFT,
     POWER_SHIFT_LEFT,
     POWER_SHIFT_RIGHT,
     POWER_SPREAD,
     POWER_TERNARY_LEFT,
-    POWER_TERNARY_RIGHT,
     POWER_UNARY,
     POWER_YIELD,
     VALUE_COUNT_MAX,
@@ -34,7 +33,6 @@ const BALANCED_STACK_MAX: u32 = 1 << 6;
 const NEST_DEPTH_MAX: u32 = 128;
 const NONE_POSITION: u32 = u32::MAX;
 const SCAN_STEP_MAX: u32 = 1 << 16;
-const SEGMENT_MAX_BARE: u32 = 2;
 const TYPE_MODIFIER_MAX: u32 = 3;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,7 +54,7 @@ struct Parser<'source, 'run> {
     plain_failure: core::cell::Cell<u32>,
     position: u32,
     raw: &'run [TypeScriptKind],
-    segment_max: u32,
+    returning: bool,
     significant_next: u32,
     source: &'source [u8],
     tokens: &'run [Token],
@@ -115,6 +113,7 @@ const fn is_type_token(kind: TypeScriptKind) -> bool {
             | TypeScriptKind::ExtendsKeyword
             | TypeScriptKind::FalseKeyword
             | TypeScriptKind::Identifier
+            | TypeScriptKind::ImportKeyword
             | TypeScriptKind::Minus
             | TypeScriptKind::NewKeyword
             | TypeScriptKind::NullKeyword
@@ -407,6 +406,53 @@ impl Parser<'_, '_> {
         position
     }
 
+    fn arrow_follows(&mut self, from: u32) -> bool {
+        let end = self.balanced_end(from);
+        let after = self.significant(end);
+
+        if self.kind_at(after) != Some(TypeScriptKind::Arrow) {
+            return false;
+        }
+
+        let mut depth = 0_u32;
+
+        for position in after + 1..(after + 1).saturating_add(SCAN_STEP_MAX) {
+            let Some(kind) = self.kind_at(position) else {
+                return false;
+            };
+
+            if is_opener(kind) {
+                depth += 1;
+
+                continue;
+            }
+
+            if is_closer(kind) {
+                if depth == 0 {
+                    return false;
+                }
+
+                depth -= 1;
+
+                continue;
+            }
+
+            if depth > 0 {
+                continue;
+            }
+
+            if kind == TypeScriptKind::Arrow {
+                return true;
+            }
+
+            if matches!(kind, TypeScriptKind::Comma | TypeScriptKind::Semicolon) {
+                return false;
+            }
+        }
+
+        false
+    }
+
     fn arrow_ahead(&mut self, from: u32) -> bool {
         let end = self.balanced_end(from);
         let after = self.significant(end);
@@ -419,7 +465,43 @@ impl Parser<'_, '_> {
             return false;
         }
 
-        self.arrow_after_type(after)
+        if self.behind(from) == Some(TypeScriptKind::Arrow) && self.in_a_branch() {
+            return false;
+        }
+
+        self.parameters_here(from) && self.arrow_after_type(after)
+    }
+
+    fn in_a_branch(&self) -> bool {
+        let mut index = self.frame_count;
+
+        while index > 0 {
+            index -= 1;
+
+            let frame = self.frames[index as usize];
+
+            if frame.variant == Variant::Ternary && frame.stage == 0 {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn parameters_here(&self, from: u32) -> bool {
+        let held = self.significant(from + 1);
+
+        match self.kind_at(held) {
+            None => false,
+            Some(
+                TypeScriptKind::BraceOpen
+                | TypeScriptKind::BracketOpen
+                | TypeScriptKind::DotDotDot
+                | TypeScriptKind::ParenClose
+                | TypeScriptKind::ThisKeyword,
+            ) => true,
+            Some(kind) => is_name(kind),
+        }
     }
 
     fn arrow_after_type(&self, from: u32) -> bool {
@@ -942,6 +1024,7 @@ impl Parser<'_, '_> {
                     | TypeScriptKind::FunctionKeyword
                     | TypeScriptKind::ImportKeyword
                     | TypeScriptKind::JsxTagStart
+                    | TypeScriptKind::Less
                     | TypeScriptKind::MinusMinus
                     | TypeScriptKind::NewKeyword
                     | TypeScriptKind::PlusPlus
@@ -1062,6 +1145,10 @@ impl Parser<'_, '_> {
             {
                 return true;
             }
+
+            if self.ahead(1) == Some(TypeScriptKind::Less) {
+                return self.generic_arrow_ahead_at(self.ahead_position(1));
+            }
         }
 
         is_name(kind) && self.ahead(1) == Some(TypeScriptKind::Arrow)
@@ -1074,9 +1161,13 @@ impl Parser<'_, '_> {
             self.bump();
         }
 
+        self.type_parameters();
+
         if self.at(TypeScriptKind::ParenOpen) {
             self.formal_parameters();
+            self.returning = true;
             self.return_annotation();
+            self.returning = false;
         } else {
             self.wrap(TypeScriptKind::IdentifierNode);
         }
@@ -1430,7 +1521,7 @@ impl Parser<'_, '_> {
         }
 
         if self.word(b"as") || self.word(b"satisfies") {
-            return Some(self.type_operation(group));
+            return Some(self.type_operation());
         }
 
         if kind == TypeScriptKind::Less && self.call_arguments_ahead() {
@@ -1481,6 +1572,14 @@ impl Parser<'_, '_> {
                 self.bump();
 
                 return self.call_trailer();
+            }
+
+            if after == Some(TypeScriptKind::Less)
+                && self.call_arguments_ahead_at(self.ahead_position(1))
+            {
+                self.bump();
+
+                return self.type_argument_trailer();
             }
         }
 
@@ -1625,8 +1724,6 @@ impl Parser<'_, '_> {
     }
 
     fn non_null(&mut self, _group: u32) -> Step {
-        self.reduce_for(POWER_NULLISH_LEFT);
-
         if self.value_count == 0 {
             return Step::Done;
         }
@@ -1643,7 +1740,11 @@ impl Parser<'_, '_> {
     }
 
     fn generic_arrow_ahead(&mut self) -> bool {
-        let end = self.type_arguments_end();
+        self.generic_arrow_ahead_at(self.significant(self.position))
+    }
+
+    fn generic_arrow_ahead_at(&mut self, from: u32) -> bool {
+        let end = self.type_arguments_end_at(from);
 
         if end == NONE_POSITION {
             return false;
@@ -1659,7 +1760,9 @@ impl Parser<'_, '_> {
 
         self.type_parameters();
         self.formal_parameters();
+        self.returning = true;
         self.return_annotation();
+        self.returning = false;
         self.push_value(checkpoint);
 
         Step::Operator
@@ -1686,7 +1789,7 @@ impl Parser<'_, '_> {
         Step::Operand
     }
 
-    fn type_operation(&mut self, group: u32) -> Step {
+    fn type_operation(&mut self) -> Step {
         self.reduce_for(POWER_RELATIONAL_LEFT);
 
         if self.value_count == 0 {
@@ -1707,11 +1810,7 @@ impl Parser<'_, '_> {
         if self.at(TypeScriptKind::ConstKeyword) {
             self.bump();
         } else {
-            let bare = self.frames[group as usize].variant == Variant::Top;
-
-            self.segment_max = if bare { SEGMENT_MAX_BARE } else { u32::MAX };
             self.type_expression();
-            self.segment_max = u32::MAX;
         }
 
         self.events.start_at(checkpoint, kind);
@@ -1733,6 +1832,12 @@ impl Parser<'_, '_> {
             self.current(),
             Some(TypeScriptKind::ParenOpen | TypeScriptKind::TemplateStart)
         ) {
+            return Step::Operator;
+        }
+
+        if self.frame_count > 0
+            && self.frames[self.frame_count as usize - 1].kind == TypeScriptKind::NewExpression
+        {
             return Step::Operator;
         }
 
@@ -1758,7 +1863,7 @@ impl Parser<'_, '_> {
         let frame = Frame {
             checkpoint: self.values[values as usize],
             kind: TypeScriptKind::TernaryExpression,
-            power: POWER_TERNARY_RIGHT,
+            power: POWER_ASSIGN_RIGHT,
             values,
             variant: Variant::Ternary,
             ..Frame::EMPTY
@@ -1952,12 +2057,18 @@ impl Parser<'_, '_> {
             position = after;
         }
 
-        let after = if self.kind_at(position) == Some(TypeScriptKind::BracketOpen) {
+        let held = if self.kind_at(position) == Some(TypeScriptKind::BracketOpen) {
             let end = self.balanced_end(position);
 
             self.significant(end)
         } else {
             self.significant(position + 1)
+        };
+
+        let after = if self.kind_at(held) == Some(TypeScriptKind::Question) {
+            self.significant(held + 1)
+        } else {
+            held
         };
 
         matches!(
@@ -2006,9 +2117,8 @@ impl Parser<'_, '_> {
 
     fn method_definition(&mut self) {
         let checkpoint = self.anchor();
-        let abstracted = self.member_modifiers();
+        let abstracted = self.modifiers();
 
-        self.method_modifiers();
         self.property_key();
         let _ = self.eat(TypeScriptKind::Question);
         self.type_parameters();
@@ -2034,6 +2144,24 @@ impl Parser<'_, '_> {
         self.events
             .start_at(checkpoint, TypeScriptKind::MethodDefinition);
         self.events.finish();
+    }
+
+    fn modifiers(&mut self) -> bool {
+        let mut abstracted = false;
+
+        for _ in 0..8 {
+            let before = self.position;
+
+            abstracted = self.member_modifiers() || abstracted;
+
+            self.method_modifiers();
+
+            if self.position == before {
+                break;
+            }
+        }
+
+        abstracted
     }
 
     fn method_modifiers(&mut self) {
@@ -2068,6 +2196,7 @@ impl Parser<'_, '_> {
                         | TypeScriptKind::Equal
                         | TypeScriptKind::Less
                         | TypeScriptKind::ParenOpen
+                        | TypeScriptKind::Question
                         | TypeScriptKind::Semicolon
                 )
             ) {
@@ -2132,7 +2261,16 @@ impl Parser<'_, '_> {
             return;
         }
 
-        if is_name(kind) {
+        let reached = matches!(
+            self.ahead(1),
+            Some(
+                TypeScriptKind::BracketOpen
+                    | TypeScriptKind::Dot
+                    | TypeScriptKind::QuestionDot
+            )
+        );
+
+        if is_name(kind) && !reached {
             self.wrap(TypeScriptKind::IdentifierNode);
 
             return;
@@ -2335,6 +2473,8 @@ impl Parser<'_, '_> {
                 self.function_declaration();
             }
             Some(TypeScriptKind::LetKeyword) if self.opens_a_binding() => self.declaration(),
+            Some(TypeScriptKind::AwaitKeyword) if self.opens_a_resource(1) => self.declaration(),
+            Some(TypeScriptKind::Identifier) if self.opens_a_resource(0) => self.declaration(),
             Some(TypeScriptKind::ImportKeyword) if self.opens_an_import_alias() => {
                 self.import_alias();
             }
@@ -2429,6 +2569,40 @@ impl Parser<'_, '_> {
             )
     }
 
+    fn opens_a_resource(&self, steps: u32) -> bool {
+        let position = self.ahead_position(steps);
+
+        if !self.word_at(position, b"using") || (steps > 0 && self.starts_line(position)) {
+            return false;
+        }
+
+        let name = self.ahead_position(steps + 1);
+        let kind = self.kind_at(name).unwrap_or(TypeScriptKind::ErrorToken);
+
+        is_name(kind)
+            && kind != TypeScriptKind::AwaitKeyword
+            && !self.starts_line(name)
+            && self.ahead(steps + 2) == Some(TypeScriptKind::Equal)
+    }
+
+    fn iterates_a_resource(&self, steps: u32) -> bool {
+        let position = self.ahead_position(steps);
+
+        if !self.word_at(position, b"using") || (steps > 0 && self.starts_line(position)) {
+            return false;
+        }
+
+        let name = self.ahead_position(steps + 1);
+        let kind = self.kind_at(name).unwrap_or(TypeScriptKind::ErrorToken);
+
+        is_name(kind)
+            && !matches!(
+                kind,
+                TypeScriptKind::AwaitKeyword | TypeScriptKind::OfKeyword
+            )
+            && !self.starts_line(name)
+    }
+
     fn expression_statement(&mut self) {
         self.open(TypeScriptKind::ExpressionStatement);
         self.expression();
@@ -2454,6 +2628,11 @@ impl Parser<'_, '_> {
         };
 
         self.open(kind);
+
+        if self.at(TypeScriptKind::AwaitKeyword) {
+            self.bump();
+        }
+
         self.bump();
 
         for _ in 0..self.steps() {
@@ -2568,6 +2747,12 @@ impl Parser<'_, '_> {
             return;
         }
 
+        if self.at(TypeScriptKind::ExportKeyword) {
+            self.export_at(checkpoint);
+
+            return;
+        }
+
         self.statement();
     }
 
@@ -2601,7 +2786,8 @@ impl Parser<'_, '_> {
             SyntaxErrorKind::UnexpectedToken,
         );
 
-        if is_name(self.current().unwrap_or(TypeScriptKind::ErrorToken)) {
+        if is_name(self.current().unwrap_or(TypeScriptKind::ErrorToken)) && !self.word(b"implements")
+        {
             self.wrap(TypeScriptKind::TypeIdentifier);
         }
 
@@ -2651,8 +2837,48 @@ impl Parser<'_, '_> {
             return;
         }
 
+        let checkpoint = self.anchor();
+
         self.query_target();
         self.type_arguments();
+
+        if !self.at(TypeScriptKind::ParenOpen) {
+            return;
+        }
+
+        self.argument_list();
+
+        self.events
+            .start_at(checkpoint, TypeScriptKind::CallExpression);
+        self.events.finish();
+    }
+
+    fn argument_list(&mut self) {
+        self.open(TypeScriptKind::Arguments);
+        self.bump();
+
+        for _ in 0..self.steps() {
+            self.skip_trivia();
+
+            if self.at(TypeScriptKind::ParenClose) || self.current().is_none() {
+                break;
+            }
+
+            if self.eat(TypeScriptKind::Comma) {
+                continue;
+            }
+
+            let before = self.position;
+
+            self.expression_single();
+
+            if self.position == before {
+                self.emit();
+            }
+        }
+
+        let _ = self.eat(TypeScriptKind::ParenClose);
+        self.events.finish();
     }
 
     fn heritage_generic_ahead(&self) -> bool {
@@ -2768,9 +2994,17 @@ impl Parser<'_, '_> {
             return;
         }
 
-        let _ = self.member_modifiers();
+        if self.readonly_index_ahead()
+            || (self.at(TypeScriptKind::BracketOpen) && self.index_signature_ahead())
+        {
+            self.index_signature();
+            let _ = self.eat(TypeScriptKind::Semicolon);
 
-        self.method_modifiers();
+            return;
+        }
+
+        let _ = self.modifiers();
+
         self.property_key();
         let _ = self.eat(TypeScriptKind::Question);
         let _ = self.eat(TypeScriptKind::Bang);
@@ -2922,7 +3156,13 @@ impl Parser<'_, '_> {
         let _ = self.eat(TypeScriptKind::AwaitKeyword);
         self.expect(TypeScriptKind::ParenOpen, SyntaxErrorKind::UnexpectedToken);
 
-        if declares(self.current().unwrap_or(TypeScriptKind::ErrorToken)) {
+        if self.at(TypeScriptKind::AwaitKeyword) && self.iterates_a_resource(1) {
+            self.bump();
+        }
+
+        if declares(self.current().unwrap_or(TypeScriptKind::ErrorToken))
+            || self.iterates_a_resource(0)
+        {
             self.bump();
         }
 
@@ -3271,7 +3511,12 @@ impl Parser<'_, '_> {
     }
 
     fn export_statement(&mut self) {
-        self.open(TypeScriptKind::ExportStatement);
+        let checkpoint = self.anchor();
+
+        self.export_at(checkpoint);
+    }
+
+    fn export_at(&mut self, checkpoint: Checkpoint) {
         self.bump();
 
         if self.at(TypeScriptKind::Star) {
@@ -3306,11 +3551,17 @@ impl Parser<'_, '_> {
             self.export_default();
         } else if self.word(b"namespace") && self.opens_a_name(1) {
             self.internal_module();
+        } else if self.at(TypeScriptKind::Equal) {
+            self.bump();
+            self.expression_single();
         } else {
             self.statement();
         }
 
         let _ = self.eat(TypeScriptKind::Semicolon);
+
+        self.events
+            .start_at(checkpoint, TypeScriptKind::ExportStatement);
         self.events.finish();
     }
 
@@ -3338,6 +3589,15 @@ impl Parser<'_, '_> {
             };
 
             self.class_body_of(held);
+
+            return;
+        }
+
+        if self.word(b"abstract") && self.ahead(1) == Some(TypeScriptKind::ClassKeyword) {
+            let checkpoint = self.anchor();
+
+            self.bump();
+            self.class_at(checkpoint, TypeScriptKind::AbstractClassDeclaration);
 
             return;
         }
@@ -3522,7 +3782,11 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::Module);
         self.bump();
         self.module_name();
-        self.statement_block();
+
+        if self.at(TypeScriptKind::BraceOpen) {
+            self.statement_block();
+        }
+
         self.events.finish();
     }
 
@@ -3587,6 +3851,12 @@ impl Parser<'_, '_> {
     }
 
     fn type_union(&mut self) {
+        if self.word(b"readonly") {
+            self.readonly_type();
+
+            return;
+        }
+
         let checkpoint = self.anchor();
         let leading = self.eat(TypeScriptKind::Bar);
 
@@ -3603,10 +3873,39 @@ impl Parser<'_, '_> {
             }
 
             self.bump();
+
+            if self.word(b"readonly") {
+                self.readonly_type();
+                self.events.start_at(checkpoint, TypeScriptKind::UnionType);
+                self.events.finish();
+
+                break;
+            }
+
             self.type_intersection();
             self.events.start_at(checkpoint, TypeScriptKind::UnionType);
             self.events.finish();
         }
+    }
+
+    fn readonly_type(&mut self) {
+        if self.nesting >= NEST_DEPTH_MAX {
+            self.outcome = Structure::TooDeep;
+            self.emit();
+
+            return;
+        }
+
+        let checkpoint = self.anchor();
+
+        self.nesting += 1;
+        self.bump();
+        self.type_union();
+        self.nesting -= 1;
+
+        self.events
+            .start_at(checkpoint, TypeScriptKind::ReadonlyType);
+        self.events.finish();
     }
 
     fn type_intersection(&mut self) {
@@ -3670,6 +3969,11 @@ impl Parser<'_, '_> {
                 self.wrap(TypeScriptKind::TypeIdentifier);
             }
 
+            if self.at(TypeScriptKind::ExtendsKeyword) {
+                self.bump();
+                self.type_union();
+            }
+
             self.events.finish();
 
             return true;
@@ -3680,7 +3984,19 @@ impl Parser<'_, '_> {
 
             self.open(TypeScriptKind::TypeQuery);
             self.bump();
+
+            let target = self.anchor();
+
             self.query_target();
+
+            if self.at(TypeScriptKind::Less) && self.type_arguments_ahead() {
+                self.type_arguments();
+
+                self.events
+                    .start_at(target, TypeScriptKind::InstantiationExpression);
+                self.events.finish();
+            }
+
             self.events.finish();
             self.type_trailers(checkpoint);
 
@@ -3749,17 +4065,19 @@ impl Parser<'_, '_> {
     }
 
     fn type_primary(&mut self) {
+        let returning = core::mem::take(&mut self.returning);
+
         let Some(kind) = self.current() else {
             return;
         };
 
         if kind == TypeScriptKind::ParenOpen {
-            self.type_paren();
+            self.type_paren(returning);
 
             return;
         }
 
-        if kind == TypeScriptKind::Less {
+        if kind == TypeScriptKind::Less && !returning {
             self.open(TypeScriptKind::FunctionType);
             self.type_parameters();
             self.formal_parameters();
@@ -3829,9 +4147,17 @@ impl Parser<'_, '_> {
         }
 
         if kind == TypeScriptKind::ImportKeyword {
-            self.open(TypeScriptKind::TypeQuery);
-            self.bump();
-            self.events.finish();
+            let checkpoint = self.anchor();
+
+            self.query_target();
+
+            if self.at(TypeScriptKind::Less) && self.type_arguments_ahead() {
+                self.type_arguments();
+
+                self.events
+                    .start_at(checkpoint, TypeScriptKind::GenericType);
+                self.events.finish();
+            }
 
             return;
         }
@@ -3853,8 +4179,14 @@ impl Parser<'_, '_> {
         self.emit();
     }
 
-    fn type_paren(&mut self) {
-        if self.arrow_ahead(self.significant(self.position)) {
+    fn type_paren(&mut self, returning: bool) {
+        let held = if returning {
+            !self.arrow_follows(self.significant(self.position))
+        } else {
+            false
+        };
+
+        if !held && self.arrow_ahead(self.significant(self.position)) {
             self.open(TypeScriptKind::FunctionType);
             self.formal_parameters();
             let _ = self.eat(TypeScriptKind::Arrow);
@@ -3883,11 +4215,7 @@ impl Parser<'_, '_> {
         }
 
         let checkpoint = self.anchor();
-        let limit = self.segment_max;
-
-        self.segment_max = u32::MAX;
-
-        let segments = self.segments_ahead().min(limit);
+        let segments = self.segments_ahead();
 
         self.wrap(if segments == 1 {
             leaf
@@ -3935,12 +4263,38 @@ impl Parser<'_, '_> {
     fn query_target(&mut self) {
         let checkpoint = self.anchor();
 
+        if self.at(TypeScriptKind::ImportKeyword) {
+            self.wrap(TypeScriptKind::ImportNode);
+
+            if self.at(TypeScriptKind::ParenOpen) {
+                self.argument_list();
+
+                self.events
+                    .start_at(checkpoint, TypeScriptKind::CallExpression);
+                self.events.finish();
+            }
+
+            self.query_trailers(checkpoint);
+
+            return;
+        }
+
+        if self.at(TypeScriptKind::ThisKeyword) {
+            self.wrap(TypeScriptKind::This);
+            self.query_trailers(checkpoint);
+
+            return;
+        }
+
         if !is_property_name(self.current().unwrap_or(TypeScriptKind::ErrorToken)) {
             return;
         }
 
         self.wrap(TypeScriptKind::IdentifierNode);
+        self.query_trailers(checkpoint);
+    }
 
+    fn query_trailers(&mut self, checkpoint: Checkpoint) {
         for _ in 0..self.steps() {
             if !self.at(TypeScriptKind::Dot) {
                 break;
@@ -4215,7 +4569,18 @@ impl Parser<'_, '_> {
             return;
         }
 
-        if self.at(TypeScriptKind::NewKeyword) && self.ahead(1) != Some(TypeScriptKind::ParenOpen) {
+        if self.readonly_index_ahead() {
+            self.index_signature();
+
+            return;
+        }
+
+        if self.at(TypeScriptKind::NewKeyword)
+            && !matches!(
+                self.ahead(1),
+                Some(TypeScriptKind::Less | TypeScriptKind::ParenOpen)
+            )
+        {
             self.signature_of(TypeScriptKind::PropertySignature);
 
             return;
@@ -4247,7 +4612,7 @@ impl Parser<'_, '_> {
 
     fn signature_of(&mut self, property: TypeScriptKind) {
         let checkpoint = self.anchor();
-        let _ = self.member_modifiers();
+        let _ = self.modifiers();
 
         self.property_key();
         let _ = self.eat(TypeScriptKind::Question);
@@ -4277,11 +4642,26 @@ impl Parser<'_, '_> {
             && self.ahead(2) == Some(TypeScriptKind::BracketOpen)
     }
 
+    fn readonly_index_ahead(&self) -> bool {
+        self.word(b"readonly")
+            && self.ahead(1) == Some(TypeScriptKind::BracketOpen)
+            && is_name(
+                self.kind_at(self.ahead_position(2))
+                    .unwrap_or(TypeScriptKind::ErrorToken),
+            )
+            && matches!(
+                self.kind_at(self.ahead_position(3)),
+                Some(TypeScriptKind::Colon | TypeScriptKind::InKeyword)
+            )
+    }
+
     fn index_signature(&mut self) {
         self.open(TypeScriptKind::IndexSignature);
 
         if self.mapped_modifier_ahead() {
             self.bump();
+            self.bump();
+        } else if self.word(b"readonly") {
             self.bump();
         }
 
@@ -4425,7 +4805,7 @@ impl Parser<'_, '_> {
                 self.type_predicate();
             } else {
                 match self.current().unwrap_or(TypeScriptKind::ErrorToken) {
-                    TypeScriptKind::ThisKeyword => self.wrap(TypeScriptKind::ThisType),
+                    TypeScriptKind::ThisKeyword => self.wrap(TypeScriptKind::This),
                     current if is_name(current) => self.wrap(TypeScriptKind::IdentifierNode),
                     _ => {}
                 }
@@ -4494,7 +4874,7 @@ impl Parser<'_, '_> {
         self.open(TypeScriptKind::TypePredicate);
 
         match self.current().unwrap_or(TypeScriptKind::ErrorToken) {
-            TypeScriptKind::ThisKeyword => self.wrap(TypeScriptKind::ThisType),
+            TypeScriptKind::ThisKeyword => self.wrap(TypeScriptKind::This),
             current if is_name(current) => self.wrap(TypeScriptKind::IdentifierNode),
             _ => {}
         }
@@ -4509,8 +4889,10 @@ impl Parser<'_, '_> {
     }
 
     fn type_arguments_end(&self) -> u32 {
-        let from = self.significant(self.position);
+        self.type_arguments_end_at(self.significant(self.position))
+    }
 
+    fn type_arguments_end_at(&self, from: u32) -> u32 {
         if from < self.plain_failure.get() {
             return NONE_POSITION;
         }
@@ -4568,7 +4950,7 @@ impl Parser<'_, '_> {
                 continue;
             }
 
-            if !is_type_token(kind) {
+            if !(is_type_token(kind) || is_property_name(kind) && self.follows_a_dot(position)) {
                 self.plain_mark(plain, position);
 
                 return NONE_POSITION;
@@ -4578,6 +4960,30 @@ impl Parser<'_, '_> {
         NONE_POSITION
     }
 
+    fn follows_a_dot(&self, position: u32) -> bool {
+        self.behind(position) == Some(TypeScriptKind::Dot)
+    }
+
+    fn behind(&self, position: u32) -> Option<TypeScriptKind> {
+        let mut at = position;
+
+        for _ in 0..SCAN_STEP_MAX {
+            if at == 0 {
+                return None;
+            }
+
+            at -= 1;
+
+            match self.kind_at(at) {
+                Some(TypeScriptKind::Comment) => {}
+                Some(kind) => return Some(kind),
+                None => return None,
+            }
+        }
+
+        None
+    }
+
     fn plain_mark(&self, plain: bool, position: u32) {
         if plain {
             self.plain_failure.set(position);
@@ -4585,7 +4991,11 @@ impl Parser<'_, '_> {
     }
 
     fn call_arguments_ahead(&self) -> bool {
-        let end = self.type_arguments_end();
+        self.call_arguments_ahead_at(self.significant(self.position))
+    }
+
+    fn call_arguments_ahead_at(&self, from: u32) -> bool {
+        let end = self.type_arguments_end_at(from);
 
         if end == NONE_POSITION {
             return false;
@@ -4746,7 +5156,7 @@ pub fn build(
         plain_failure: core::cell::Cell::new(0),
         position: 0,
         raw,
-        segment_max: u32::MAX,
+        returning: false,
         significant_next: 0,
         source,
         tokens,

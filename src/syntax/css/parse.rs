@@ -706,7 +706,11 @@ impl Parser<'_> {
 
             let before = self.position;
 
-            if self.current().is_some_and(opens_a_selector) {
+            let selects = self
+                .current()
+                .is_some_and(|kind| opens_a_selector(kind) || is_combinator(kind));
+
+            if selects {
                 self.selector();
             } else {
                 self.value();
@@ -869,6 +873,7 @@ impl Parser<'_> {
             Some(CSSKind::Identifier) => self.plain_or_call(),
             Some(CSSKind::Number) => self.numeric(CSSKind::IntegerValue),
             Some(CSSKind::ParenOpen) => self.parenthesized_value(),
+            Some(CSSKind::Slash) if self.opens_a_plain_value() => self.plain_or_call(),
             Some(CSSKind::Text) => self.wrap(CSSKind::StringValue),
             Some(_) | None => return false,
         }
@@ -945,6 +950,13 @@ impl Parser<'_> {
         let _ = self.eat(CSSKind::ParenClose);
         self.events.finish();
         self.ascend();
+    }
+
+    fn opens_a_plain_value(&self) -> bool {
+        let position = self.significant(self.position);
+        let start = self.tokens[position as usize].offset as usize;
+
+        plain_value_end(self.source, start).is_some_and(|end| end > start)
     }
 
     fn plain_or_call(&mut self) {

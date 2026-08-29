@@ -402,6 +402,25 @@ fn a_file_that_does_not_parse_is_refused() {
 }
 
 #[test]
+fn a_line_continuation_does_not_break_the_statement_it_joins() {
+    let source: &[u8] =
+        b"package p\n\nf :: proc() {\n\tif a == 1 \\\n\t|| b == 2 {\n\t\tc := 3\n\t}\n}\n";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(OUT_BYTES_MAX);
+    let mut second = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(second.as_bytes()),
+        String::from_utf8_lossy(&once)
+    );
+}
+
+#[test]
 fn a_range_reads_back_the_lines_it_names() {
     let source: &[u8] = b"main :: proc() {\nx:=1\n}\n";
     let mut held = Held::reserve();

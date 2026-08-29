@@ -3,16 +3,13 @@ import os
 import subprocess
 import sys
 
-
 EXTENSIONS = (".cjs", ".cts", ".js", ".mjs", ".mts", ".ts", ".tsx")
 RULES = ("no-redeclare", "no-undef", "no-unused-vars")
 BATCH = 256
 
-
 def pin(root):
     with open(os.path.join(root, "PIN"), encoding="utf-8") as held:
         return held.read().strip()
-
 
 def sources(root):
     found = []
@@ -29,7 +26,6 @@ def sources(root):
 
     return found
 
-
 def code_of(row):
     held = row.get("code", "")
     open_at = held.find("(")
@@ -40,7 +36,6 @@ def code_of(row):
 
     return held[open_at + 1 : close_at]
 
-
 def payload(text):
     start = text.find("{")
 
@@ -48,7 +43,6 @@ def payload(text):
         return {"diagnostics": []}
 
     return json.loads(text[start:])
-
 
 def rows(text, held, broken):
     for row in payload(text)["diagnostics"]:
@@ -70,7 +64,6 @@ def rows(text, held, broken):
         offset = label["span"]["offset"]
         held.setdefault(name, []).append([code, offset])
 
-
 def run(prefix, batch):
     held = subprocess.run(
         prefix + batch,
@@ -85,7 +78,6 @@ def run(prefix, batch):
         return None
 
     return held.stdout, payload(held.stdout).get("number_of_files", len(batch))
-
 
 def decline(prefix, batch):
     found = set()
@@ -114,7 +106,6 @@ def decline(prefix, batch):
         stack.append(held[middle:])
 
     return found
-
 
 def main():
     if len(sys.argv) != 3:
@@ -193,7 +184,6 @@ def main():
     print(f"wrote {written} files for oxlint {version}")
 
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

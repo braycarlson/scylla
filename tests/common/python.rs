@@ -174,7 +174,7 @@ fn quoted(text: &[u8], from: usize) -> Option<(String, usize)> {
 
     offset += 1;
 
-    let mut found = String::new();
+    let mut found = Vec::new();
 
     while offset < text.len() {
         let byte = text[offset];
@@ -182,10 +182,17 @@ fn quoted(text: &[u8], from: usize) -> Option<(String, usize)> {
         offset += 1;
 
         if byte == b'"' {
-            return Some((found, offset));
+            return Some((String::from_utf8_lossy(&found).into_owned(), offset));
         }
 
-        found.push(byte as char);
+        if byte == b'\\' && offset < text.len() {
+            found.push(text[offset]);
+            offset += 1;
+
+            continue;
+        }
+
+        found.push(byte);
     }
 
     None

@@ -182,6 +182,45 @@ pub fn line_break_width(source: &[u8], offset: usize) -> usize {
     }
 }
 
+pub const ESCAPE_DIGIT_MAX: usize = 6;
+
+pub fn escape_holds(source: &[u8], start: usize) -> bool {
+    if source.get(start) != Some(&b'\\') {
+        return false;
+    }
+
+    let escaped = start + 1;
+
+    escaped < source.len() && line_break_width(source, escaped) == 0
+}
+
+pub fn escape_end(source: &[u8], start: usize) -> usize {
+    assert!(start < source.len());
+    assert_eq!(source[start], b'\\');
+
+    let mut offset = start + 1;
+
+    if !escape_holds(source, start) {
+        return offset;
+    }
+
+    if !source[offset].is_ascii_hexdigit() {
+        return offset + 1;
+    }
+
+    let stop = (offset + ESCAPE_DIGIT_MAX).min(source.len());
+
+    while offset < stop && source[offset].is_ascii_hexdigit() {
+        offset += 1;
+    }
+
+    if source.get(offset).is_some_and(|byte| *byte == b' ') {
+        offset += 1;
+    }
+
+    offset
+}
+
 pub fn line_scan_trimmed(source: &[u8], start: usize) -> usize {
     let end = line_scan(source, start);
 
@@ -198,16 +237,24 @@ pub fn line_scan_trimmed(source: &[u8], start: usize) -> usize {
 pub struct Numbers {
     pub dot_may_lead: bool,
     pub dot_may_trail: bool,
+    pub ranges: bool,
 }
 
 impl Numbers {
     pub const DEFAULT: Self = Self {
         dot_may_lead: false,
         dot_may_trail: false,
+        ranges: false,
     };
     pub const ONE_SIDED: Self = Self {
         dot_may_lead: true,
         dot_may_trail: true,
+        ranges: false,
+    };
+    pub const RANGED: Self = Self {
+        dot_may_lead: true,
+        dot_may_trail: true,
+        ranges: true,
     };
 }
 
@@ -220,7 +267,8 @@ pub fn number_scan_bounded(source: &[u8], start: usize, numbers: Numbers) -> usi
     assert!(source[start].is_ascii_digit() || numbers.dot_may_lead && source[start] == b'.');
 
     let hexadecimal = source[start] == b'0' && matches!(source.get(start + 1), Some(b'x' | b'X'));
-    let mut offset = start + usize::from(source[start] == b'.');
+    let mut dotted = source[start] == b'.';
+    let mut offset = start + usize::from(dotted);
 
     while offset < source.len() {
         let byte = source[offset];
@@ -244,8 +292,12 @@ pub fn number_scan_bounded(source: &[u8], start: usize, numbers: Numbers) -> usi
             break;
         }
 
-        if byte == b'.' && !fraction_follows(source, offset + 1, hexadecimal, numbers) {
-            break;
+        if byte == b'.' {
+            if dotted || !fraction_follows(source, offset + 1, hexadecimal, numbers) {
+                break;
+            }
+
+            dotted = true;
         }
 
         offset += 1;
@@ -267,7 +319,7 @@ fn fraction_follows(source: &[u8], offset: usize, hexadecimal: bool, numbers: Nu
         return true;
     }
 
-    numbers.dot_may_trail && byte != b'.'
+    numbers.dot_may_trail && (!numbers.ranges || byte != b'.')
 }
 
 pub fn punctuation_of(source: &[u8], start: usize) -> (Punctuation, usize) {
@@ -984,9 +1036,18 @@ mod tests {
     #[test]
     fn a_one_sided_dot_is_a_number_only_where_the_language_says_so() {
         assert_eq!(number_scan_bounded(b"1.", 0, Numbers::ONE_SIDED), 2);
-        assert_eq!(number_scan_bounded(b"1..<5", 0, Numbers::ONE_SIDED), 1);
+        assert_eq!(number_scan_bounded(b"1..toString", 0, Numbers::ONE_SIDED), 2);
         assert_eq!(number_scan_bounded(b".5", 0, Numbers::ONE_SIDED), 2);
+        assert_eq!(number_scan_bounded(b"1..<5", 0, Numbers::RANGED), 1);
+        assert_eq!(number_scan_bounded(b"1.", 0, Numbers::RANGED), 2);
         assert_eq!(number_scan(b"1.", 0), 1);
+    }
+
+    #[test]
+    fn a_literal_carries_one_dot_and_the_next_one_opens_a_member() {
+        assert_eq!(number_scan_bounded(b"1.0.toString", 0, Numbers::ONE_SIDED), 3);
+        assert_eq!(number_scan_bounded(b".5.toString", 0, Numbers::ONE_SIDED), 2);
+        assert_eq!(number_scan(b"1.5.hypot", 0), 3);
     }
 
     #[test]

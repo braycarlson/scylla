@@ -144,7 +144,11 @@ fn literal_end(source: &[u8], from: usize, limit: usize, quote: u8, width: usize
         let byte = source[offset];
 
         if byte == b'\\' {
-            offset += 2;
+            offset += if matches!(source.get(offset + 1), Some(b'{' | b'}')) {
+                1
+            } else {
+                2
+            };
 
             continue;
         }

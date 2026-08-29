@@ -24,7 +24,7 @@ fn the_hot_rows_hold_their_size() {
     assert_eq!(size_of::<JavaScriptBinding>(), 36);
     assert_eq!(size_of::<JavaScriptReference>(), 28);
     assert_eq!(size_of::<OdinBinding>(), 36);
-    assert_eq!(size_of::<PythonBinding>(), 48);
+    assert_eq!(size_of::<PythonBinding>(), 52);
     assert_eq!(size_of::<PythonReference>(), 40);
     assert_eq!(size_of::<RustBinding>(), 36);
     assert_eq!(size_of::<ZigBinding>(), 36);

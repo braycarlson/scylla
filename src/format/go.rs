@@ -71,6 +71,10 @@ fn broken(input: &Input<'_>) -> bool {
         return true;
     }
 
+    if !brace::closed(input.source, input.tokens) {
+        return true;
+    }
+
     !brace::balanced(input.tokens)
 }
 

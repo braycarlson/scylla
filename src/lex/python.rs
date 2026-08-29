@@ -2,7 +2,6 @@ use crate::language::Lexer;
 use crate::scan::{
     identifier_scan,
     is_identifier_start_at,
-    number_scan,
     punctuation_of,
     string_scan_continued,
 };
@@ -191,10 +190,8 @@ impl Scanner<'_> {
             return Lex::Complete;
         }
 
-        let blank = crate::scan::whitespace_width(self.source, self.offset);
-
-        if blank > 0 {
-            self.offset += blank;
+        if matches!(byte, b' ' | b'\t' | b'\x0c') {
+            self.offset += 1;
 
             return Lex::Complete;
         }
@@ -427,7 +424,7 @@ pub(crate) fn token_at(source: &[u8], offset: usize) -> (TokenKind, usize) {
     }
 
     if byte.is_ascii_digit() {
-        return (TokenKind::Number, number_scan(source, offset));
+        return (TokenKind::Number, number_python_scan(source, offset));
     }
 
     if byte == b'{' {
@@ -444,6 +441,86 @@ pub(crate) fn token_at(source: &[u8], offset: usize) -> (TokenKind, usize) {
     let (punctuation, length) = punctuation_of(source, offset);
 
     (TokenKind::Punctuation(punctuation), offset + length)
+}
+
+fn number_python_scan(source: &[u8], start: usize) -> usize {
+    assert!(start < source.len());
+    assert!(source[start].is_ascii_digit());
+
+    if source[start] == b'0' {
+        if let Some(end) = number_python_based(source, start) {
+            return end;
+        }
+    }
+
+    let mut offset = digits_scan(source, start, u8::is_ascii_digit);
+
+    if source.get(offset) == Some(&b'.') {
+        offset = digits_scan(source, offset + 1, u8::is_ascii_digit);
+    }
+
+    offset = exponent_scan(source, offset);
+
+    if matches!(source.get(offset), Some(b'j' | b'J')) {
+        offset += 1;
+    }
+
+    assert!(offset > start);
+
+    offset
+}
+
+fn number_python_based(source: &[u8], start: usize) -> Option<usize> {
+    let digit: fn(&u8) -> bool = match source.get(start + 1)? {
+        b'b' | b'B' => |held| matches!(held, b'0' | b'1'),
+        b'o' | b'O' => |held| matches!(held, b'0'..=b'7'),
+        b'x' | b'X' => u8::is_ascii_hexdigit,
+        _ => return None,
+    };
+
+    let end = digits_scan(source, start + 2, digit);
+
+    (end > start + 2).then_some(end)
+}
+
+fn exponent_scan(source: &[u8], start: usize) -> usize {
+    if !matches!(source.get(start), Some(b'e' | b'E')) {
+        return start;
+    }
+
+    let signed = matches!(source.get(start + 1), Some(b'+' | b'-'));
+    let digits = start + 1 + usize::from(signed);
+    let end = digits_scan(source, digits, u8::is_ascii_digit);
+
+    if end == digits {
+        return start;
+    }
+
+    end
+}
+
+fn digits_scan(source: &[u8], start: usize, digit: fn(&u8) -> bool) -> usize {
+    let mut offset = start;
+
+    while offset < source.len() {
+        let byte = source[offset];
+
+        if digit(&byte) {
+            offset += 1;
+
+            continue;
+        }
+
+        if byte != b'_' || offset == start || !source.get(offset + 1).is_some_and(digit) {
+            break;
+        }
+
+        offset += 2;
+    }
+
+    assert!(offset >= start);
+
+    offset
 }
 
 fn line_end(source: &[u8], start: usize) -> usize {
@@ -476,7 +553,11 @@ fn string_format_scan(source: &[u8], start: usize) -> usize {
         let byte = source[offset];
 
         if byte == b'\\' {
-            offset += 2;
+            offset += if matches!(source.get(offset + 1), Some(b'{' | b'}')) {
+                1
+            } else {
+                2
+            };
 
             continue;
         }
@@ -962,6 +1043,47 @@ mod tests {
                 "{word}"
             );
         }
+    }
+
+    #[test]
+    fn a_number_ends_where_the_python_grammar_ends_it() {
+        for (source, wanted) in [
+            ("1", 1),
+            ("0", 1),
+            ("1_000_000", 9),
+            ("1_", 1),
+            ("1.5", 3),
+            ("1.", 2),
+            ("1..real", 2),
+            ("1.e5", 4),
+            ("1e5", 3),
+            ("1e+9", 4),
+            ("1e-9", 4),
+            ("1e", 1),
+            ("1e+", 1),
+            ("1j", 2),
+            ("1.5j", 4),
+            ("0x1f", 4),
+            ("0XCAFE", 6),
+            ("0b1010", 6),
+            ("0o777", 5),
+            ("0x", 1),
+            ("0b2", 1),
+            ("1if", 1),
+            ("1and", 1),
+            ("1syntax_error", 1),
+        ] {
+            assert_eq!(number_python_scan(source.as_bytes(), 0), wanted, "{source}");
+        }
+    }
+
+    #[test]
+    fn a_word_behind_a_number_lexes_as_its_own_token() {
+        let source = b"1syntax_error\n";
+        let tokens = tests_support::lex(&PYTHON, source);
+
+        assert_eq!(tokens[0].text(source), b"1");
+        assert_eq!(tokens[1].text(source), b"syntax_error");
     }
 
     #[test]

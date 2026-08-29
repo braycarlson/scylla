@@ -4,11 +4,9 @@ import subprocess
 import sys
 import tempfile
 
-
 def pin(root):
     with open(os.path.join(root, "PIN"), encoding="utf-8") as held:
         return held.read().strip()
-
 
 def sources(root):
     found = []
@@ -24,7 +22,6 @@ def sources(root):
     found.sort()
 
     return found
-
 
 def main():
     if len(sys.argv) != 3:
@@ -80,7 +77,6 @@ def main():
     print(f"wrote {written} files for ruff {version}")
 
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

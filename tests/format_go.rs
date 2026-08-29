@@ -380,6 +380,41 @@ fn a_file_that_does_not_parse_is_refused() {
 }
 
 #[test]
+fn a_source_that_never_closes_a_string_or_a_comment_is_refused() {
+    const SOURCES: [&[u8]; 3] = [
+        b"package packa/*iex",
+        b"package fixtUre/* ",
+        b"package p\n\nfunc f() {\n\ts := \"open\n}\n",
+    ];
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    for source in SOURCES {
+        assert_eq!(
+            held.format(source, &mut out),
+            Outcome::Refusal,
+            "{:?}",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn alignment_leaves_a_block_comment_the_text_it_was_given() {
+    let source: &[u8] =
+        b"package p\n\nfunc f() {\n\t/* 0 = block */\n\t/* 8 = stream */\n\ta := 1\n\tbb := 2\n}\n";
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut out), Outcome::Complete);
+
+    let once = out.as_bytes().to_vec();
+
+    assert_eq!(held.comments(source), held.comments(&once));
+}
+
+#[test]
 fn a_range_reads_back_the_lines_it_names() {
     let source: &[u8] = b"package main\n\nfunc f() {\nx := 1\n_ = x\n}\n";
     let mut held = Held::reserve();

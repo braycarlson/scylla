@@ -18,24 +18,24 @@ pub const POWER_COMPARE_LEFT: u8 = 18;
 pub const POWER_COMPARE_RIGHT: u8 = 19;
 pub const POWER_EQUALITY_LEFT: u8 = 20;
 pub const POWER_EQUALITY_RIGHT: u8 = 21;
-pub const POWER_BIT_OR_LEFT: u8 = 22;
-pub const POWER_BIT_OR_RIGHT: u8 = 23;
-pub const POWER_BIT_XOR_LEFT: u8 = 24;
-pub const POWER_BIT_XOR_RIGHT: u8 = 25;
-pub const POWER_BIT_AND_LEFT: u8 = 26;
-pub const POWER_BIT_AND_RIGHT: u8 = 27;
-pub const POWER_BIT_AND_NOT_LEFT: u8 = 28;
-pub const POWER_BIT_AND_NOT_RIGHT: u8 = 29;
-pub const POWER_SHIFT_LEFT: u8 = 30;
-pub const POWER_SHIFT_RIGHT: u8 = 31;
 pub const POWER_ADDITIVE_LEFT: u8 = 32;
 pub const POWER_ADDITIVE_RIGHT: u8 = 33;
+pub const POWER_BIT_OR_LEFT: u8 = POWER_ADDITIVE_LEFT;
+pub const POWER_BIT_OR_RIGHT: u8 = POWER_ADDITIVE_RIGHT;
+pub const POWER_BIT_XOR_LEFT: u8 = POWER_ADDITIVE_LEFT;
+pub const POWER_BIT_XOR_RIGHT: u8 = POWER_ADDITIVE_RIGHT;
 pub const POWER_MULTIPLICATIVE_LEFT: u8 = 34;
 pub const POWER_MULTIPLICATIVE_RIGHT: u8 = 35;
-pub const POWER_CAST: u8 = 36;
+pub const POWER_BIT_AND_LEFT: u8 = POWER_MULTIPLICATIVE_LEFT;
+pub const POWER_BIT_AND_RIGHT: u8 = POWER_MULTIPLICATIVE_RIGHT;
+pub const POWER_BIT_AND_NOT_LEFT: u8 = POWER_MULTIPLICATIVE_LEFT;
+pub const POWER_BIT_AND_NOT_RIGHT: u8 = POWER_MULTIPLICATIVE_RIGHT;
+pub const POWER_SHIFT_LEFT: u8 = POWER_MULTIPLICATIVE_LEFT;
+pub const POWER_SHIFT_RIGHT: u8 = POWER_MULTIPLICATIVE_RIGHT;
 pub const POWER_PREFIX: u8 = 38;
-pub const POWER_RANGE_LEFT: u8 = 42;
-pub const POWER_RANGE_RIGHT: u8 = 43;
+pub const POWER_RANGE_LEFT: u8 = 12;
+pub const POWER_RANGE_RIGHT: u8 = 13;
+pub const POWER_TRAILER: u8 = 42;
 
 const INFIX: [(OdinKind, OdinKind, u8, u8); 29] = [
     (
@@ -327,6 +327,13 @@ pub const fn literal_node(kind: OdinKind) -> Option<OdinKind> {
     }
 }
 
+pub const fn is_universal(kind: OdinKind) -> bool {
+    matches!(
+        kind,
+        OdinKind::FalseKeyword | OdinKind::NilKeyword | OdinKind::TrueKeyword
+    )
+}
+
 pub const fn is_name(kind: OdinKind) -> bool {
     matches!(
         kind,
@@ -342,6 +349,7 @@ pub const fn opens_a_type(kind: OdinKind) -> bool {
             | OdinKind::BracketOpen
             | OdinKind::Caret
             | OdinKind::ContextKeyword
+            | OdinKind::Directive
             | OdinKind::DistinctKeyword
             | OdinKind::Dollar
             | OdinKind::DotDot

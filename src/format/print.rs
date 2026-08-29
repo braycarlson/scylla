@@ -214,8 +214,16 @@ impl Printer {
             return false;
         }
 
-        self.column += count_of(bytes.len());
         self.line_start = false;
+
+        if let Some(at) = bytes.iter().rposition(|byte| *byte == b'\n') {
+            self.column = count_of(bytes.len() - at - 1);
+            self.line_start = at + 1 == bytes.len();
+
+            return true;
+        }
+
+        self.column += count_of(bytes.len());
 
         true
     }
@@ -226,21 +234,6 @@ impl Printer {
         }
 
         self.verbatim = true;
-
-        let mut offset = bytes.len();
-
-        while offset > 0 {
-            offset -= 1;
-
-            if bytes[offset] != b'\n' {
-                continue;
-            }
-
-            self.column = count_of(bytes.len() - offset - 1);
-            self.line_start = offset + 1 == bytes.len();
-
-            return true;
-        }
 
         true
     }

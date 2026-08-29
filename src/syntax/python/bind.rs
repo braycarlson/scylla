@@ -44,6 +44,8 @@ pub enum ScopeKind {
     Lambda,
     Module,
     Type,
+    TypeAlias,
+    TypeVariable,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -124,6 +126,8 @@ impl ScopeKind {
             Self::Lambda => "lambda",
             Self::Module => "module",
             Self::Type => "type",
+            Self::TypeAlias => "type alias",
+            Self::TypeVariable => "type variable",
         }
     }
 }
@@ -137,6 +141,7 @@ impl BindingKind {
                 | Self::ComprehensionTarget
                 | Self::FunctionDef
                 | Self::PatternCapture
+                | Self::TypeParameter
                 | Self::WalrusTarget
         )
     }
@@ -425,12 +430,40 @@ impl Binder<'_> {
         self.load(job);
     }
 
+    fn enclosing(&self, scope: u32) -> u32 {
+        let mut held = scope;
+
+        for _ in 0..self.tables.scopes.count() {
+            let found = self.tables.scopes[held as usize];
+
+            if found.kind != ScopeKind::Comprehension || found.parent == NONE {
+                return held;
+            }
+
+            held = found.parent;
+        }
+
+        held
+    }
+
     fn store(&mut self, job: Job) {
         let kind = self.kind_of(job.node);
 
         if kind == PythonKind::Name {
             let (start, _) = self.positions(job.node);
-            let _ = self.bind(job.kind, self.text_of(start), job.scope);
+            let name = self.text_of(start);
+
+            let scope = if job.kind == BindingKind::WalrusTarget {
+                self.enclosing(job.scope)
+            } else {
+                job.scope
+            };
+
+            if scope != job.scope {
+                self.refer(name, job.scope, true);
+            }
+
+            let _ = self.bind(job.kind, name, scope);
 
             return;
         }
@@ -624,15 +657,22 @@ impl Binder<'_> {
     }
 
     fn type_alias(&mut self, job: Job) {
-        let mut names = [NONE; 16];
-        let count = self.own_tokens(job.node, PythonKind::Identifier, &mut names);
+        let named = self.child_of(job.node, PythonKind::Name);
+        let mut carried = [NONE; 16];
+        let count = if named == NONE {
+            0
+        } else {
+            self.own_tokens(named, PythonKind::Identifier, &mut carried)
+        };
 
         if count > 0 {
-            let name = self.text_of(names[0]);
+            let name = self.text_of(carried[0]);
             let _ = self.bind(BindingKind::Assignment, name, job.scope);
         }
 
-        let inner = self.type_scope(job.node, job.scope);
+        let params = self.type_scope(job.node, job.scope);
+        let inner = self.open_scope(ScopeKind::TypeAlias, job.node, params);
+
         self.stage_open();
 
         let mut child = self.tree.at(job.node).child_first;
@@ -687,10 +727,34 @@ impl Binder<'_> {
                     let name = self.text_of(names[0]);
                     let _ = self.bind(BindingKind::TypeParameter, name, scope);
                 }
+
+                self.type_bound(child, scope);
             }
 
             child = self.tree.at(child).sibling_next;
         }
+    }
+
+    fn type_bound(&mut self, node: u32, scope: u32) {
+        let held = self.tree.at(node).child_first;
+
+        if held == NONE {
+            return;
+        }
+
+        let inner = self.open_scope(ScopeKind::TypeVariable, node, scope);
+
+        self.stage_open();
+
+        let mut child = held;
+
+        while child != NONE {
+            self.stage(child, inner, Mode::Load, BindingKind::Assignment, false);
+
+            child = self.tree.at(child).sibling_next;
+        }
+
+        self.commit();
     }
 
     fn inlined(&mut self, job: Job) {
@@ -1163,7 +1227,7 @@ impl Binder<'_> {
                         Mode::Load
                     };
 
-                    self.stage(clause, scope, mode, BindingKind::Assignment, false);
+                    self.stage(clause, scope, mode, BindingKind::Assignment, job.comprehension);
                     index += 1;
                     clause = self.tree.at(clause).sibling_next;
                 }

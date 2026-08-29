@@ -16,18 +16,18 @@ use scylla::syntax::go::classify::classify;
 use scylla::syntax::go::kind::GoKind;
 use scylla::syntax::go::parse;
 use scylla::syntax::go::semantic::{Resolution, Semantic};
-use scylla::token::Tokens;
+use scylla::token::{Lex, Tokens};
 use scylla::tree::{Events, NONE, Tree};
 
-const BINDING_COUNT_MAX: u32 = 1 << 15;
+const BINDING_COUNT_MAX: u32 = 1 << 16;
 const ERROR_COUNT_MAX: u32 = 1 << 12;
-const EVENT_COUNT_MAX: u32 = 1 << 20;
+const EVENT_COUNT_MAX: u32 = 1 << 21;
 const EVERY_CATEGORY: [&str; 3] = ["gotypes", "not-go", "scylla"];
 const FACT_COUNT_MAX: u32 = 1 << 13;
-const NODE_COUNT_MAX: u32 = 1 << 18;
-const REFERENCE_COUNT_MAX: u32 = 1 << 17;
-const SCOPE_COUNT_MAX: u32 = 1 << 14;
-const TOKEN_COUNT_MAX: u32 = 1 << 18;
+const NODE_COUNT_MAX: u32 = 1 << 19;
+const REFERENCE_COUNT_MAX: u32 = 1 << 18;
+const SCOPE_COUNT_MAX: u32 = 1 << 16;
+const TOKEN_COUNT_MAX: u32 = 1 << 19;
 
 const UNIVERSE: [&[u8]; 44] = [
     b"any",
@@ -109,7 +109,10 @@ impl Machine {
 
     fn run(&mut self, source: &[u8]) -> Structure {
         self.lexed.clear();
-        GO.lex(source, &mut self.lexed);
+
+        if GO.lex(source, &mut self.lexed) != Lex::Complete {
+            return Structure::Truncated;
+        }
 
         assert!(classify(
             source,
@@ -118,7 +121,7 @@ impl Machine {
             &mut self.raw
         ));
 
-        parse::build(
+        let parsed = parse::build(
             source,
             self.tokens.as_slice(),
             &self.raw,
@@ -126,13 +129,19 @@ impl Machine {
             &mut self.tree,
         );
 
-        self.semantic.build(
+        let held = self.semantic.build(
             source,
             self.tokens.as_slice(),
             &self.raw,
             &self.tree,
             &UNIVERSE,
-        )
+        );
+
+        if parsed != Structure::Complete {
+            return parsed;
+        }
+
+        held
     }
 
     fn rows(&self) -> Vec<(u32, i64)> {
@@ -227,14 +236,23 @@ fn collect(root: &Path, base: &Path, found: &mut Vec<Fixture>) {
     }
 }
 
-fn golden(root: &Path, name: &str) -> Option<Vec<(u32, i64)>> {
+struct Golden {
+    broken: bool,
+    rows: Vec<(u32, i64)>,
+}
+
+fn golden(root: &Path, name: &str) -> Option<Golden> {
     let path = root.join(format!("{name}.json"));
     let text = fs::read(&path).ok()?;
+    let broken = find(&text, b"\"broken\":true").is_some();
     let mut found = Vec::new();
     let key = b"\"ast\":[";
 
     let Some(start) = find(&text, key) else {
-        return Some(found);
+        return Some(Golden {
+            broken,
+            rows: found,
+        });
     };
 
     let mut offset = start + key.len();
@@ -272,7 +290,10 @@ fn golden(root: &Path, name: &str) -> Option<Vec<(u32, i64)>> {
     found.sort_unstable();
     found.dedup();
 
-    Some(found)
+    Some(Golden {
+        broken,
+        rows: found,
+    })
 }
 
 fn find(text: &[u8], key: &[u8]) -> Option<usize> {
@@ -383,7 +404,7 @@ fn fixture_diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bo
 
     let _ = machine.run(&fixture.source);
 
-    machine.rows() != expected
+    machine.rows() != expected.rows
 }
 
 fn corpus_diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> bool {
@@ -391,11 +412,15 @@ fn corpus_diverges(machine: &mut Machine, root: &Path, fixture: &Fixture) -> boo
         return true;
     };
 
+    if expected.broken {
+        return true;
+    }
+
     if machine.run(&fixture.source) != Structure::Complete {
         return true;
     }
 
-    placed(&machine.rows(), &expected) != expected
+    placed(&machine.rows(), &expected.rows) != expected.rows
 }
 
 fn report(name: &str, held: &[(u32, i64)], expected: &[(u32, i64)]) -> String {
@@ -473,6 +498,27 @@ fn the_model_is_total_over_the_fixtures() {
 }
 
 #[test]
+fn a_range_over_a_written_out_composite_literal_binds_inside_the_loop_body() {
+    const SOURCE: &[u8] =
+        b"package p\n\nfunc f() {\n\tfor _, po := range []*poset{a, b} {\n\t\tuse(po)\n\t}\n}\n";
+
+    let mut machine = Machine::reserve();
+    let _ = machine.run(SOURCE);
+
+    let bound = machine
+        .semantic
+        .references()
+        .iter()
+        .filter(|held| {
+            matches!(held.resolution, Resolution::Bound(_))
+                && &SOURCE[held.name.range()] == b"po".as_slice()
+        })
+        .count();
+
+    assert_eq!(bound, 2, "the loop variable is unresolved inside the body");
+}
+
+#[test]
 fn every_scope_a_reference_resolves_into_is_on_its_own_chain() {
     let found = fixtures();
 
@@ -532,14 +578,16 @@ fn every_fixture_names_what_go_types_names() {
         let expected = golden(&root, &fixture.name)
             .unwrap_or_else(|| panic!("{} has no golden", fixture.name));
 
+        assert!(!expected.broken, "{} does not parse", fixture.name);
+
         let _ = machine.run(&fixture.source);
 
         let held = machine.rows();
 
         assert!(
-            held == expected,
+            held == expected.rows,
             "{}",
-            report(&fixture.name, &held, &expected)
+            report(&fixture.name, &held, &expected.rows)
         );
 
         compared += 1;
@@ -578,14 +626,18 @@ fn the_corpus_names_what_go_types_names() {
             continue;
         };
 
+        if expected.broken {
+            continue;
+        }
+
         if machine.run(&fixture.source) != Structure::Complete {
             continue;
         }
 
-        let rows = placed(&machine.rows(), &expected);
+        let rows = placed(&machine.rows(), &expected.rows);
 
-        if rows != expected {
-            differing.push(report(&fixture.name, &rows, &expected));
+        if rows != expected.rows {
+            differing.push(report(&fixture.name, &rows, &expected.rows));
         }
 
         compared += 1;

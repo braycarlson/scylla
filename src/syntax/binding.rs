@@ -304,7 +304,10 @@ fn javascript_binding(held: &javascript::Binding) -> Binding {
         | javascript::BindingKind::TypeAlias
         | javascript::BindingKind::TypeParameter => BindingClass::Type,
         javascript::BindingKind::Const => BindingClass::Constant,
-        javascript::BindingKind::Function => BindingClass::Function,
+        javascript::BindingKind::EnumMember => BindingClass::Variant,
+        javascript::BindingKind::Function | javascript::BindingKind::Signature => {
+            BindingClass::Function
+        }
         javascript::BindingKind::Import
         | javascript::BindingKind::ImportDefault
         | javascript::BindingKind::ImportNamespace
@@ -577,6 +580,8 @@ fn python_scope_class(kind: PythonScopeKind) -> ScopeClass {
         PythonScopeKind::Comprehension => ScopeClass::Block,
         PythonScopeKind::Function | PythonScopeKind::Lambda => ScopeClass::Function,
         PythonScopeKind::Module => ScopeClass::Module,
-        PythonScopeKind::Type => ScopeClass::Other,
+        PythonScopeKind::Type | PythonScopeKind::TypeAlias | PythonScopeKind::TypeVariable => {
+            ScopeClass::Other
+        }
     }
 }

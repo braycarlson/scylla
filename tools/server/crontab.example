@@ -1,5 +1,15 @@
+# cron and tmux both run their command under a non-login shell, so nothing in
+# /etc/profile.d is sourced. Every variable the scripts need is declared here
+# instead. TMPDIR matters most: /tmp is usually a tmpfs and cargo-mutants copies
+# the whole build tree per job, so weekly.sh would build into RAM without it.
+PATH=/root/.cargo/bin:/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+TMPDIR=/var/tmp/scratch
+CARGO_HOME=/root/.cargo
+RUSTUP_HOME=/root/.rustup
 SCYLLA=/srv/scylla
 
-@reboot          mkdir -p $SCYLLA/results/logs && $SCYLLA/tools/server/fuzz.sh    >> $SCYLLA/results/logs/fuzz.log    2>&1
+# fuzz.sh defaults its worker count to $(nproc). Set SCYLLA_FUZZ_FORK ahead of
+# the command only on a box that shares its cores with something else.
+@reboot          mkdir -p $SCYLLA/results/logs && tmux new-session -d -s scylla-fuzz "$SCYLLA/tools/server/fuzz.sh >> $SCYLLA/results/logs/fuzz.log 2>&1"
 30 1 * * *       mkdir -p $SCYLLA/results/logs && $SCYLLA/tools/server/nightly.sh >> $SCYLLA/results/logs/nightly.log 2>&1
 30 4 * * 6       mkdir -p $SCYLLA/results/logs && $SCYLLA/tools/server/weekly.sh  >> $SCYLLA/results/logs/weekly.log  2>&1

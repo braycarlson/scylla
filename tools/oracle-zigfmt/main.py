@@ -4,17 +4,14 @@ import subprocess
 import sys
 import tempfile
 
-
 BINARY = os.environ.get(
     "ZIG",
     os.path.expanduser("~/.native/toolchains/zig-0.16.0/zig"),
 )
 
-
 def pin(root):
     with open(os.path.join(root, "PIN"), encoding="utf-8") as held:
         return held.read().strip()
-
 
 def version():
     held = subprocess.run(
@@ -25,7 +22,6 @@ def version():
     )
 
     return held.stdout.strip()
-
 
 def sources(root):
     found = []
@@ -41,7 +37,6 @@ def sources(root):
     found.sort()
 
     return found
-
 
 def main():
     if len(sys.argv) != 3:
@@ -95,7 +90,6 @@ def main():
     print(f"wrote {written} files for zig {wanted}")
 
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

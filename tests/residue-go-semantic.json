@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "fixture": "go/internal/types/testdata/check/constdecl.go",
+    "category": "gotypes",
+    "reason": "The file writes `const ( iota = iota )` and `const ( X = X + X )` inside a function, and the Go specification puts the scope of a constant identifier at the end of its ConstSpec, so both right-hand sides read the outer name: the predeclared `iota` and the package-level `const X = 2`. The file asserts that reading itself, with `B == 1` and `X == 4`. `go/types` records the object being declared in `Info.Uses` for those two names anyway, so the golden points a name at itself and scylla points it where the specification says it goes."
+  },
+  {
+    "fixture": "go/internal/types/testdata/fixedbugs/issue75885.go",
+    "category": "gotypes",
+    "reason": "The file is the test for `cannot use type parameter declared in alias declaration as RHS`, and it writes `type A[P any] = P` inside `func _[P any]()`. `go/types` keeps the alias's own type parameters out of the scope its right-hand side resolves through, so the `P` after the `=` lands on the function's `P`; scylla's scope for a type declaration carries its type parameters and lands on the alias's own `P`. Both name a `P` that is in scope at that point, and only the diagnostic go/types raises separates them."
+  }
+]

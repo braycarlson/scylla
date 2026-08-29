@@ -41,8 +41,20 @@ func escape(text string) string {
 	return out.String()
 }
 
-func walk(fset *token.FileSet, file *ast.File, length int) []row {
+func trimmed(source []byte, start int, end int) int {
+	held := end
+
+	for held > start && (source[held-1] == ' ' || source[held-1] == '\t' ||
+		source[held-1] == '\n' || source[held-1] == '\r') {
+		held--
+	}
+
+	return held
+}
+
+func walk(fset *token.FileSet, file *ast.File, source []byte) []row {
 	rows := []row{}
+	length := len(source)
 
 	ast.Inspect(file, func(node ast.Node) bool {
 		if node == nil {
@@ -55,12 +67,14 @@ func walk(fset *token.FileSet, file *ast.File, length int) []row {
 			return true
 		}
 
-		start := fset.Position(node.Pos()).Offset
-		end := fset.Position(node.End()).Offset
+		start := fset.PositionFor(node.Pos(), false).Offset
+		end := fset.PositionFor(node.End(), false).Offset
 
 		if start < 0 || end > length || end < start {
 			return true
 		}
+
+		end = trimmed(source, start, end)
 
 		rows = append(rows, row{name: name, start: start, end: end})
 
@@ -156,7 +170,7 @@ func main() {
 		}
 
 		relative = filepath.ToSlash(relative)
-		rows := walk(fset, parsed, len(source))
+		rows := walk(fset, parsed, source)
 		var body strings.Builder
 
 		body.WriteString("{\"ast\":[")

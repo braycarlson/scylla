@@ -167,6 +167,32 @@ func skipped(file *ast.File) map[*ast.Ident]bool {
 	return held
 }
 
+func segment(path string, stop int) int {
+	start := 1
+
+	for index := 1; index < stop; index++ {
+		if path[index] == '/' {
+			start = index + 1
+		}
+	}
+
+	return start
+}
+
+func versioned(segment string) bool {
+	if len(segment) < 2 || segment[0] != 'v' {
+		return false
+	}
+
+	for index := 1; index < len(segment); index++ {
+		if segment[index] < '0' || segment[index] > '9' {
+			return false
+		}
+	}
+
+	return true
+}
+
 func named(file *ast.File, fset *token.FileSet, object types.Object) int {
 	for _, spec := range file.Imports {
 		if spec.Pos() != object.Pos() {
@@ -174,22 +200,22 @@ func named(file *ast.File, fset *token.FileSet, object types.Object) int {
 		}
 
 		if spec.Name != nil {
-			return fset.Position(spec.Name.Pos()).Offset
+			return fset.PositionFor(spec.Name.Pos(), false).Offset
 		}
 
 		path := spec.Path.Value
-		start := 1
+		stop := len(path) - 1
+		start := segment(path, stop)
 
-		for index := 1; index+1 < len(path); index++ {
-			if path[index] == '/' {
-				start = index + 1
-			}
+		if start > 1 && versioned(path[start:stop]) {
+			stop = start - 1
+			start = segment(path, stop)
 		}
 
-		return fset.Position(spec.Path.Pos()).Offset + start
+		return fset.PositionFor(spec.Path.Pos(), false).Offset + start
 	}
 
-	return fset.Position(object.Pos()).Offset
+	return fset.PositionFor(object.Pos(), false).Offset
 }
 
 func clauses(paths []string) ([]string, map[string][]string) {
@@ -226,10 +252,13 @@ func clauses(paths []string) ([]string, map[string][]string) {
 	return names, held
 }
 
-func check(paths []string) (*token.FileSet, map[string]*ast.File, *types.Info) {
+func check(
+	paths []string,
+) (*token.FileSet, map[string]*ast.File, *types.Info, *types.Package, map[string]bool) {
 	fset := token.NewFileSet()
 	files := []*ast.File{}
 	named := map[string]*ast.File{}
+	broken := map[string]bool{}
 
 	for _, path := range paths {
 		source, err := os.ReadFile(path)
@@ -244,6 +273,7 @@ func check(paths []string) (*token.FileSet, map[string]*ast.File, *types.Info) {
 			continue
 		}
 
+		broken[path] = err != nil
 		files = append(files, parsed)
 		named[path] = parsed
 	}
@@ -259,12 +289,18 @@ func check(paths []string) (*token.FileSet, map[string]*ast.File, *types.Info) {
 		DisableUnusedImportCheck: true,
 	}
 
-	_, _ = config.Check("scylla", fset, files, info)
+	checked, _ := config.Check("scylla", fset, files, info)
 
-	return fset, named, info
+	return fset, named, info, checked, broken
 }
 
-func rowsOf(fset *token.FileSet, path string, file *ast.File, info *types.Info) []row {
+func rowsOf(
+	fset *token.FileSet,
+	path string,
+	file *ast.File,
+	info *types.Info,
+	checked *types.Package,
+) []row {
 	rows := []row{}
 	seen := map[*ast.Ident]bool{}
 	away := skipped(file)
@@ -278,7 +314,7 @@ func rowsOf(fset *token.FileSet, path string, file *ast.File, info *types.Info) 
 		}
 
 		seen[ident] = true
-		at := fset.Position(ident.Pos())
+		at := fset.PositionFor(ident.Pos(), false)
 
 		if at.Filename != path {
 			return
@@ -291,9 +327,10 @@ func rowsOf(fset *token.FileSet, path string, file *ast.File, info *types.Info) 
 		}
 
 		definition := -1
+		foreign := object.Pkg() != nil && object.Pkg() != checked
 
-		if object.Pos() != token.NoPos {
-			held := fset.Position(object.Pos())
+		if object.Pos() != token.NoPos && !foreign {
+			held := fset.PositionFor(object.Pos(), false)
 
 			if held.Filename != "" && held.Filename != path {
 				return
@@ -358,7 +395,7 @@ func rowsOf(fset *token.FileSet, path string, file *ast.File, info *types.Info) 
 			return true
 		}
 
-		at := fset.Position(ident.Pos())
+		at := fset.PositionFor(ident.Pos(), false)
 
 		if at.Filename != path {
 			return true
@@ -395,10 +432,14 @@ func rowsOf(fset *token.FileSet, path string, file *ast.File, info *types.Info) 
 	return rows
 }
 
-func render(path string, rows []row) string {
+func render(path string, rows []row, broken bool) string {
 	var text strings.Builder
 
-	text.WriteString("{\"ast\":[")
+	if broken {
+		text.WriteString("{\"broken\":true,\"ast\":[")
+	} else {
+		text.WriteString("{\"ast\":[")
+	}
 
 	for index, held := range rows {
 		if index > 0 {
@@ -435,7 +476,7 @@ func main() {
 		clause, grouped := clauses(held[directory])
 
 		for _, one := range clause {
-			fset, files, info := check(grouped[one])
+			fset, files, info, checked, broken := check(grouped[one])
 
 			for path := range files {
 				relative, err := filepath.Rel(root, path)
@@ -451,7 +492,7 @@ func main() {
 					continue
 				}
 
-				body := render(relative, rowsOf(fset, path, files[path], info))
+				body := render(relative, rowsOf(fset, path, files[path], info, checked), broken[path])
 
 				if err := os.WriteFile(target, []byte(body), 0o644); err != nil {
 					continue

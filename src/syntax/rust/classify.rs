@@ -1,6 +1,6 @@
-use crate::bounded::BoundedVec;
+use crate::bounded::{BoundedVec, count_of};
 use crate::syntax::rust::kind::RustKind;
-use crate::token::{Token, TokenKind, Tokens};
+use crate::token::{Punctuation, Token, TokenKind, Tokens, operator_limit_of};
 
 #[cfg(test)]
 const KEYWORDS: [(&[u8], RustKind); 42] = [
@@ -107,6 +107,7 @@ pub fn classify(
     raw.clear();
 
     let mut position = 0;
+    let mut previous = RustKind::ErrorToken;
 
     while position < tokens.len() {
         let token = tokens[position];
@@ -126,16 +127,47 @@ pub fn classify(
             position += 2;
         }
 
+        let limit = operator_limit_of(tokens, position, count_of(end));
         let mut cursor = offset;
         let mut stop = offset;
 
+        let split = if coarse == TokenKind::Number && previous == RustKind::Dot {
+            source[offset..end].iter().position(|byte| *byte == b'.')
+        } else {
+            None
+        };
+
+        if let Some(index) = split {
+            let middle = offset + index;
+
+            if !push(source, out, raw, coarse, RustKind::Number, offset, middle) {
+                return false;
+            }
+
+            let dot = TokenKind::Punctuation(Punctuation::Dot);
+
+            if !push(source, out, raw, dot, RustKind::Dot, middle, middle + 1) {
+                return false;
+            }
+
+            if !push(source, out, raw, coarse, RustKind::Number, middle + 1, end) {
+                return false;
+            }
+
+            previous = RustKind::Number;
+            position += 1;
+
+            continue;
+        }
+
         for _ in 0..=(end - offset) {
-            let (kind, reach) = kind_of(source, coarse, cursor, end);
+            let (kind, reach) = kind_of(source, limit as usize, coarse, cursor, end);
 
             if !push(source, out, raw, coarse, kind, cursor, reach) {
                 return false;
             }
 
+            previous = kind;
             stop = reach;
 
             if reach >= end {
@@ -222,7 +254,13 @@ fn push(
     raw.push(kind)
 }
 
-fn kind_of(source: &[u8], coarse: TokenKind, offset: usize, end: usize) -> (RustKind, usize) {
+fn kind_of(
+    source: &[u8],
+    limit: usize,
+    coarse: TokenKind,
+    offset: usize,
+    end: usize,
+) -> (RustKind, usize) {
     let bytes = &source[offset..end];
 
     match coarse {
@@ -241,7 +279,7 @@ fn kind_of(source: &[u8], coarse: TokenKind, offset: usize, end: usize) -> (Rust
                 return (word_of(bytes), end);
             }
 
-            operator_join(source, offset)
+            operator_join(&source[..limit], offset)
         }
     }
 }

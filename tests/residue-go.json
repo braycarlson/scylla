@@ -3,5 +3,15 @@
     "fixture": "bat/tests/syntax-tests/highlighted/Go/main.go",
     "category": "not-go",
     "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Go package. `go/parser` rejects it on the first escape byte, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "go/internal/coverage/cfile/testdata/issue59563/repro.go",
+    "category": "shape",
+    "reason": "The generated file chains 400 `else if` arms into one statement, past the 96 levels the parser declares in `NEST_DEPTH_MAX`. scylla answers `Structure::TooDeep` and stops descending, which is the parser reporting its own bound rather than disagreeing with `go/ast` about the shape of the source."
+  },
+  {
+    "fixture": "go/internal/types/testdata/check/stmt1.go",
+    "category": "shape",
+    "reason": "The file writes `case 0: return;` with the semicolon spelled out. `go/ast` ends a `CaseClause` at its last statement and leaves the separator owned by nothing, while scylla attributes every token it consumes to the node that was open when it consumed it, so the clause that ate the separator carries it. Both agree on every statement inside the clause; only the byte the separator occupies is placed differently."
   }
 ]

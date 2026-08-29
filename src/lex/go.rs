@@ -4,11 +4,12 @@ use crate::scan::{
     is_identifier_start_at,
     line_scan,
     line_scan_trimmed,
-    number_scan,
+    number_scan_bounded,
     punctuation_of,
     string_scan,
     word_in,
 };
+use crate::scan::Numbers;
 use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static GO: GoLexer = GoLexer;
@@ -474,8 +475,13 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
         };
     }
 
-    if byte.is_ascii_digit() {
-        return (TokenKind::Number, number_scan(source, offset));
+    let leads = byte == b'.' && source.get(offset + 1).is_some_and(u8::is_ascii_digit);
+
+    if byte.is_ascii_digit() || leads {
+        return (
+            TokenKind::Number,
+            number_scan_bounded(source, offset, Numbers::ONE_SIDED),
+        );
     }
 
     let (punctuation, length) = punctuation_of(source, offset);

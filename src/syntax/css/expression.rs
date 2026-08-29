@@ -1,6 +1,6 @@
+use crate::scan;
 use crate::syntax::css::kind::CSSKind;
 
-pub const ESCAPE_DIGIT_MAX: usize = 6;
 pub const HEX_WIDTH_MAX: usize = 8;
 pub const HEX_WIDTH_MIN: usize = 3;
 pub const NEST_DEPTH_MAX: u32 = 64;
@@ -104,30 +104,7 @@ pub const fn is_loose_postfix(kind: CSSKind) -> bool {
 }
 
 pub fn escape_end(source: &[u8], start: usize) -> usize {
-    assert!(start < source.len());
-    assert_eq!(source[start], b'\\');
-
-    let mut offset = start + 1;
-
-    if offset >= source.len() {
-        return offset;
-    }
-
-    if !source[offset].is_ascii_hexdigit() {
-        return offset + 1;
-    }
-
-    let stop = (offset + ESCAPE_DIGIT_MAX).min(source.len());
-
-    while offset < stop && source[offset].is_ascii_hexdigit() {
-        offset += 1;
-    }
-
-    if source.get(offset).is_some_and(|byte| *byte == b' ') {
-        offset += 1;
-    }
-
-    offset
+    scan::escape_end(source, start)
 }
 
 pub fn identifier_end(source: &[u8], start: usize) -> Option<usize> {

@@ -1,5 +1,7 @@
 use crate::language::Lexer;
 use crate::scan::{
+    escape_end,
+    escape_holds,
     is_identifier_part,
     line_break_width,
     mark_width,
@@ -72,6 +74,10 @@ fn token_of(source: &[u8], start: usize, depth: u32) -> (TokenKind, usize) {
 
     if breaks > 0 {
         return (TokenKind::Newline, start + breaks);
+    }
+
+    if byte == b'\\' && escape_holds(source, start) {
+        return (TokenKind::Identifier, escape_end(source, start));
     }
 
     if byte == b'/' && source.get(start + 1) == Some(&b'*') {

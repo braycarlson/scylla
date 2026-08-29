@@ -29,6 +29,7 @@ pub enum Role {
     ConstKeyword,
     Constant,
     DefaultKeyword,
+    EnumBody,
     EnumDeclaration,
     Equal,
     ExportClause,
@@ -459,7 +460,7 @@ static TYPESCRIPT_ROLES: [Role; crate::syntax::typescript::kind::KIND_COUNT as u
     Role::Other,
     Role::ArrowFunction,
     Role::Other,
-    Role::Other,
+    Role::TypePredicate,
     Role::Other,
     Role::AssignmentExpression,
     Role::AssignmentPattern,
@@ -482,13 +483,13 @@ static TYPESCRIPT_ROLES: [Role; crate::syntax::typescript::kind::KIND_COUNT as u
     Role::FunctionType,
     Role::Other,
     Role::Other,
+    Role::Modifier,
     Role::Other,
     Role::Other,
     Role::Other,
     Role::Other,
     Role::Other,
-    Role::Other,
-    Role::Other,
+    Role::EnumBody,
     Role::EnumDeclaration,
     Role::Other,
     Role::Other,
@@ -565,7 +566,7 @@ static TYPESCRIPT_ROLES: [Role; crate::syntax::typescript::kind::KIND_COUNT as u
     Role::Other,
     Role::Parameter,
     Role::Other,
-    Role::Other,
+    Role::Modifier,
     Role::Pair,
     Role::PairPattern,
     Role::Other,
@@ -644,6 +645,7 @@ pub enum BindingKind {
     Class,
     Const,
     Enum,
+    EnumMember,
     Function,
     Import,
     ImportDefault,
@@ -654,6 +656,7 @@ pub enum BindingKind {
     Namespace,
     Parameter,
     ParameterProperty,
+    Signature,
     TypeAlias,
     TypeParameter,
     Var,
@@ -776,6 +779,7 @@ impl BindingKind {
             | Self::Class
             | Self::Const
             | Self::Enum
+            | Self::EnumMember
             | Self::Function
             | Self::Import
             | Self::ImportDefault
@@ -784,6 +788,7 @@ impl BindingKind {
             | Self::Namespace
             | Self::Parameter
             | Self::ParameterProperty
+            | Self::Signature
             | Self::Var => Namespace::Value,
         }
     }
@@ -801,16 +806,18 @@ impl BindingKind {
             }
             Self::CatchParameter
             | Self::Const
+            | Self::EnumMember
             | Self::Function
             | Self::Let
             | Self::Parameter
             | Self::ParameterProperty
+            | Self::Signature
             | Self::Var => matches!(namespace, Namespace::Any | Namespace::Value),
         }
     }
 
     pub const fn hoists(self) -> bool {
-        matches!(self, Self::Function | Self::Var)
+        matches!(self, Self::Function | Self::Signature | Self::Var)
     }
 
     pub const fn imports(self) -> bool {
@@ -827,7 +834,7 @@ impl BindingKind {
 
 impl ScopeKind {
     pub const fn holds_a_function(self) -> bool {
-        matches!(self, Self::Function | Self::Global | Self::Module)
+        matches!(self, Self::Ambient | Self::Function | Self::Global | Self::Module)
     }
 
     pub const fn is_root(self) -> bool {
@@ -1060,7 +1067,7 @@ impl Semantic {
         while scope != NONE && steps <= SCOPE_DEPTH_MAX {
             let held = self.scopes[scope as usize];
             let bounded = if reference.positional && scope == reference.scope {
-                self.binding_before(source, scope, name, reference.node)
+                self.binding_before(source, scope, name, reference.node, reference.namespace)
             } else {
                 self.binding_in(source, scope, name, reference.namespace)
             };
@@ -1144,7 +1151,14 @@ impl Semantic {
         NONE
     }
 
-    fn binding_before(&self, source: &[u8], scope: u32, name: &[u8], node: u32) -> u32 {
+    fn binding_before(
+        &self,
+        source: &[u8],
+        scope: u32,
+        name: &[u8],
+        node: u32,
+        namespace: Namespace,
+    ) -> u32 {
         let hash = name_hash(name);
         let mut index = self.heads[self.bucket_of(scope, hash)];
 
@@ -1157,6 +1171,7 @@ impl Semantic {
 
             if held.scope == scope
                 && held.node <= node
+                && held.kind.binds_in(namespace)
                 && held.name_hash == hash
                 && &source[held.name.range()] == name
             {
@@ -1169,8 +1184,6 @@ impl Semantic {
         NONE
     }
 }
-
-const FIELD_MODIFIER_MAX: u32 = 2;
 
 const fn signs(role: Role) -> bool {
     matches!(
@@ -1187,7 +1200,11 @@ fn module_of<K>(tree: &Tree<K>) -> ModuleKind
 where
     K: Kind + Kinds,
 {
-    for node in tree.as_slice() {
+    for (index, node) in tree.as_slice().iter().enumerate() {
+        if index == 0 || node.parent != 0 {
+            continue;
+        }
+
         if matches!(
             node.kind.role(),
             Role::ExportStatement | Role::ImportStatement
@@ -1369,7 +1386,8 @@ where
             Some(Role::CatchClause) => Some(ScopeKind::Catch),
             Some(Role::Class | Role::ClassDeclaration) => Some(ScopeKind::Class),
             Some(
-                Role::ForInStatement
+                Role::EnumDeclaration
+                | Role::ForInStatement
                 | Role::ForStatement
                 | Role::InterfaceDeclaration
                 | Role::StatementBlock
@@ -1383,9 +1401,14 @@ where
 
     fn scope_kind_at(&self, node: u32, role: Role) -> Option<ScopeKind> {
         let kind = Self::scope_kind_of(role)?;
+        let parent = self.role_of(self.tree.at(node).parent);
 
-        if role == Role::Namespace && self.role_of(self.tree.at(node).parent) == Role::Ambient {
+        if role == Role::Namespace && parent == Role::Ambient {
             return Some(ScopeKind::Ambient);
+        }
+
+        if role == Role::StatementBlock && parent == Role::Ambient {
+            return None;
         }
 
         Some(kind)
@@ -1451,6 +1474,10 @@ where
             self.catch_parameter(node);
         }
 
+        if role == Role::EnumDeclaration {
+            self.members(node);
+        }
+
         if role == Role::ForInStatement {
             self.iteration(node);
         }
@@ -1461,7 +1488,8 @@ where
 
         if matches!(
             role,
-            Role::CallSignature
+            Role::ArrowFunction
+                | Role::CallSignature
                 | Role::Class
                 | Role::ClassDeclaration
                 | Role::FunctionDeclaration
@@ -1492,13 +1520,29 @@ where
     }
 
     fn name_token_of(&self, node: u32) -> Option<Span> {
-        for child in self.children(node) {
-            if matches!(
-                self.role_of(child),
-                Role::IdentifierNode | Role::TypeIdentifier
-            ) {
-                return Some(self.span_of(child));
+        let mut held = node;
+
+        for _ in 0..=self.tree.count() {
+            let mut nested = NONE;
+
+            for child in self.children(held) {
+                if matches!(
+                    self.role_of(child),
+                    Role::IdentifierNode | Role::TypeIdentifier
+                ) {
+                    return Some(self.span_of(child));
+                }
+
+                if nested == NONE && self.role_of(child) == Role::MemberExpression {
+                    nested = child;
+                }
             }
+
+            if nested == NONE {
+                return None;
+            }
+
+            held = nested;
         }
 
         None
@@ -1531,6 +1575,7 @@ where
             Some(Role::EnumDeclaration) => self.declaration(node, BindingKind::Enum),
             Some(Role::FormalParameters) => self.parameters(node),
             Some(Role::FunctionDeclaration) => self.declaration(node, BindingKind::Function),
+            Some(Role::FunctionSignature) => self.declaration(node, BindingKind::Signature),
             Some(Role::ImportAlias | Role::ImportRequire) => self.import_equals(node),
             Some(Role::ImportStatement) => self.import(node),
             Some(Role::InferType) => self.infer(node),
@@ -1558,7 +1603,7 @@ where
     }
 
     fn lexical(&mut self, node: u32) {
-        let kind = if self.holds_token(node, Role::ConstKeyword, b"") {
+        let kind = if self.holds_token(node, Role::ConstKeyword, b"") || self.resource(node) {
             BindingKind::Const
         } else {
             BindingKind::Let
@@ -1574,6 +1619,16 @@ where
 
             self.pattern(target, Target::Bind { kind, zone });
         }
+    }
+
+    fn resource(&self, node: u32) -> bool {
+        let span = self.span_of(node);
+        let from = span.offset as usize;
+        let end = span.end() as usize;
+        let text = self.source.get(from..end).unwrap_or_default();
+        let head = text.strip_prefix(b"await".as_slice()).unwrap_or(text);
+
+        head.trim_ascii_start().starts_with(b"using")
     }
 
     fn variable(&mut self, node: u32) {
@@ -1637,12 +1692,29 @@ where
     }
 
     fn declares_a_field(&self, node: u32) -> bool {
-        (0..FIELD_MODIFIER_MAX).any(|index| {
-            matches!(
-                self.word_at(node, index),
+        let target = self.parameter_target(node);
+        let held = self.tree.at(node);
+
+        let stop = if target == NONE {
+            held.token_end
+        } else {
+            self.tree.at(target).token_start
+        };
+
+        for position in held.token_start..stop {
+            if self.raw[position as usize].role() == Role::Comment {
+                continue;
+            }
+
+            if matches!(
+                self.tokens[position as usize].text(self.source),
                 b"private" | b"protected" | b"public" | b"readonly"
-            )
-        })
+            ) {
+                return true;
+            }
+        }
+
+        false
     }
 
     fn import_equals(&mut self, node: u32) {
@@ -1705,6 +1777,29 @@ where
         self.parameter = PARAMETER_NONE;
     }
 
+    fn members(&mut self, node: u32) {
+        let Some(body) = self.children(node).last() else {
+            return;
+        };
+
+        if self.role_of(body) != Role::EnumBody {
+            return;
+        }
+
+        for member in self.children(body) {
+            let named = if self.role_of(member) == Role::PropertyIdentifier {
+                member
+            } else {
+                match self.children(member).next() {
+                    Some(first) if self.role_of(first) == Role::PropertyIdentifier => first,
+                    Some(_) | None => continue,
+                }
+            };
+
+            self.record(BindingKind::EnumMember, self.span_of(named), named, NONE);
+        }
+    }
+
     fn iteration(&mut self, node: u32) {
         let target = self.child_at(node, 0);
 
@@ -1728,6 +1823,11 @@ where
                 Some(Role::ConstKeyword) => return Some(BindingKind::Const),
                 Some(Role::LetKeyword) => return Some(BindingKind::Let),
                 Some(Role::VarKeyword) => return Some(BindingKind::Var),
+                Some(Role::Identifier)
+                    if self.tokens[position as usize].text(self.source) == b"using" =>
+                {
+                    return Some(BindingKind::Const);
+                }
                 Some(_) | None => {}
             }
         }
@@ -1997,6 +2097,16 @@ where
     }
 
     fn export_of(&mut self, node: u32, specifier: Span) -> bool {
+        if self.role_of(node) == Role::Ambient {
+            let mut named = false;
+
+            for child in self.children(node) {
+                named = self.export_of(child, specifier) || named;
+            }
+
+            return named;
+        }
+
         match Some(self.role_of(node)) {
             Some(Role::ExportClause) => {
                 for held in self.children(node) {
@@ -2020,6 +2130,8 @@ where
                 Role::ClassDeclaration
                 | Role::EnumDeclaration
                 | Role::FunctionDeclaration
+                | Role::ImportAlias
+                | Role::ImportRequire
                 | Role::InterfaceDeclaration
                 | Role::Namespace
                 | Role::TypeAliasDeclaration,
@@ -2085,15 +2197,26 @@ where
         match Some(self.role_of(node)) {
             Some(Role::IdentifierNode) => {
                 let name = self.span_of(node);
+                let kind = if typed {
+                    BindingKind::ImportType
+                } else {
+                    BindingKind::ImportDefault
+                };
 
-                self.record(BindingKind::ImportDefault, name, node, NONE);
+                self.record(kind, name, node, NONE);
             }
             Some(Role::NamespaceImport) => {
                 let Some(name) = self.name_token_of(node) else {
                     return;
                 };
 
-                self.record(BindingKind::ImportNamespace, name, node, NONE);
+                let kind = if typed {
+                    BindingKind::ImportType
+                } else {
+                    BindingKind::ImportNamespace
+                };
+
+                self.record(kind, name, node, NONE);
             }
             Some(Role::NamedImports) => {
                 for held in self.children(node) {
@@ -2257,11 +2380,33 @@ where
             return Namespace::Any;
         }
 
-        if role == Role::TypeIdentifier || parent == Role::NestedType {
+        if role == Role::TypeIdentifier || self.nested_type(node) {
             return Namespace::Type;
         }
 
         Namespace::Value
+    }
+
+    fn nested_type(&self, node: u32) -> bool {
+        let mut held = self.tree.at(node).parent;
+        let mut steps = 0;
+
+        while held != NONE && steps <= SCOPE_DEPTH_MAX {
+            let role = self.role_of(held);
+
+            if role == Role::NestedType {
+                return true;
+            }
+
+            if role != Role::MemberExpression {
+                return false;
+            }
+
+            held = self.tree.at(held).parent;
+            steps += 1;
+        }
+
+        false
     }
 
     fn queried(&self, node: u32) -> bool {
@@ -2349,11 +2494,22 @@ where
                 return Standing::Load;
             }
 
-            if let Some(held) = Self::standing_in(role, position) {
-                if held == Standing::Store && self.consumed(parent) {
-                    return Standing::Load;
+            if role == Role::Parameter {
+                if child == self.parameter_target(parent) {
+                    return Standing::Bound;
                 }
 
+                return Standing::Load;
+            }
+
+            if role == Role::MemberExpression
+                && position == 0
+                && self.role_of(self.tree.at(parent).parent) == Role::Namespace
+            {
+                return Standing::Bound;
+            }
+
+            if let Some(held) = Self::standing_in(role, position) {
                 return held;
             }
 
@@ -2404,15 +2560,6 @@ where
             ) => Some(Standing::Bound),
             Some(_) | None => None,
         }
-    }
-
-    fn consumed(&self, node: u32) -> bool {
-        let parent = self.tree.at(node).parent;
-
-        !matches!(
-            Some(self.role_of(parent)),
-            Some(Role::ExpressionStatement | Role::ForStatement | Role::SequenceExpression) | None
-        )
     }
 
     fn reexports(&self, node: u32) -> Standing {
@@ -2477,8 +2624,7 @@ where
                     Some(Standing::Load)
                 }
             }
-            Some(Role::AugmentedAssignment) => Some(Standing::Load),
-            Some(Role::UpdateExpression) => Some(Standing::Store),
+            Some(Role::AugmentedAssignment | Role::UpdateExpression) => Some(Standing::Load),
             Some(Role::ArrowFunction) => {
                 if position == 0 {
                     Some(Standing::Bound)

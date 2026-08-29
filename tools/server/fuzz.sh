@@ -76,5 +76,7 @@ while true; do
         ) 9>"$lock"
 
         python3 "$here/triage.py" || echo "fuzz: triage exited $?"
+        python3 "$here/report.py" "$results/$(date --utc +%F)" > /dev/null \
+            || echo "fuzz: report exited $?"
     done
 done

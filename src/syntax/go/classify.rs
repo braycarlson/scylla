@@ -1,6 +1,6 @@
-use crate::bounded::BoundedVec;
+use crate::bounded::{BoundedVec, count_of};
 use crate::syntax::go::kind::GoKind;
-use crate::token::{Token, TokenKind, Tokens};
+use crate::token::{Token, TokenKind, Tokens, operator_limit_of};
 
 #[cfg(test)]
 const KEYWORDS: [(&[u8], GoKind); 25] = [
@@ -111,11 +111,12 @@ pub fn classify(
             continue;
         }
 
+        let limit = operator_limit_of(tokens, position, count_of(end));
         let mut cursor = offset;
         let mut stop = offset;
 
         for _ in 0..=(end - offset) {
-            let (kind, reach) = kind_of(source, token.kind, cursor, end);
+            let (kind, reach) = kind_of(&source[..limit as usize], token.kind, cursor, end);
 
             if !push(source, out, raw, token.kind, kind, cursor, reach) {
                 return false;

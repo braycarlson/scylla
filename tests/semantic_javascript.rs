@@ -15,11 +15,15 @@ use scylla::syntax::javascript::classify::classify;
 use scylla::syntax::javascript::kind::JavaScriptKind;
 use scylla::syntax::javascript::parse;
 use scylla::syntax::javascript::semantic::{
+    Binding,
     BindingKind,
     Context,
+    Kinds,
     Namespace,
     PARAMETER_NONE,
+    Reference,
     Resolution,
+    Role,
     ScopeKind,
     Semantic,
 };
@@ -27,9 +31,9 @@ use scylla::syntax::typescript::classify::classify as typescript_classify;
 use scylla::syntax::typescript::dialect::Dialect;
 use scylla::syntax::typescript::kind::TypeScriptKind;
 use scylla::syntax::typescript::parse as typescript_parse;
-use scylla::syntax::{FactKind, Structure};
-use scylla::token::Tokens;
-use scylla::tree::{Events, NONE, Tree};
+use scylla::syntax::{Category, FactKind, Structure};
+use scylla::token::{Token, Tokens};
+use scylla::tree::{Events, Kind, NONE, Tree};
 
 const BINDING_COUNT_MAX: u32 = 1 << 15;
 const ERROR_COUNT_MAX: u32 = 1 << 12;
@@ -112,12 +116,14 @@ struct Fixture {
 }
 
 struct Machine {
+    declaration: bool,
     events: Events<JavaScriptKind>,
     lexed: Tokens,
     raw: BoundedVec<JavaScriptKind>,
     semantic: Semantic,
     tokens: Tokens,
     tree: Tree<JavaScriptKind>,
+    typed: bool,
     typed_events: Events<TypeScriptKind>,
     typed_raw: BoundedVec<TypeScriptKind>,
     typed_tokens: Tokens,
@@ -127,6 +133,7 @@ struct Machine {
 impl Machine {
     fn reserve() -> Self {
         Self {
+            declaration: false,
             events: Events::reserve(EVENT_COUNT_MAX),
             lexed: Tokens::reserve(TOKEN_COUNT_MAX),
             raw: BoundedVec::reserve(TOKEN_COUNT_MAX),
@@ -138,6 +145,7 @@ impl Machine {
             ),
             tokens: Tokens::reserve(TOKEN_COUNT_MAX),
             tree: Tree::reserve(NODE_COUNT_MAX, ERROR_COUNT_MAX),
+            typed: false,
             typed_events: Events::reserve(EVENT_COUNT_MAX),
             typed_raw: BoundedVec::reserve(TOKEN_COUNT_MAX),
             typed_tokens: Tokens::reserve(TOKEN_COUNT_MAX),
@@ -146,6 +154,10 @@ impl Machine {
     }
 
     fn run_fixture(&mut self, fixture: &Fixture) -> Structure {
+        self.declaration = fixture.name.ends_with(".d.ts")
+            || fixture.name.ends_with(".d.cts")
+            || fixture.name.ends_with(".d.mts");
+
         match fixture.dialect {
             None => self.run(&fixture.source),
             Some(dialect) => self.run_typed(&fixture.source, dialect),
@@ -153,6 +165,7 @@ impl Machine {
     }
 
     fn run_typed(&mut self, source: &[u8], dialect: Dialect) -> Structure {
+        self.typed = true;
         self.lexed.clear();
         TYPESCRIPT.lex(source, &mut self.lexed);
 
@@ -184,6 +197,7 @@ impl Machine {
     }
 
     fn run(&mut self, source: &[u8]) -> Structure {
+        self.typed = false;
         self.lexed.clear();
         JAVASCRIPT.lex(source, &mut self.lexed);
 
@@ -218,6 +232,8 @@ impl Machine {
         self.undefined(source, &mut found);
         self.unused(source, &mut found);
         self.redeclared(source, &mut found);
+
+        found.retain(|row| !suppressed(source, &row.0, row.1));
         found.sort();
 
         found
@@ -233,7 +249,10 @@ impl Machine {
                 continue;
             }
 
-            if typeof_at(source, held.name.offset) {
+            if typeof_at(source, held.name.offset)
+                && !self.queried(held.node)
+                && self.role_above(held.node, 1) != Some(Role::MemberExpression)
+            {
                 continue;
             }
 
@@ -242,6 +261,12 @@ impl Machine {
     }
 
     fn unused(&self, source: &[u8], found: &mut Vec<(String, u32)>) {
+        if self.declaration {
+            return;
+        }
+
+        let jsx = self.holds_jsx();
+
         for index in 0..self.semantic.count() {
             let held = self.semantic.bindings()[index as usize];
 
@@ -249,11 +274,15 @@ impl Machine {
                 continue;
             }
 
+            if jsx && &source[held.name.range()] == b"React" {
+                continue;
+            }
+
             if ignorable(held.kind, &source[held.name.range()]) {
                 continue;
             }
 
-            if self.exported(held.name) || self.ambient(held.scope) {
+            if self.exported(held.name) || self.ambient(held.scope) || self.declared(held.node) {
                 continue;
             }
 
@@ -269,7 +298,7 @@ impl Machine {
                 continue;
             }
 
-            if self.read(index) {
+            if self.read(source, index) {
                 continue;
             }
 
@@ -283,11 +312,90 @@ impl Machine {
         self.unused_parameters(source, found);
     }
 
+    fn holds_jsx(&self) -> bool {
+        if self.typed {
+            return (0..self.typed_tree.count()).any(|at| {
+                matches!(
+                    self.typed_tree.at(at).kind,
+                    TypeScriptKind::JsxElement | TypeScriptKind::JsxSelfClosingElement
+                )
+            });
+        }
+
+        (0..self.tree.count()).any(|at| {
+            matches!(
+                self.tree.at(at).kind,
+                JavaScriptKind::JsxElement | JavaScriptKind::JsxSelfClosingElement
+            )
+        })
+    }
+
+    fn declared(&self, node: u32) -> bool {
+        if !self.typed {
+            return false;
+        }
+
+        if self.ambient_variable(node) {
+            return false;
+        }
+
+        let mut held = node;
+
+        for _ in 0..=self.typed_tree.count() {
+            if held == NONE {
+                return false;
+            }
+
+            let kind = self.typed_tree.at(held).kind;
+
+            if kind == TypeScriptKind::InternalModule {
+                return false;
+            }
+
+            if kind == TypeScriptKind::AmbientDeclaration {
+                return true;
+            }
+
+            held = self.typed_tree.at(held).parent;
+        }
+
+        false
+    }
+
+    fn ambient_variable(&self, node: u32) -> bool {
+        let declarator = self.typed_tree.at(node).parent;
+
+        if declarator == NONE
+            || self.typed_tree.at(declarator).kind.role() != Role::VariableDeclarator
+        {
+            return false;
+        }
+
+        let declaration = self.typed_tree.at(declarator).parent;
+
+        if declaration == NONE
+            || !matches!(
+                self.typed_tree.at(declaration).kind.role(),
+                Role::LexicalDeclaration | Role::VariableDeclaration
+            )
+        {
+            return false;
+        }
+
+        let above = self.typed_tree.at(declaration).parent;
+
+        above != NONE && self.typed_tree.at(above).kind == TypeScriptKind::AmbientDeclaration
+    }
+
     fn ambient(&self, scope: u32) -> bool {
         let mut held = scope;
 
         for _ in 0..=self.semantic.scopes().len() {
             let found = self.semantic.scopes()[held as usize];
+
+            if self.typed && self.typed_tree.at(found.node).kind == TypeScriptKind::InternalModule {
+                return false;
+            }
 
             if found.kind == ScopeKind::Ambient {
                 return true;
@@ -314,7 +422,7 @@ impl Machine {
         let held = self.semantic.bindings()[index as usize];
         let name = &source[held.name.range()];
         let mut first = index;
-        let mut read = self.read(index);
+        let mut read = self.read(source, index);
         let mut merged = merges(held.kind);
         let mut counted = 1;
 
@@ -334,7 +442,7 @@ impl Machine {
             }
 
             merged = merged || merges(seen.kind);
-            read = read || self.read(other);
+            read = read || self.read(source, other);
             counted += 1;
 
             if other < first {
@@ -345,10 +453,152 @@ impl Machine {
         (first, read, merged && counted > 1)
     }
 
-    fn read(&self, index: u32) -> bool {
-        self.semantic
-            .references_of(index)
-            .any(|held| self.semantic.references()[held as usize].context == Context::Load)
+    fn read(&self, source: &[u8], index: u32) -> bool {
+        let held = self.semantic.bindings()[index as usize];
+
+        self.semantic.references_of(index).any(|found| {
+            let reference = self.semantic.references()[found as usize];
+
+            reference.context == Context::Load
+                && !self.discarded(&reference, held.scope)
+                && !self.recursive(&reference, held)
+                && !self.thrown_away(source, &reference, held)
+        })
+    }
+
+    fn thrown_away(&self, source: &[u8], reference: &Reference, held: Binding) -> bool {
+        if self.functional(reference.scope) != self.functional(held.scope) {
+            return false;
+        }
+
+        let name = &source[held.name.range()];
+
+        if self.typed {
+            return thrown(
+                &self.typed_tree,
+                self.typed_tokens.as_slice(),
+                source,
+                reference.node,
+                name,
+            );
+        }
+
+        thrown(
+            &self.tree,
+            self.tokens.as_slice(),
+            source,
+            reference.node,
+            name,
+        )
+    }
+
+    fn recursive(&self, reference: &Reference, held: Binding) -> bool {
+        let Some(body) = self.self_body(held) else {
+            return false;
+        };
+
+        if self.typed {
+            return inside(&self.typed_tree, reference.node, body);
+        }
+
+        inside(&self.tree, reference.node, body)
+    }
+
+    fn self_body(&self, held: Binding) -> Option<u32> {
+        if matches!(
+            held.kind,
+            BindingKind::Class | BindingKind::Function | BindingKind::TypeParameter
+        ) {
+            return Some(held.node);
+        }
+
+        if !matches!(
+            held.kind,
+            BindingKind::Const | BindingKind::Let | BindingKind::Var
+        ) {
+            return None;
+        }
+
+        let declarator = self.parent_at(held.node);
+
+        if declarator == NONE || self.role_of(declarator) != Role::VariableDeclarator {
+            return None;
+        }
+
+        let value = self.last_at(declarator);
+
+        matches!(
+            self.role_of(value),
+            Role::ArrowFunction | Role::Class | Role::FunctionExpression
+        )
+        .then_some(value)
+    }
+
+    fn parent_at(&self, node: u32) -> u32 {
+        if self.typed {
+            return self.typed_tree.at(node).parent;
+        }
+
+        self.tree.at(node).parent
+    }
+
+    fn last_at(&self, node: u32) -> u32 {
+        if self.typed {
+            return last_child(&self.typed_tree, node);
+        }
+
+        last_child(&self.tree, node)
+    }
+
+    fn discarded(&self, reference: &Reference, scope: u32) -> bool {
+        if self.functional(reference.scope) == self.functional(scope) {
+            return false;
+        }
+
+        self.role_above(reference.node, 1) == Some(Role::UpdateExpression)
+            && self.role_above(reference.node, 2) == Some(Role::ExpressionStatement)
+    }
+
+    fn role_above(&self, node: u32, steps: u32) -> Option<Role> {
+        let mut held = node;
+
+        for _ in 0..steps {
+            held = if self.typed {
+                self.typed_tree.as_slice().get(held as usize)?.parent
+            } else {
+                self.tree.as_slice().get(held as usize)?.parent
+            };
+
+            if held == NONE {
+                return None;
+            }
+        }
+
+        if self.typed {
+            return Some(self.typed_tree.as_slice().get(held as usize)?.kind.role());
+        }
+
+        Some(self.tree.as_slice().get(held as usize)?.kind.role())
+    }
+
+    fn functional(&self, scope: u32) -> u32 {
+        let mut held = scope;
+
+        for _ in 0..=self.semantic.scopes().len() {
+            let found = self.semantic.scopes()[held as usize];
+
+            if matches!(
+                found.kind,
+                ScopeKind::Function | ScopeKind::Global | ScopeKind::Module
+            ) || found.parent == NONE
+            {
+                return held;
+            }
+
+            held = found.parent;
+        }
+
+        held
     }
 
     fn names_itself(&self, index: u32) -> bool {
@@ -363,11 +613,19 @@ impl Machine {
         for index in 0..self.semantic.count() {
             let held = self.semantic.bindings()[index as usize];
 
-            if held.kind != BindingKind::Parameter || held.parameter == PARAMETER_NONE {
+            let held_property = held.kind == BindingKind::ParameterProperty;
+
+            if !(held.kind == BindingKind::Parameter || held_property)
+                || held.parameter == PARAMETER_NONE
+            {
                 continue;
             }
 
-            if !self.read(index) && !self.shadowed(source, index) {
+            if !held_property && !self.read(source, index) && !self.shadowed(source, index) {
+                continue;
+            }
+
+            if spread_at(source, held.name.offset) {
                 continue;
             }
 
@@ -382,11 +640,11 @@ impl Machine {
                 continue;
             }
 
-            if held.parameter < used[held.scope as usize] {
+            if held.parameter < used[held.scope as usize] && !self.patterned(held.node) {
                 continue;
             }
 
-            if self.read(index) || self.shadowed(source, index) {
+            if self.read(source, index) || self.shadowed(source, index) {
                 continue;
             }
 
@@ -394,8 +652,101 @@ impl Machine {
                 continue;
             }
 
+            if !spread_at(source, held.name.offset) && self.overriding(source, held.scope) {
+                continue;
+            }
+
+            if self.setting(source, held.scope) {
+                continue;
+            }
+
             found.push(("no-unused-vars".to_owned(), held.name.offset));
         }
+    }
+
+    fn queried(&self, node: u32) -> bool {
+        if !self.typed || node == NONE {
+            return false;
+        }
+
+        let nodes = self.typed_tree.as_slice();
+        let mut held = node;
+
+        for _ in 0..nodes.len() {
+            let Some(found) = nodes.get(held as usize) else {
+                return false;
+            };
+
+            if found.parent == NONE {
+                return false;
+            }
+
+            let Some(parent) = nodes.get(found.parent as usize) else {
+                return false;
+            };
+
+            if parent.kind == TypeScriptKind::TypeQuery {
+                return true;
+            }
+
+            if parent.kind != TypeScriptKind::MemberExpression {
+                return false;
+            }
+
+            held = found.parent;
+        }
+
+        false
+    }
+
+    fn overriding(&self, source: &[u8], scope: u32) -> bool {
+        self.accessed(source, scope, b"override")
+    }
+
+    fn patterned(&self, node: u32) -> bool {
+        if self.typed {
+            return pattern_above(&self.typed_tree, node);
+        }
+
+        pattern_above(&self.tree, node)
+    }
+
+    fn setting(&self, source: &[u8], scope: u32) -> bool {
+        self.accessed(source, scope, b"set")
+    }
+
+    fn accessed(&self, source: &[u8], scope: u32, word: &[u8]) -> bool {
+        let Some(signature) = self.signature(source, scope) else {
+            return false;
+        };
+
+        let mut words = signature
+            .split(u8::is_ascii_whitespace)
+            .filter(|found| !found.is_empty());
+
+        words.any(|found| found == word) && words.next().is_some()
+    }
+
+    fn signature<'source>(&self, source: &'source [u8], scope: u32) -> Option<&'source [u8]> {
+        let held = self.semantic.scopes()[scope as usize];
+
+        if held.node == NONE {
+            return None;
+        }
+
+        let span = if self.typed {
+            let node = self.typed_tree.as_slice().get(held.node as usize)?;
+
+            node.span(self.typed_tokens.as_slice())
+        } else {
+            let node = self.tree.as_slice().get(held.node as usize)?;
+
+            node.span(self.tokens.as_slice())
+        };
+
+        let text = source.get(span.range())?;
+
+        Some(text.split(|byte| *byte == b'(').next().unwrap_or(text))
     }
 
     fn shadowed(&self, source: &[u8], index: u32) -> bool {
@@ -416,33 +767,211 @@ impl Machine {
     }
 
     fn redeclared(&self, source: &[u8], found: &mut Vec<(String, u32)>) {
+        let script = self.semantic.scopes()[0].kind == ScopeKind::Global;
+
         for index in 0..self.semantic.count() {
             let held = self.semantic.bindings()[index as usize];
 
-            if !declares(held.kind) || self.names_itself(index) {
+            if !declares(held.kind) {
                 continue;
             }
 
             let name = &source[held.name.range()];
+
+            if self.names_itself(index) {
+                if script && shadows_a_global(name) {
+                    found.push(("no-redeclare".to_owned(), held.name.offset));
+                }
+
+                continue;
+            }
+
+            let scope = self.namespaced(held.scope);
             let mut earlier = false;
 
             for before in 0..index {
                 let seen = self.semantic.bindings()[before as usize];
 
-                if seen.scope != held.scope || &source[seen.name.range()] != name {
+                if self.namespaced(seen.scope) != scope
+                    || &source[seen.name.range()] != name
+                {
                     continue;
                 }
 
                 earlier = declares(seen.kind) && !self.names_itself(before);
             }
 
-            if !earlier && !shadows_a_global(name) {
+            if !(earlier || script && shadows_a_global(name)) {
                 continue;
             }
 
             found.push(("no-redeclare".to_owned(), held.name.offset));
         }
     }
+
+    fn namespaced(&self, scope: u32) -> u32 {
+        let held = self.semantic.scopes()[scope as usize];
+
+        if held.kind != ScopeKind::Block || held.parent == NONE {
+            return scope;
+        }
+
+        let above = self.semantic.scopes()[held.parent as usize];
+
+        if above.node == NONE || self.role_of(above.node) != Role::Namespace {
+            return scope;
+        }
+
+        held.parent
+    }
+
+    fn role_of(&self, node: u32) -> Role {
+        if self.typed {
+            return self.typed_tree.at(node).kind.role();
+        }
+
+        self.tree.at(node).kind.role()
+    }
+}
+
+fn suppressed(source: &[u8], code: &str, offset: u32) -> bool {
+    if window(source, 0, b"eslint-disable").is_none() {
+        return false;
+    }
+
+    let line = line_of(source, offset);
+    let above = line_above(source, line);
+
+    directive(source, line, b"eslint-disable-line", code)
+        || above.is_some_and(|held| directive(source, held, b"eslint-disable-next-line", code))
+        || blocked(source, line, code)
+}
+
+fn blocked(source: &[u8], line: (usize, usize), code: &str) -> bool {
+    let mut held = (0, 0);
+    let mut open = false;
+
+    for _ in 0..=source.len() {
+        if held.0 >= line.0 {
+            break;
+        }
+
+        if directive(source, held, b"eslint-enable", code) {
+            open = false;
+        } else if directive(source, held, b"eslint-disable", code) {
+            open = true;
+        }
+
+        match line_below(source, held) {
+            Some(next) => held = next,
+            None => break,
+        }
+    }
+
+    open
+}
+
+fn directive(source: &[u8], line: (usize, usize), word: &[u8], code: &str) -> bool {
+    let text = &source[line.0..line.1];
+    let mut at = 0;
+
+    while at + word.len() <= text.len() {
+        let Some(found) = window(text, at, word) else {
+            return false;
+        };
+
+        at = found + word.len();
+
+        let rest = &text[at..];
+
+        if rest.first().is_some_and(|byte| is_name_byte(*byte) || *byte == b'-') {
+            continue;
+        }
+
+        if covers(rest, code) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn window(text: &[u8], from: usize, word: &[u8]) -> Option<usize> {
+    (from..=text.len().saturating_sub(word.len())).find(|at| &text[*at..at + word.len()] == word)
+}
+
+fn covers(rest: &[u8], code: &str) -> bool {
+    let mut held = rest;
+
+    if let Some(at) = window(held, 0, b"--") {
+        held = &held[..at];
+    }
+
+    for closer in [&b"*/"[..], &b"\n"[..]] {
+        if let Some(at) = window(held, 0, closer) {
+            held = &held[..at];
+        }
+    }
+
+    let mut named = false;
+
+    for part in held.split(|byte| *byte == b',') {
+        let trimmed = trim(part);
+
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        named = true;
+
+        if trimmed == code.as_bytes() {
+            return true;
+        }
+    }
+
+    !named
+}
+
+fn trim(text: &[u8]) -> &[u8] {
+    let mut start = 0;
+    let mut end = text.len();
+
+    while start < end && text[start].is_ascii_whitespace() {
+        start += 1;
+    }
+
+    while end > start && text[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+
+    &text[start..end]
+}
+
+fn line_of(source: &[u8], offset: u32) -> (usize, usize) {
+    let held = (offset as usize).min(source.len());
+    let start = source[..held].iter().rposition(|byte| *byte == b'\n').map_or(0, |at| at + 1);
+    let end = source[held..]
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .map_or(source.len(), |at| held + at);
+
+    (start, end)
+}
+
+fn line_above(source: &[u8], line: (usize, usize)) -> Option<(usize, usize)> {
+    if line.0 == 0 {
+        return None;
+    }
+
+    Some(line_of(source, u32::try_from(line.0 - 1).ok()?))
+}
+
+fn line_below(source: &[u8], line: (usize, usize)) -> Option<(usize, usize)> {
+    if line.1 >= source.len() {
+        return None;
+    }
+
+    Some(line_of(source, u32::try_from(line.1 + 1).ok()?))
 }
 
 fn shadows_a_global(name: &[u8]) -> bool {
@@ -460,7 +989,17 @@ const fn merges(kind: BindingKind) -> bool {
 }
 
 const fn declares(kind: BindingKind) -> bool {
-    !matches!(kind, BindingKind::TypeParameter)
+    !matches!(kind, BindingKind::Signature | BindingKind::TypeParameter)
+}
+
+fn spread_at(source: &[u8], offset: u32) -> bool {
+    let mut held = offset as usize;
+
+    while held > 0 && source[held - 1].is_ascii_whitespace() {
+        held -= 1;
+    }
+
+    held >= 3 && &source[held - 3..held] == b"..."
 }
 
 fn typeof_at(source: &[u8], offset: u32) -> bool {
@@ -513,6 +1052,219 @@ fn ignorable(kind: BindingKind, name: &[u8]) -> bool {
     kind != BindingKind::Parameter || name.len() > 1
 }
 
+const fn escapes(role: Role) -> bool {
+    matches!(
+        role,
+        Role::Arguments
+            | Role::ArrowFunction
+            | Role::ClassStaticBlock
+            | Role::FunctionDeclaration
+            | Role::FunctionExpression
+            | Role::MethodDefinition
+    )
+}
+
+fn thrown<K>(tree: &Tree<K>, tokens: &[Token], source: &[u8], node: u32, name: &[u8]) -> bool
+where
+    K: Kind + Kinds,
+{
+    if sequence_term(tree, node) {
+        return true;
+    }
+
+    if looped(tree, node) {
+        return false;
+    }
+
+    if update_target(tree, node) {
+        return discarded_value(tree, tree.at(node).parent);
+    }
+
+    let mut child = node;
+
+    for _ in 0..=tree.count() {
+        let parent = tree.at(child).parent;
+
+        if parent == NONE {
+            return false;
+        }
+
+        let role = tree.at(parent).kind.role();
+
+        if escapes(role) {
+            return false;
+        }
+
+        if matches!(role, Role::AssignmentExpression | Role::AugmentedAssignment) {
+            return last_child(tree, parent) == child
+                && names(tree, tokens, source, tree.at(parent).child_first, name)
+                && discarded_value(tree, parent);
+        }
+
+        child = parent;
+    }
+
+    false
+}
+
+fn looped<K>(tree: &Tree<K>, node: u32) -> bool
+where
+    K: Kind + Kinds,
+{
+    let mut held = node;
+
+    for _ in 0..=tree.count() {
+        if held == NONE {
+            return false;
+        }
+
+        let kind = tree.at(held).kind;
+
+        if kind.category() == Category::Loop {
+            return true;
+        }
+
+        if escapes(kind.role()) {
+            return false;
+        }
+
+        held = tree.at(held).parent;
+    }
+
+    false
+}
+
+fn update_target<K>(tree: &Tree<K>, node: u32) -> bool
+where
+    K: Kind + Kinds,
+{
+    let parent = tree.at(node).parent;
+
+    parent != NONE
+        && tree.at(parent).kind.role() == Role::AugmentedAssignment
+        && tree.at(parent).child_first == node
+}
+
+fn sequence_term<K>(tree: &Tree<K>, node: u32) -> bool
+where
+    K: Kind + Kinds,
+{
+    let parent = tree.at(node).parent;
+
+    parent != NONE
+        && tree.at(parent).kind.role() == Role::SequenceExpression
+        && last_child(tree, parent) != node
+}
+
+fn discarded_value<K>(tree: &Tree<K>, node: u32) -> bool
+where
+    K: Kind + Kinds,
+{
+    let mut child = node;
+
+    for _ in 0..=tree.count() {
+        let parent = tree.at(child).parent;
+
+        if parent == NONE {
+            return false;
+        }
+
+        let role = tree.at(parent).kind.role();
+
+        if role == Role::ExpressionStatement {
+            return true;
+        }
+
+        if role != Role::SequenceExpression {
+            return false;
+        }
+
+        if last_child(tree, parent) != child {
+            return true;
+        }
+
+        child = parent;
+    }
+
+    false
+}
+
+fn names<K>(tree: &Tree<K>, tokens: &[Token], source: &[u8], node: u32, name: &[u8]) -> bool
+where
+    K: Kind + Kinds,
+{
+    node != NONE
+        && tree.at(node).kind.role() == Role::IdentifierNode
+        && &source[tree.at(node).span(tokens).range()] == name
+}
+
+fn last_child<K>(tree: &Tree<K>, node: u32) -> u32
+where
+    K: Kind,
+{
+    let mut child = tree.at(node).child_first;
+    let mut last = NONE;
+
+    for _ in 0..=tree.count() {
+        if child == NONE {
+            return last;
+        }
+
+        last = child;
+        child = tree.at(child).sibling_next;
+    }
+
+    last
+}
+
+fn inside<K>(tree: &Tree<K>, node: u32, ancestor: u32) -> bool
+where
+    K: Kind,
+{
+    let mut held = node;
+
+    for _ in 0..=tree.count() {
+        if held == ancestor {
+            return true;
+        }
+
+        if held == NONE {
+            return false;
+        }
+
+        held = tree.at(held).parent;
+    }
+
+    false
+}
+
+fn pattern_above<K>(tree: &Tree<K>, node: u32) -> bool
+where
+    K: Kind + Kinds,
+{
+    let mut held = node;
+
+    for _ in 0..=tree.count() {
+        if held == NONE {
+            return false;
+        }
+
+        let role = tree.at(held).kind.role();
+
+        if matches!(role, Role::ArrayPattern | Role::ObjectPattern) {
+            return true;
+        }
+
+        if role == Role::FormalParameters {
+            return false;
+        }
+
+        held = tree.at(held).parent;
+    }
+
+    false
+}
+
 const fn reportable(kind: BindingKind) -> bool {
     matches!(
         kind,
@@ -529,6 +1281,7 @@ const fn reportable(kind: BindingKind) -> bool {
             | BindingKind::Let
             | BindingKind::Namespace
             | BindingKind::TypeAlias
+            | BindingKind::TypeParameter
             | BindingKind::Var
     )
 }

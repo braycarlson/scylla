@@ -626,6 +626,7 @@ impl Parser<'_, '_> {
 
                 self.statement_block();
                 self.push_value(checkpoint);
+                self.reduce_top();
 
                 return Step::Operator;
             }

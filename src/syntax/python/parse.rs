@@ -512,7 +512,8 @@ impl Parser<'_, '_> {
 
         top.variant == Variant::Binary
             && top.kind == kind
-            && (kind == PythonKind::Compare || (kind == PythonKind::BoolOp && top.token == token))
+            && (matches!(kind, PythonKind::Compare | PythonKind::MatchOr)
+                || (kind == PythonKind::BoolOp && top.token == token))
     }
 
     fn binary(&mut self, kind: PythonKind, token: PythonKind, left: u8, right: u8) -> Step {
@@ -897,11 +898,6 @@ impl Parser<'_, '_> {
 
         self.frame_count = group;
 
-        if frame.dictionary && frame.stage == 1 {
-            self.events.start(PythonKind::Constant);
-            self.events.finish();
-        }
-
         self.events
             .start_at(frame.checkpoint, PythonKind::JoinedStr);
         self.events.finish();
@@ -942,6 +938,7 @@ impl Parser<'_, '_> {
             let element = self.anchor();
             let frame = Frame {
                 checkpoint,
+                content: element,
                 element,
                 kind: PythonKind::FormattedValue,
                 power: POWER_BARRIER,
@@ -990,7 +987,14 @@ impl Parser<'_, '_> {
             return self.open_joined(true);
         }
 
+        self.close_element(group);
+
         let frame = self.frames[group as usize];
+
+        if frame.elements > 0 {
+            self.events.start_at(frame.content, PythonKind::Tuple);
+            self.events.finish();
+        }
 
         self.frame_count = group;
 
@@ -2565,7 +2569,16 @@ impl Parser<'_, '_> {
             }
         }
 
+        self.line_terminator();
+
         let _ = self.eat(PythonKind::Newline);
+    }
+
+    fn line_terminator(&mut self) {
+        match self.current() {
+            None | Some(PythonKind::Dedent | PythonKind::Newline) => {}
+            Some(_) => self.record(SyntaxErrorKind::UnexpectedToken),
+        }
     }
 
     fn simple_statement(&mut self) {

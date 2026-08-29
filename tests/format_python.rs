@@ -298,6 +298,108 @@ fn formatting_formatted_output_changes_nothing() {
 }
 
 #[test]
+fn a_one_element_tuple_holding_a_broken_collection_gets_one_comma() {
+    let source: &[u8] = b"a = (\n    (\n        None,\n        1,\n    ),\n)\n";
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut out), Outcome::Complete);
+    assert!(!String::from_utf8_lossy(out.as_bytes()).contains(",,"));
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(source)
+    );
+}
+
+#[test]
+fn a_comment_after_the_trailing_comma_keeps_the_comma_before_it() {
+    let source: &[u8] = b"from a import (\n    b,\n    c,  # note\n)\n";
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(source)
+    );
+}
+
+#[test]
+fn a_comment_on_a_line_of_its_own_keeps_that_line() {
+    let source: &[u8] = b"x = [\n    1,\n    2,\n    # note\n]\n";
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut out), Outcome::Complete);
+
+    let once = String::from_utf8_lossy(out.as_bytes()).into_owned();
+
+    assert!(once.contains("2,\n"), "{once}");
+    assert!(once.contains("# note\n]"), "{once}");
+}
+
+#[test]
+fn a_one_line_suite_holding_a_semicolon_stays_on_its_line() {
+    let source: &[u8] = b"def f(t):\n    if t: a = 1; b = 2\n    else: a = 3; b = 4\n";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(ARENA_BYTES_MAX);
+    let mut second = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(second.as_bytes()),
+        String::from_utf8_lossy(&once)
+    );
+}
+
+#[test]
+fn a_multiline_string_leaves_the_column_its_last_line_ends_at() {
+    let source: &[u8] = b"def f():\n    try:\n        pass\n    except:\n        if d:\n            print(\"\"\"\nIf you would like to see debugging output,\ntry: %s -d5\n\"\"\" % sys.argv[0])\n";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(ARENA_BYTES_MAX);
+    let mut second = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert!(
+        String::from_utf8_lossy(&once).contains("sys.argv[0]"),
+        "{}",
+        String::from_utf8_lossy(&once)
+    );
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(second.as_bytes()),
+        String::from_utf8_lossy(&once)
+    );
+}
+
+#[test]
+fn a_format_off_region_leaves_the_indentation_it_found() {
+    let source: &[u8] = b"def f(a):\n    if a:\n        # note\n        # fmt: off\n        x = (\n            1 or\n            2\n        )\n        # fmt: on\n        if x:\n            return x\n\n    return 0\n";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(ARENA_BYTES_MAX);
+    let mut second = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(
+        String::from_utf8_lossy(&once),
+        String::from_utf8_lossy(source)
+    );
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+}
+
+#[test]
 fn formatting_keeps_every_token_it_was_given() {
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(ARENA_BYTES_MAX);

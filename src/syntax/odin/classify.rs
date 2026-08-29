@@ -1,6 +1,6 @@
-use crate::bounded::BoundedVec;
+use crate::bounded::{BoundedVec, count_of};
 use crate::syntax::odin::kind::OdinKind;
-use crate::token::{Token, TokenKind, Tokens};
+use crate::token::{Token, TokenKind, Tokens, operator_limit_of};
 
 #[cfg(test)]
 const KEYWORDS: [(&[u8], OdinKind); 42] = [
@@ -129,11 +129,12 @@ pub fn classify(
         let token = tokens[position];
         let offset = token.offset as usize;
         let end = token.end() as usize;
+        let limit = operator_limit_of(tokens, position, count_of(end));
         let mut cursor = offset;
         let mut stop = offset;
 
         for _ in 0..=(end - offset) {
-            let (kind, reach) = kind_of(source, token.kind, cursor, end);
+            let (kind, reach) = kind_of(&source[..limit as usize], token.kind, cursor, end);
 
             if !push(source, out, raw, token.kind, kind, cursor, reach) {
                 return false;
@@ -327,6 +328,10 @@ fn comment_of(bytes: &[u8]) -> OdinKind {
 }
 
 fn number_of(bytes: &[u8]) -> OdinKind {
+    if bytes.starts_with(b"0h") || bytes.starts_with(b"0H") {
+        return OdinKind::Float;
+    }
+
     if bytes.starts_with(b"0x") || bytes.starts_with(b"0X") || bytes.starts_with(b"0b") {
         return OdinKind::Number;
     }

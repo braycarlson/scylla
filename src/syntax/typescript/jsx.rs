@@ -733,6 +733,10 @@ pub(crate) fn opens_at(previous: Option<TypeScriptKind>, source: &[u8], offset: 
         return false;
     }
 
+    if source.get(offset + 1) == Some(&b'>') {
+        return true;
+    }
+
     !generic_arrow_at(source, offset, source.len())
 }
 

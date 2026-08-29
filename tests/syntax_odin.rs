@@ -21,7 +21,7 @@ use scylla::trivia::{self, Gap};
 
 const CONTINUATION: u8 = b'\\';
 const ERROR_COUNT_MAX: u32 = 0x0000_0400;
-const EVENT_COUNT_MAX: u32 = 0x000C_0000;
+const EVENT_COUNT_MAX: u32 = 0x0010_0000;
 const EVERY_CATEGORY: [&str; 3] = ["grammar", "not-odin", "shape"];
 const NODE_COUNT_MAX: u32 = 0x0004_0000;
 const NOT_ODIN: [&str; 1] = ["not-odin"];
@@ -211,7 +211,7 @@ fn trimmed(source: &[u8], comments: &[(u32, u32)], offset: u32, end: u32) -> u32
 
         let found = comments
             .iter()
-            .find(|comment| comment.1 == held && comment.0 > offset);
+            .find(|comment| comment.1 >= held && comment.0 < held && comment.0 > offset);
 
         let Some(comment) = found else {
             break;

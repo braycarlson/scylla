@@ -11,10 +11,10 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-
 FRAME_COUNT_MAX = 8
 HERE = Path(__file__).resolve().parent
 INPUT_BYTES_MAX = 1 << 12
+MESSAGE_BYTES_MAX = 1 << 8
 MINIMIZE_SECONDS_MAX = 600
 REPRO_SECONDS_MAX = 120
 ROOT = HERE.parent.parent
@@ -23,8 +23,9 @@ BINARIES = ROOT / 'fuzz' / 'target' / 'x86_64-unknown-linux-gnu' / 'release'
 RESULTS = Path(os.environ.get('SCYLLA_RESULTS', ROOT / 'results'))
 KNOWN = RESULTS / 'known_crashes.json'
 FRAME_PATTERN = re.compile(r'^\s+\d+:\s+(?:0x[0-9a-f]+ - )?(.+?)(?:\s+at\s+\S+)?$')
+LOCATION_PATTERN = re.compile(r'panicked at (\S+:\d+:\d+):')
 PANIC_PATTERN = re.compile(r'panicked at |ERROR: AddressSanitizer|ERROR: libFuzzer|SUMMARY: ')
-
+THREAD_PATTERN = re.compile(r"^thread '[^']*'(?: \(\d+\))? panicked at ")
 
 def artifact_paths() -> list[Path]:
     if not ARTIFACTS.is_dir():
@@ -39,7 +40,6 @@ def artifact_paths() -> list[Path]:
     ]
 
     return found
-
 
 def backtrace_of(stderr: str) -> list[str]:
     frames = []
@@ -76,28 +76,34 @@ def backtrace_of(stderr: str) -> list[str]:
 
     return frames
 
-
-def hash_of(panic: str, frames: list[str]) -> str:
-    text = panic + '\n' + '\n'.join(frames)
+def hash_of(location: str, frames: list[str]) -> str:
+    text = location + '\n' + '\n'.join(frames)
 
     return hashlib.sha256(text.encode()).hexdigest()[:16]
-
 
 def today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
-
 def known_load() -> dict:
     if not KNOWN.is_file():
-        return {'artifacts': {}, 'crashes': {}}
+        return {'crashes': {}}
 
-    return json.loads(KNOWN.read_text())
+    held = json.loads(KNOWN.read_text())
+    held.pop('artifacts', None)
 
+    return held
 
 def known_save(known: dict) -> None:
     KNOWN.parent.mkdir(parents=True, exist_ok=True)
     KNOWN.write_text(json.dumps(known, indent=4, sort_keys=True) + '\n')
 
+def located(panic: str) -> str:
+    match = LOCATION_PATTERN.search(panic)
+
+    if match is None:
+        return relative(THREAD_PATTERN.sub('', panic))[:MESSAGE_BYTES_MAX]
+
+    return relative(match.group(1))
 
 def minimized_of(target: str, artifact: Path) -> Path:
     before = set(artifact.parent.glob('minimized-from-*'))
@@ -131,7 +137,6 @@ def minimized_of(target: str, artifact: Path) -> Path:
 
     return grown[0]
 
-
 def panic_of(stderr: str) -> str:
     lines = stderr.splitlines()
 
@@ -144,17 +149,15 @@ def panic_of(stderr: str) -> str:
         if 'panicked at' in held and position + 1 < len(lines):
             held = held + ' ' + lines[position + 1].strip()
 
-        return held
+        return relative(held)
 
     return ''
 
+def relative(text: str) -> str:
+    return text.replace(f'{ROOT}/', '')
 
 def reproduced(target: str, artifact: Path) -> tuple[int, str]:
     binary = BINARIES / target
-
-    if not binary.is_file():
-        return (0, '')
-
     environment = dict(os.environ)
     environment['RUST_BACKTRACE'] = '1'
 
@@ -171,25 +174,12 @@ def reproduced(target: str, artifact: Path) -> tuple[int, str]:
 
     return (held.returncode, held.stderr.decode(errors='replace'))
 
-
-def row_of(target: str, artifact: Path, minimize: bool) -> dict | None:
-    code, stderr = reproduced(target, artifact)
-
-    if code == 0:
-        return None
-
-    repro = artifact
-
-    if minimize:
-        repro = minimized_of(target, artifact)
-
+def row_of(target: str, artifact: Path, repro: Path, panic: str, frames: list[str]) -> dict:
     content = repro.read_bytes()
-    panic = panic_of(stderr)
-    frames = backtrace_of(stderr)
     row = {
         'artifact': str(artifact.relative_to(ROOT)),
         'backtrace': frames,
-        'backtrace_hash': hash_of(panic, frames),
+        'backtrace_hash': hash_of(located(panic), frames),
         'first_seen': today(),
         'input_base64': base64.b64encode(content[:INPUT_BYTES_MAX]).decode(),
         'input_clipped': len(content) > INPUT_BYTES_MAX,
@@ -201,34 +191,57 @@ def row_of(target: str, artifact: Path, minimize: bool) -> dict | None:
 
     return row
 
+def targets_built(targets: set[str]) -> set[str]:
+    missing = {target for target in targets if not (BINARIES / target).is_file()}
+
+    for target in sorted(missing):
+        print(f'triage: {target} is not built; its artifacts are left for the next run')
+
+    return targets - missing
 
 def main() -> int:
     minimize = '--minimize' in sys.argv[1:]
     known = known_load()
+    crashes = known['crashes']
+    artifacts = artifact_paths()
+    built = targets_built({artifact.parent.name for artifact in artifacts})
     fresh = []
+    folded = 0
 
-    for artifact in artifact_paths():
+    for artifact in artifacts:
         target = artifact.parent.name
-        seen_key = f'{target}/{artifact.name}'
 
-        if seen_key in known['artifacts']:
+        if target not in built:
             continue
 
-        known['artifacts'][seen_key] = today()
-        row = row_of(target, artifact, minimize)
+        code, stderr = reproduced(target, artifact)
 
-        if row is None:
+        if code == 0:
+            artifact.unlink(missing_ok=True)
             continue
 
-        crash_key = f'{target}:{row["backtrace_hash"]}'
+        panic = panic_of(stderr)
+        frames = backtrace_of(stderr)
+        crash_key = f'{target}:{hash_of(located(panic), frames)}'
+        held = crashes.get(crash_key)
 
-        if crash_key in known['crashes']:
+        if held is not None:
+            held['count'] = held.get('count', 1) + 1
+            held['last_seen'] = today()
+            artifact.unlink(missing_ok=True)
+            folded += 1
             continue
 
-        known['crashes'][crash_key] = {
+        repro = minimized_of(target, artifact) if minimize else artifact
+        row = row_of(target, artifact, repro, panic, frames)
+
+        crashes[crash_key] = {
             'artifact': row['artifact'],
+            'count': 1,
             'first_seen': row['first_seen'],
+            'last_seen': row['first_seen'],
             'panic': row['panic'],
+            'size_bytes': row['size_bytes'],
         }
 
         fresh.append(row)
@@ -242,10 +255,9 @@ def main() -> int:
                 held.write(json.dumps(row, sort_keys=True) + '\n')
 
     known_save(known)
-    print(f'triage: {len(fresh)} new, {len(known["crashes"])} known')
+    print(f'triage: {len(fresh)} new, {folded} folded into known, {len(crashes)} known')
 
     return 0
-
 
 if __name__ == '__main__':
     sys.exit(main())

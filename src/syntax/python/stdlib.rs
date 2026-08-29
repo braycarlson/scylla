@@ -259,6 +259,7 @@ pub const MAGIC_GLOBALS: &[&[u8]] = &[
     b"__builtins__",
     b"__cached__",
     b"__file__",
+    b"__path__",
 ];
 
 pub const SOFT_KEYWORDS: &[&[u8]] = &[b"_", b"case", b"match", b"type"];

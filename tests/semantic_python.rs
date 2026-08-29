@@ -21,8 +21,10 @@ use scylla::syntax::python::kind::PythonKind;
 use scylla::syntax::python::parse;
 use scylla::syntax::python::semantic::{
     AnnotationScratch,
+    Binding,
     BindingKind,
     Context,
+    Reference,
     Resolution,
     Semantic,
     SemanticInput,
@@ -37,6 +39,7 @@ const ERROR_COUNT_MAX: u32 = 1 << 10;
 const EVENT_COUNT_MAX: u32 = 1 << 21;
 const EVERY_CATEGORY: [&str; 4] = ["check", "model", "not-python", "ruff"];
 const EXPORT_COUNT_MAX: u32 = 1 << 12;
+const MODULE_SCOPE: u32 = 0;
 const LINE_COUNT_MAX: u32 = 1 << 16;
 const NODE_COUNT_MAX: u32 = 1 << 19;
 const CHECK_VERSION: PythonVersion = PythonVersion::Py314;
@@ -188,12 +191,16 @@ impl Machine {
         ) == Completion::Complete
     }
 
+    fn errored(&self) -> bool {
+        !self.tree.errors().is_empty()
+    }
+
     fn rows(&self, source: &[u8]) -> Vec<(String, u32, u32)> {
         let mut found = Vec::new();
 
         self.unused_imports(source, &mut found);
-        self.redefinitions(&mut found);
-        self.undefined(&mut found);
+        self.redefinitions(source, &mut found);
+        self.undefined(source, &mut found);
         self.unused_variables(source, &mut found);
         self.checked(&mut found);
 
@@ -253,6 +260,10 @@ impl Machine {
                 continue;
             }
 
+            if self.semantic.scopes()[held.scope as usize].kind == ScopeKind::Class {
+                continue;
+            }
+
             let statement = self.tree.at(held.node).parent;
 
             if statement != NONE && self.suppressed_at(source, "F401", statement) {
@@ -263,15 +274,78 @@ impl Machine {
                 continue;
             }
 
+            if self.package_alias_used(source, held) {
+                continue;
+            }
+
             let (line, column) = self.place(held.name.offset);
 
             found.push(("F401".to_owned(), line, column));
         }
     }
 
-    fn redefinitions(&self, found: &mut Vec<(String, u32, u32)>) {
+    fn package_alias_used(&self, source: &[u8], held: &Binding) -> bool {
+        if held.kind != BindingKind::SubmoduleImport {
+            return false;
+        }
+
+        let name = &source[held.name.range()];
+
+        self.tables.imports.iter().any(|import| {
+            let alias = &source[import.alias.range()];
+
+            if import.level != 0 || import.segment_count != 1 || alias == name {
+                return false;
+            }
+
+            let Some(segment) = self.tables.segments.get(import.segment_first as usize) else {
+                return false;
+            };
+
+            &source[segment.range()] == name
+                && self
+                    .semantic
+                    .is_used(self.semantic.binding_newest(source, held.scope, alias))
+        })
+    }
+
+    fn binds_a_lambda(&self, held: &Binding) -> bool {
+        if held.kind != BindingKind::Assignment || held.node == NONE {
+            return false;
+        }
+
+        let parent = self.tree.at(held.node).parent;
+
+        if parent == NONE {
+            return false;
+        }
+
+        let mut child = self.tree.at(parent).child_first;
+
+        for _ in 0..=self.tree.count() {
+            if child == NONE {
+                return false;
+            }
+
+            if self.tree.at(child).kind == PythonKind::Lambda {
+                return true;
+            }
+
+            child = self.tree.at(child).sibling_next;
+        }
+
+        false
+    }
+
+    fn reads_locals(&self, source: &[u8], scope: u32) -> bool {
+        self.semantic.references().iter().any(|reference| {
+            reference.scope == scope && &source[reference.name.range()] == b"locals"
+        })
+    }
+
+    fn redefinitions(&self, source: &[u8], found: &mut Vec<(String, u32, u32)>) {
         for held in self.semantic.bindings() {
-            if !definition(held.kind) || held.previous == NONE {
+            if !(definition(held.kind) || self.binds_a_lambda(held)) || held.previous == NONE {
                 continue;
             }
 
@@ -279,7 +353,21 @@ impl Machine {
                 continue;
             };
 
-            if !definition(earlier.kind) || self.semantic.is_used(held.previous) {
+            if held.scope == MODULE_SCOPE
+                && !self.stands_at_module_level(self.tree.at(held.node).parent)
+            {
+                continue;
+            }
+
+            if !shadowable(earlier.kind) || self.semantic.is_used(held.previous) {
+                continue;
+            }
+
+            if self.read_between(source, earlier, held) {
+                continue;
+            }
+
+            if held.flags.private {
                 continue;
             }
 
@@ -295,9 +383,194 @@ impl Machine {
 
             found.push(("F811".to_owned(), line, column));
         }
+
+        for held in self.semantic.bindings() {
+            if !self.shadows_an_import(source, held) && !self.shadows_a_global(source, held) {
+                continue;
+            }
+
+            let (line, column) = self.place(held.name.offset);
+
+            found.push(("F811".to_owned(), line, column));
+        }
     }
 
-    fn undefined(&self, found: &mut Vec<(String, u32, u32)>) {
+    fn shadows_a_global(&self, source: &[u8], held: &Binding) -> bool {
+        if !definition(held.kind) || held.scope != MODULE_SCOPE {
+            return false;
+        }
+
+        if !self.stands_at_module_level(self.tree.at(held.node).parent) {
+            return false;
+        }
+
+        let name = &source[held.name.range()];
+
+        self.semantic
+            .bindings()
+            .iter()
+            .enumerate()
+            .any(|(index, global)| {
+                let position = u32::try_from(index).expect("a bounded index fits in u32");
+
+                global.kind == BindingKind::Global
+                    && &source[global.name.range()] == name
+                    && !self.semantic.is_used(position)
+                    && self
+                        .hoist_of(global)
+                        .is_some_and(|offset| offset <= held.name.offset)
+            })
+    }
+
+    fn stands_at_module_level(&self, node: u32) -> bool {
+        let mut held = node;
+
+        for _ in 0..=self.tree.count() {
+            if held == NONE {
+                return true;
+            }
+
+            if matches!(
+                self.tree.at(held).kind,
+                PythonKind::AsyncFunctionDef | PythonKind::FunctionDef | PythonKind::Lambda
+            ) {
+                return false;
+            }
+
+            held = self.tree.at(held).parent;
+        }
+
+        false
+    }
+
+    fn hoist_of(&self, global: &Binding) -> Option<u32> {
+        let owner = self.semantic.scopes().get(global.scope as usize)?;
+
+        if owner.kind != ScopeKind::Function || !self.eager_in(owner.parent, MODULE_SCOPE) {
+            return None;
+        }
+
+        Some(self.tree.at(owner.node).span(self.tokens.as_slice()).offset)
+    }
+
+    fn shadows_an_import(&self, source: &[u8], held: &Binding) -> bool {
+        if held.previous != NONE || held.kind == BindingKind::Annotation {
+            return false;
+        }
+
+        let name = &source[held.name.range()];
+        let scopes = self.semantic.scopes();
+        let mut scope = scopes[held.scope as usize].parent;
+
+        for _ in 0..=scopes.len() {
+            if scope == NONE {
+                return false;
+            }
+
+            let index = self.semantic.binding_newest(source, scope, name);
+
+            if index != NONE {
+                return self.semantic.get(index).is_some_and(|earlier| {
+                    imports(earlier.kind)
+                        && !earlier.flags.export_explicit
+                        && !earlier.flags.type_checking
+                        && !self.semantic.is_used(index)
+                        && self.same_module_path(source, earlier, held)
+                });
+            }
+
+            scope = scopes[scope as usize].parent;
+        }
+
+        false
+    }
+
+    fn read_between(&self, source: &[u8], earlier: &Binding, held: &Binding) -> bool {
+        let name = &source[held.name.range()];
+        let point = self.effect_of(held);
+
+        self.semantic.references().iter().any(|reference| {
+            reference.context == Context::Load
+                && reference.name.offset > earlier.name.offset
+                && reference.name.offset < point
+                && &source[reference.name.range()] == name
+                && matches!(
+                    reference.resolution,
+                    Resolution::Bound(binding)
+                        if self
+                            .semantic
+                            .get(binding)
+                            .is_some_and(|target| target.scope == held.scope)
+                )
+                && self.eager_in(reference.scope, held.scope)
+        })
+    }
+
+    fn same_module_path(&self, source: &[u8], earlier: &Binding, held: &Binding) -> bool {
+        if earlier.kind != BindingKind::SubmoduleImport {
+            return true;
+        }
+
+        let Some(left) = self.module_path(earlier) else {
+            return false;
+        };
+
+        let Some(right) = self.module_path(held) else {
+            return false;
+        };
+
+        left.len() == right.len()
+            && left
+                .iter()
+                .zip(right)
+                .all(|(one, two)| source[one.range()] == source[two.range()])
+    }
+
+    fn module_path(&self, held: &Binding) -> Option<&[Span]> {
+        let import = self
+            .tables
+            .imports
+            .iter()
+            .find(|import| import.alias == held.name)?;
+
+        let first = import.segment_first as usize;
+        let end = first + import.segment_count as usize;
+
+        self.tables.segments.get(first..end)
+    }
+
+    fn effect_of(&self, held: &Binding) -> u32 {
+        if held.kind != BindingKind::ClassDefinition {
+            return held.name.offset;
+        }
+
+        self.tree.at(held.node).span(self.tokens.as_slice()).end()
+    }
+
+    fn eager_in(&self, scope: u32, wanted: u32) -> bool {
+        let scopes = self.semantic.scopes();
+        let mut held = scope;
+
+        for _ in 0..=scopes.len() {
+            if held == wanted {
+                return true;
+            }
+
+            let Some(named) = scopes.get(held as usize) else {
+                return false;
+            };
+
+            if matches!(named.kind, ScopeKind::Function | ScopeKind::Lambda) {
+                return false;
+            }
+
+            held = named.parent;
+        }
+
+        false
+    }
+
+    fn undefined(&self, source: &[u8], found: &mut Vec<(String, u32, u32)>) {
         for held in self.semantic.references() {
             let gone = match held.resolution {
                 Resolution::Bound(binding) => {
@@ -315,34 +588,170 @@ impl Machine {
                 continue;
             }
 
+            if self.probed_for_a_name(source, held.node) {
+                continue;
+            }
+
+            if self.rebound_past_a_clause(held) {
+                continue;
+            }
+
             let (line, column) = self.place(held.name.offset);
 
             found.push(("F821".to_owned(), line, column));
         }
     }
 
+    fn rebound_past_a_clause(&self, held: &Reference) -> bool {
+        let Resolution::Bound(index) = held.resolution else {
+            return false;
+        };
+
+        let Some(handler) = self.clause_of(index) else {
+            return false;
+        };
+
+        let Some(clause) = self.semantic.get(handler) else {
+            return false;
+        };
+
+        if clause.previous == NONE {
+            return false;
+        }
+
+        let span = self.tree.at(clause.node).span(self.tokens.as_slice());
+        let outside = held.name.offset < span.offset || held.name.offset >= span.end();
+
+        outside && self.tree.at(clause.node).kind == PythonKind::ExceptHandler
+    }
+
+    fn clause_of(&self, deletion: u32) -> Option<u32> {
+        let mut index = deletion;
+
+        for _ in 0..=self.semantic.bindings().len() {
+            let held = self.semantic.get(index)?;
+
+            if held.kind == BindingKind::ExceptVariable {
+                return Some(index);
+            }
+
+            index = held.previous;
+        }
+
+        None
+    }
+
+    fn probed_for_a_name(&self, source: &[u8], node: u32) -> bool {
+        let mut child = node;
+        let mut held = self.tree.at(node).parent;
+
+        for _ in 0..=self.tree.count() {
+            if held == NONE {
+                return false;
+            }
+
+            let kind = self.tree.at(held).kind;
+
+            if matches!(
+                kind,
+                PythonKind::AsyncFunctionDef | PythonKind::FunctionDef | PythonKind::Lambda
+            ) {
+                return false;
+            }
+
+            if kind == PythonKind::Try
+                && self.tree.at(child).kind == PythonKind::Block
+                && self.catches_a_name_error(source, held)
+            {
+                return true;
+            }
+
+            child = held;
+            held = self.tree.at(held).parent;
+        }
+
+        false
+    }
+
+    fn catches_a_name_error(&self, source: &[u8], node: u32) -> bool {
+        let mut child = self.tree.at(node).child_first;
+
+        for _ in 0..=self.tree.count() {
+            if child == NONE {
+                return false;
+            }
+
+            if self.tree.at(child).kind == PythonKind::ExceptHandler
+                && self.names_a_name_error(source, child)
+            {
+                return true;
+            }
+
+            child = self.tree.at(child).sibling_next;
+        }
+
+        false
+    }
+
+    fn names_a_name_error(&self, source: &[u8], handler: u32) -> bool {
+        let held = self.tree.at(handler);
+        let mut end = held.token_end;
+        let mut child = held.child_first;
+
+        for _ in 0..=self.tree.count() {
+            if child == NONE {
+                break;
+            }
+
+            if self.tree.at(child).kind == PythonKind::Block {
+                end = self.tree.at(child).token_start;
+
+                break;
+            }
+
+            child = self.tree.at(child).sibling_next;
+        }
+
+        let tokens = self.tokens.as_slice();
+
+        (held.token_start..end).any(|position| {
+            self.raw.get(position as usize) == Some(&PythonKind::Identifier)
+                && tokens
+                    .get(position as usize)
+                    .is_some_and(|token| token.text(source) == b"NameError")
+        })
+    }
+
     fn unused_variables(&self, source: &[u8], found: &mut Vec<(String, u32, u32)>) {
         for (index, held) in self.semantic.bindings().iter().enumerate() {
             if !matches!(
                 held.kind,
-                BindingKind::Assignment | BindingKind::Named | BindingKind::WithVariable
+                BindingKind::Assignment
+                    | BindingKind::ExceptVariable
+                    | BindingKind::Named
+                    | BindingKind::WithVariable
             ) {
                 continue;
             }
 
-            if held.kind == BindingKind::Assignment && held.flags.unpacked {
+            if held.kind == BindingKind::Assignment
+                && held.flags.unpacked
+                && !self.unpacks_a_display(held.node)
+            {
                 continue;
             }
 
             let position = u32::try_from(index).expect("a bounded index fits in u32");
 
-            if held.flags.shadowed {
+            let alone = held.kind == BindingKind::ExceptVariable;
+
+            if held.flags.shadowed && !alone {
                 continue;
             }
 
             let scope = self.semantic.scopes()[held.scope as usize];
 
-            if !matches!(scope.kind, ScopeKind::Function | ScopeKind::Lambda) {
+            if !alone && !matches!(scope.kind, ScopeKind::Function | ScopeKind::Lambda) {
                 continue;
             }
 
@@ -350,7 +759,23 @@ impl Machine {
                 continue;
             }
 
-            if self.semantic.chain_used(source, position) || held.flags.deleted {
+            if self.reads_locals(source, held.scope) {
+                continue;
+            }
+
+            let dropped = held.flags.deleted && !alone;
+
+            let used = if alone {
+                self.semantic.is_used(position) || self.read_in_the_clause(source, held)
+            } else {
+                self.semantic.chain_used(source, position)
+            };
+
+            if used || dropped {
+                continue;
+            }
+
+            if self.declared_nonlocal(source, held) {
                 continue;
             }
 
@@ -359,6 +784,123 @@ impl Machine {
             found.push(("F841".to_owned(), line, column));
         }
     }
+
+    fn read_in_the_clause(&self, source: &[u8], held: &Binding) -> bool {
+        let name = &source[held.name.range()];
+        let span = self.tree.at(held.node).span(self.tokens.as_slice());
+
+        self.semantic.references().iter().any(|reference| {
+            reference.context == Context::Load
+                && reference.name.offset >= span.offset
+                && reference.name.offset < span.end()
+                && &source[reference.name.range()] == name
+        })
+    }
+
+    fn declared_nonlocal(&self, source: &[u8], held: &Binding) -> bool {
+        let name = &source[held.name.range()];
+
+        self.semantic.bindings().iter().any(|declaration| {
+            declaration.kind == BindingKind::Nonlocal
+                && &source[declaration.name.range()] == name
+                && self.within(declaration.scope, held.scope)
+                && self.reaches_a_binding(source, declaration, name)
+        })
+    }
+
+    fn reaches_a_binding(&self, source: &[u8], declaration: &Binding, name: &[u8]) -> bool {
+        let scopes = self.semantic.scopes();
+        let Some(held) = scopes.get(declaration.scope as usize) else {
+            return false;
+        };
+
+        let mut scope = held.parent;
+
+        for _ in 0..=scopes.len() {
+            let Some(named) = scopes.get(scope as usize) else {
+                return false;
+            };
+
+            if named.kind == ScopeKind::Function
+                && self.semantic.binding_newest(source, scope, name) != NONE
+            {
+                return true;
+            }
+
+            scope = named.parent;
+        }
+
+        false
+    }
+
+    fn within(&self, scope: u32, ancestor: u32) -> bool {
+        let scopes = self.semantic.scopes();
+        let mut held = scope;
+
+        for _ in 0..=scopes.len() {
+            if held == ancestor {
+                return true;
+            }
+
+            let Some(named) = scopes.get(held as usize) else {
+                return false;
+            };
+
+            held = named.parent;
+        }
+
+        false
+    }
+
+    fn unpacks_a_display(&self, node: u32) -> bool {
+        let mut held = node;
+
+        for _ in 0..=self.tree.count() {
+            let parent = self.tree.at(held).parent;
+
+            if parent == NONE {
+                return false;
+            }
+
+            if self.tree.at(parent).kind == PythonKind::Assign {
+                return matches!(
+                    self.last_child(parent).map(|last| self.tree.at(last).kind),
+                    Some(PythonKind::List | PythonKind::Tuple)
+                );
+            }
+
+            held = parent;
+        }
+
+        false
+    }
+
+    fn last_child(&self, node: u32) -> Option<u32> {
+        let mut child = self.tree.at(node).child_first;
+        let mut last = None;
+
+        for _ in 0..=self.tree.count() {
+            if child == NONE {
+                return last;
+            }
+
+            last = Some(child);
+            child = self.tree.at(child).sibling_next;
+        }
+
+        last
+    }
+}
+
+fn shadowable(kind: BindingKind) -> bool {
+    kind.binds()
+}
+
+fn imports(kind: BindingKind) -> bool {
+    matches!(
+        kind,
+        BindingKind::Import | BindingKind::ImportFrom | BindingKind::SubmoduleImport
+    )
 }
 
 fn definition(kind: BindingKind) -> bool {
@@ -437,6 +979,10 @@ fn the_corpus_reports_the_rows_ruff_reports() {
         if !machine.run(&fixture.source) {
             differing.push(format!("{}: the model overran\n", fixture.name));
 
+            continue;
+        }
+
+        if machine.errored() {
             continue;
         }
 

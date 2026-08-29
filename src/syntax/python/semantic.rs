@@ -148,6 +148,7 @@ pub struct Binding {
     pub reference_count: u32,
     pub scope: u32,
     pub scope_previous: u32,
+    pub visible: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -218,7 +219,18 @@ struct Builder<'run> {
 
 impl BindingKind {
     pub const fn binds(self) -> bool {
-        !matches!(self, Self::Deletion | Self::Global | Self::Nonlocal)
+        !matches!(
+            self,
+            Self::Annotation | Self::Deletion | Self::Global | Self::Nonlocal
+        )
+    }
+
+    pub const fn answers(self) -> bool {
+        !matches!(self, Self::Annotation | Self::Global | Self::Nonlocal)
+    }
+
+    pub const fn defines(self) -> bool {
+        matches!(self, Self::ClassDefinition | Self::FunctionDefinition)
     }
 
     pub const fn imports(self) -> bool {
@@ -231,6 +243,36 @@ impl BindingKind {
                 | Self::SubmoduleImport
         )
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Reach {
+    classed: bool,
+    deferred: bool,
+    offset: u32,
+    whole: bool,
+}
+
+impl Reach {
+    const EVERY: Self = Self {
+        classed: false,
+        deferred: true,
+        offset: 0,
+        whole: true,
+    };
+}
+
+fn reachable(held: Binding, reach: Reach) -> bool {
+    if held.kind == BindingKind::Deletion && !reach.deferred {
+        return held.visible <= reach.offset;
+    }
+
+    if reach.whole || reach.deferred {
+        return true;
+    }
+
+    !(reach.classed || held.kind.defines() || held.kind == BindingKind::Assignment)
+        || held.visible <= reach.offset
 }
 
 impl Semantic {
@@ -900,9 +942,12 @@ impl Semantic {
         let name = &source[reference.name.range()];
         let hash = name_hash(name);
         let start = self.redirect_of(source, reference, name, hash);
+
+        let redirected = start != reference.scope;
         let mut scope = start;
         let mut steps = 0;
         let mut maybe = false;
+        let mut deferred = redirected;
 
         while scope != NONE && steps <= SCOPE_DEPTH_MAX {
             let held = self.scopes[scope as usize];
@@ -913,12 +958,20 @@ impl Semantic {
 
                 let positional = (scope == start || immediate)
                     && held.kind != ScopeKind::Comprehension
-                    && !reference.flags.deferred;
+                    && !reference.flags.deferred
+                    && !redirected;
+
+                let reach = Reach {
+                    classed: held.kind == ScopeKind::Class,
+                    deferred,
+                    offset: reference.name.offset,
+                    whole: !positional,
+                };
 
                 let bounded = if positional {
-                    self.binding_before(source, scope, name, hash, reference.node)
+                    self.binding_before(source, scope, name, hash, reference.node, reach)
                 } else {
-                    self.binding_at(source, scope, name, hash)
+                    self.binding_at(source, scope, name, hash, reach)
                 };
 
                 if bounded != NONE {
@@ -927,6 +980,7 @@ impl Semantic {
             }
 
             maybe = maybe || self.star_in(scope);
+            deferred = deferred || matches!(held.kind, ScopeKind::Function | ScopeKind::Lambda);
             scope = held.parent;
             steps += 1;
         }
@@ -960,7 +1014,7 @@ impl Semantic {
             let held = self.scopes[scope as usize];
 
             if held.kind == ScopeKind::Function
-                && self.binding_at(source, scope, name, hash) != NONE
+                && self.binding_at(source, scope, name, hash, Reach::EVERY) != NONE
             {
                 return scope;
             }
@@ -998,7 +1052,7 @@ impl Semantic {
         None
     }
 
-    fn binding_at(&self, source: &[u8], scope: u32, name: &[u8], hash: u32) -> u32 {
+    fn binding_at(&self, source: &[u8], scope: u32, name: &[u8], hash: u32, reach: Reach) -> u32 {
         let mut index = self.heads[self.bucket_of(scope, hash)];
 
         for _ in 0..=self.bindings.count() {
@@ -1010,7 +1064,8 @@ impl Semantic {
 
             if held.scope == scope
                 && held.name_hash == hash
-                && held.kind.binds()
+                && held.kind.answers()
+                && reachable(held, reach)
                 && &source[held.name.range()] == name
             {
                 return index;
@@ -1022,9 +1077,17 @@ impl Semantic {
         NONE
     }
 
-    fn binding_before(&self, source: &[u8], scope: u32, name: &[u8], hash: u32, node: u32) -> u32 {
+    fn binding_before(
+        &self,
+        source: &[u8],
+        scope: u32,
+        name: &[u8],
+        hash: u32,
+        node: u32,
+        reach: Reach,
+    ) -> u32 {
         if self.offsets.count() == 0 {
-            return self.binding_before_chained(source, scope, name, hash, node);
+            return self.binding_before_chained(source, scope, name, hash, node, reach);
         }
 
         let bucket = self.bucket_of(scope, hash);
@@ -1059,7 +1122,8 @@ impl Semantic {
 
             let eligible = held.scope == scope
                 && held.name_hash == hash
-                && !matches!(held.kind, BindingKind::Global | BindingKind::Nonlocal);
+                && reachable(held, reach)
+                && held.kind.answers();
 
             if eligible && &source[held.name.range()] == name {
                 return index;
@@ -1076,6 +1140,7 @@ impl Semantic {
         name: &[u8],
         hash: u32,
         node: u32,
+        reach: Reach,
     ) -> u32 {
         let mut index = self.heads[self.bucket_of(scope, hash)];
 
@@ -1089,7 +1154,8 @@ impl Semantic {
             let eligible = held.scope == scope
                 && held.node <= node
                 && held.name_hash == hash
-                && !matches!(held.kind, BindingKind::Global | BindingKind::Nonlocal);
+                && reachable(held, reach)
+                && held.kind.answers();
 
             if eligible && &source[held.name.range()] == name {
                 return index;
@@ -1217,6 +1283,80 @@ impl<'run> Builder<'run> {
         self.stack[self.depth as usize - 1]
     }
 
+    fn reading_scope(&self, node: u32) -> u32 {
+        let scope = self.scope();
+        let held = self.semantic.scopes[scope as usize];
+
+        if matches!(held.kind, ScopeKind::Type | ScopeKind::TypeAlias) || held.parent == NONE {
+            return scope;
+        }
+
+        if !self.reads_outside(node) {
+            return scope;
+        }
+
+        held.parent
+    }
+
+    fn reads_outside(&self, node: u32) -> bool {
+        let mut previous = NONE;
+        let mut held = node;
+
+        for _ in 0..self.tree.count() {
+            let parent = self.tree.at(held).parent;
+
+            if parent == NONE {
+                return false;
+            }
+
+            let kind = self.kind_of(parent);
+
+            if !Self::opens_a_scope(kind) {
+                previous = held;
+                held = parent;
+
+                continue;
+            }
+
+            if matches!(kind, PythonKind::AsyncFunctionDef | PythonKind::FunctionDef) {
+                return self.kind_of(held) != PythonKind::Block;
+            }
+
+            if !matches!(
+                kind,
+                PythonKind::DictComp
+                    | PythonKind::GeneratorExp
+                    | PythonKind::ListComp
+                    | PythonKind::SetComp
+            ) {
+                return false;
+            }
+
+            return self.kind_of(held) == PythonKind::Comprehension
+                && self.first_clause(parent) == held
+                && self.iterable_of(held) == previous;
+        }
+
+        false
+    }
+
+    fn first_clause(&self, node: u32) -> u32 {
+        match self.view(node).child_first_of(PythonKind::Comprehension) {
+            None => NONE,
+            Some(held) => held.index(),
+        }
+    }
+
+    fn iterable_of(&self, node: u32) -> u32 {
+        let held = self.tree.at(node).child_first;
+
+        if held == NONE {
+            return NONE;
+        }
+
+        self.tree.at(held).sibling_next
+    }
+
     fn view(&self, node: u32) -> View<'run> {
         View::new(self.tree, self.tokens, self.raw, node)
     }
@@ -1248,6 +1388,7 @@ impl<'run> Builder<'run> {
                 | PythonKind::Lambda
                 | PythonKind::ListComp
                 | PythonKind::SetComp
+                | PythonKind::TypeAlias
         )
     }
 
@@ -1283,10 +1424,27 @@ impl<'run> Builder<'run> {
             self.type_parameters(node);
         }
 
-        if Self::opens_a_scope(kind) {
+        if Self::opens_a_scope(kind) && kind != PythonKind::ClassDef {
             self.open(node);
             self.opened(node, kind);
         }
+
+        if self.bodies_a_class(node, kind) {
+            let held = self.tree.at(node).parent;
+
+            self.open(held);
+            self.opened(held, PythonKind::ClassDef);
+        }
+    }
+
+    fn bodies_a_class(&self, node: u32, kind: PythonKind) -> bool {
+        if kind != PythonKind::Block {
+            return false;
+        }
+
+        let parent = self.tree.at(node).parent;
+
+        parent != NONE && self.kind_of(parent) == PythonKind::ClassDef
     }
 
     fn type_params_of(&self, node: u32, kind: PythonKind) -> u32 {
@@ -1333,7 +1491,11 @@ impl<'run> Builder<'run> {
             }
         }
 
-        if Self::opens_a_scope(kind) && self.depth > 1 {
+        if Self::opens_a_scope(kind) && kind != PythonKind::ClassDef && self.depth > 1 {
+            self.depth -= 1;
+        }
+
+        if self.bodies_a_class(node, kind) && self.depth > 1 {
             self.depth -= 1;
         }
 
@@ -1496,7 +1658,7 @@ impl<'run> Builder<'run> {
         let mut found = [Span::EMPTY; ANNOTATION_DEPTH_MAX as usize];
         let count = self.annotation_parse(content, &mut found);
         let branch = self.branch();
-        let scope = self.scope();
+        let scope = self.reading_scope(node);
         let type_checking = self.type_checking_block != NONE;
 
         for index in 0..count {
@@ -1960,7 +2122,13 @@ impl<'run> Builder<'run> {
 
         let after = self.after_of(node);
 
-        self.record(BindingKind::Deletion, name, after);
+        self.record_visible(
+            BindingKind::Deletion,
+            name,
+            after,
+            BindingFlags::default(),
+            self.view(node).span().end(),
+        );
     }
 
     fn after_of(&self, node: u32) -> u32 {
@@ -2223,6 +2391,7 @@ impl<'run> Builder<'run> {
 
         match kind {
             None => {}
+            Some(BindingKind::Deletion) if self.conditional(node) => {}
             Some(held) => {
                 let flags = BindingFlags {
                     unpacked: unpacked && held == BindingKind::Assignment,
@@ -2240,7 +2409,7 @@ impl<'run> Builder<'run> {
         let annotation = self.annotation_root != NONE;
         let type_checking = self.type_checking_block != NONE;
         let branch = self.branch();
-        let scope = self.scope();
+        let scope = self.reading_scope(node);
 
         let recorded = self.semantic.push_reference(Reference {
             branch,
@@ -2261,6 +2430,52 @@ impl<'run> Builder<'run> {
         if !recorded && self.outcome == Structure::Complete {
             self.outcome = Structure::Truncated;
         }
+    }
+
+    fn conditional(&self, node: u32) -> bool {
+        let mut held = self.tree.at(node).parent;
+
+        for _ in 0..=self.tree.count() {
+            if held == NONE {
+                return false;
+            }
+
+            let kind = self.kind_of(held);
+
+            if matches!(
+                kind,
+                PythonKind::AsyncFunctionDef
+                    | PythonKind::ClassDef
+                    | PythonKind::FunctionDef
+                    | PythonKind::Lambda
+                    | PythonKind::Module
+            ) {
+                return false;
+            }
+
+            if matches!(
+                kind,
+                PythonKind::ExceptHandler
+                    | PythonKind::If
+                    | PythonKind::MatchCase
+                    | PythonKind::While
+            ) {
+                return true;
+            }
+
+            let parent = self.tree.at(held).parent;
+
+            if kind == PythonKind::ElseClause
+                && parent != NONE
+                && self.kind_of(parent) == PythonKind::Try
+            {
+                return true;
+            }
+
+            held = parent;
+        }
+
+        false
     }
 
     fn context_of(&self, node: u32) -> (Context, Option<BindingKind>, bool) {
@@ -2395,11 +2610,57 @@ impl<'run> Builder<'run> {
         }
     }
 
+    fn visible_from(&self, node: u32) -> u32 {
+        if node == NONE || node >= self.tree.count() {
+            return 0;
+        }
+
+        let mut held = node;
+
+        for _ in 0..=self.tree.count() {
+            let parent = self.tree.at(held).parent;
+
+            if parent == NONE
+                || parent >= self.tree.count()
+                || matches!(self.kind_of(parent), PythonKind::Block | PythonKind::Module)
+            {
+                break;
+            }
+
+            if self.view(parent).child_first_of(PythonKind::Block).is_some() {
+                break;
+            }
+
+            held = parent;
+        }
+
+        let deferred = matches!(
+            self.kind_of(held),
+            PythonKind::AsyncFunctionDef | PythonKind::FunctionDef
+        );
+
+        match self.view(held).child_first_of(PythonKind::Block) {
+            Some(body) if deferred => body.span().offset,
+            Some(_) | None => self.view(held).span().end(),
+        }
+    }
+
     fn record(&mut self, kind: BindingKind, name: Span, node: u32) {
         self.record_with(kind, name, node, BindingFlags::default());
     }
 
     fn record_with(&mut self, kind: BindingKind, name: Span, node: u32, flags: BindingFlags) {
+        self.record_visible(kind, name, node, flags, self.visible_from(node));
+    }
+
+    fn record_visible(
+        &mut self,
+        kind: BindingKind,
+        name: Span,
+        node: u32,
+        flags: BindingFlags,
+        visible: u32,
+    ) {
         let scope = self.target_of(kind, name);
         let previous = self.previous_of(scope, name);
 
@@ -2421,6 +2682,7 @@ impl<'run> Builder<'run> {
             reference_count: 0,
             scope,
             scope_previous: NONE,
+            visible,
         });
 
         if !recorded && self.outcome == Structure::Complete {
@@ -2731,13 +2993,13 @@ mod tests {
     const COMPREHENSIONS_RESOLUTIONS: [&str; 10] = [
         "item Bound(2) scope 2",
         "item Bound(2) scope 2",
-        "items Bound(0) scope 2",
+        "items Bound(0) scope 0",
         "key Bound(4) scope 3",
         "key Bound(4) scope 3",
-        "items Bound(0) scope 3",
+        "items Bound(0) scope 0",
         "sum Builtin scope 0",
         "value Bound(6) scope 1",
-        "items Bound(0) scope 1",
+        "items Bound(0) scope 0",
         "item Unresolved scope 0",
     ];
 
@@ -2765,10 +3027,10 @@ mod tests {
     ];
 
     const DELETION_RESOLUTIONS: [&str; 9] = [
-        "value Bound(1) scope 0",
+        "value Bound(0) scope 0",
         "print Builtin scope 0",
         "value Bound(1) scope 0",
-        "held Bound(4) scope 1",
+        "held Bound(3) scope 1",
         "held Bound(4) scope 1",
         "ValueError Builtin scope 2",
         "print Builtin scope 2",
@@ -2887,23 +3149,23 @@ mod tests {
         "TypeAlias Alias scope 0",
         "TypeParameter T scope 1",
         "FunctionDefinition run scope 0",
-        "TypeParameter T scope 2",
-        "Parameter value scope 3",
+        "TypeParameter T scope 3",
+        "Parameter value scope 4",
         "ClassDefinition Holder scope 0",
-        "TypeParameter T scope 4",
-        "FunctionDefinition read scope 5",
-        "Parameter self scope 6",
+        "TypeParameter T scope 5",
+        "FunctionDefinition read scope 6",
+        "Parameter self scope 7",
     ];
 
     const TYPE_PARAMS_RESOLUTIONS: [&str; 8] = [
-        "Alias Bound(0) scope 1",
-        "list Builtin scope 1",
-        "T Bound(1) scope 1",
+        "Alias Bound(0) scope 2",
+        "list Builtin scope 2",
+        "T Bound(1) scope 2",
         "T Bound(3) scope 3",
         "T Bound(3) scope 3",
-        "value Bound(4) scope 3",
+        "value Bound(4) scope 4",
         "T Bound(6) scope 6",
-        "self Bound(8) scope 6",
+        "self Bound(8) scope 7",
     ];
 
     const UNUSED_BINDINGS: [&str; 5] = [
@@ -2927,7 +3189,7 @@ mod tests {
 
     const WALRUS_RESOLUTIONS: [&str; 8] = [
         "total Bound(3) scope 2",
-        "items Bound(0) scope 2",
+        "items Bound(0) scope 0",
         "value Bound(2) scope 2",
         "print Builtin scope 0",
         "total Bound(3) scope 0",
@@ -3801,6 +4063,7 @@ mod tests {
     #[test]
     fn a_binding_kind_reports_whether_it_binds() {
         assert!(BindingKind::Assignment.binds());
+        assert!(!BindingKind::Annotation.binds());
         assert!(!BindingKind::Deletion.binds());
         assert!(!BindingKind::Global.binds());
         assert!(!BindingKind::Nonlocal.binds());

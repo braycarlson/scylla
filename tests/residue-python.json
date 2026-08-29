@@ -1,13 +1,73 @@
 [
   {
+    "fixture": "django/docs/lint.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "django/scripts/archive_eol_stable_branches.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "django/scripts/manage_translations.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "django/tests/backends/tests.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "django/tests/csrf_tests/tests.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "django/tests/logging_tests/tests.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "python/asyncio/base_events.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "python/ctypes/__init__.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "python/multiprocessing/connection.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "python/multiprocessing/resource_tracker.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "python/random.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "python/statistics.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
+    "fixture": "python/typing.py",
+    "category": "fstring-self-documenting-spans",
+    "reason": "The file writes an f-string self-documenting field -- `f\"... {params=}\"`. CPython folds the literal text in front of the field together with the echoed `params=` into one `Constant`, and gives that node the source span of both: the `Constant` ends after the `=` while the `FormattedValue` beside it began at the `{`, so the two siblings overlap by the whole width of the field's expression. A tree built from a linear stream of start and finish events cannot hold two siblings that interleave, so scylla writes the same text as the two `Constant` nodes the source actually spells. The values agree; only CPython's node count and its overlapping span do not, and no correction to the oracle can close that without inventing a different answer than CPython's."
+  },
+  {
     "fixture": "bat/tests/syntax-tests/highlighted/Python/battest.py",
     "category": "not-python",
     "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Python module. CPython's own `ast.parse` rejects it too, which is what makes it residue rather than a defect."
-  },
-  {
-    "fixture": "type_params.py",
-    "category": "pep-695-type-parameter-scopes",
-    "reason": "PEP 695 gives a `def f[T]` or a `type A[T] = ...` its own CPython scope. The binder now opens one too, a `ScopeKind::Type` on the `TypeParams` node standing between the definition and the scope it was written in, so the parameters bind there and the annotations and bases read them. What still differs is the synthetic symbols CPython carries in that scope to hold the compiler's own state: `.defaults`, `.generic_base`, `.type_params`, and `__type_params__`. The binder models the language's scopes, not those."
   },
   {
     "fixture": "vscode/extensions/copilot/test/simulation/fixtures/fixing/python/pyright_badtoken.py",

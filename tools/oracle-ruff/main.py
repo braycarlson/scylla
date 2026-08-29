@@ -3,14 +3,12 @@ import os
 import subprocess
 import sys
 
-
+BATCH = 512
 CODES = "F401,F404,F622,F704,F706,F707,F811,F821,F841,PLE0117,PLE0118,PLE1142"
-
 
 def pin(root):
     with open(os.path.join(root, "PIN"), encoding="utf-8") as held:
         return held.read().strip()
-
 
 def sources(root):
     found = []
@@ -27,7 +25,6 @@ def sources(root):
 
     return found
 
-
 def rows(text):
     held = {}
 
@@ -37,7 +34,6 @@ def rows(text):
         held.setdefault(name, []).append([row["code"], start["row"], start["column"]])
 
     return held
-
 
 def main():
     if len(sys.argv) != 3:
@@ -56,27 +52,33 @@ def main():
 
         return 1
 
-    command = [
+    prefix = [
         "uvx",
         f"ruff@{version}",
         "check",
         "--no-cache",
         "--isolated",
+        "--config",
+        "exclude = []",
         "--select",
         CODES,
         "--output-format",
         "json",
         "--force-exclude",
-        source_root,
     ]
-    held = subprocess.run(command, capture_output=True, text=True, check=False)
+    reported = {}
 
-    if held.returncode not in (0, 1):
-        print(held.stderr, file=sys.stderr)
+    for start in range(0, len(found), BATCH):
+        batch = [path for _, path in found[start : start + BATCH]]
+        held = subprocess.run(prefix + batch, capture_output=True, text=True, check=False)
 
-        return held.returncode
+        if held.returncode not in (0, 1):
+            print(held.stderr, file=sys.stderr)
 
-    reported = rows(held.stdout)
+            return held.returncode
+
+        for name, rendered in rows(held.stdout).items():
+            reported.setdefault(name, []).extend(rendered)
     written = 0
 
     for name, path in found:
@@ -95,7 +97,6 @@ def main():
     print(f"wrote {written} files for ruff {version}")
 
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

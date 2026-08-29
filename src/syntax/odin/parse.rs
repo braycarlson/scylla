@@ -3,15 +3,15 @@ use crate::syntax::odin::expression::{
     EXPRESSION_DEPTH_MAX,
     Frame,
     POWER_BARRIER,
-    POWER_CAST,
     POWER_PREFIX,
-    POWER_RANGE_LEFT,
+    POWER_TRAILER,
     VALUE_COUNT_MAX,
     Variant,
     assignment_of,
     infix_of,
     is_name,
     is_prefix,
+    is_universal,
     literal_node,
     opens_a_type,
 };
@@ -532,6 +532,38 @@ impl Parser<'_> {
             self.wrap(OdinKind::String);
         }
 
+        if self.at(OdinKind::BraceOpen) {
+            self.bump();
+
+            for _ in 0..self.steps() {
+                self.skip_breaks();
+
+                if self.at(OdinKind::BraceClose) || self.current().is_none() {
+                    break;
+                }
+
+                if self.eat(OdinKind::Comma) {
+                    continue;
+                }
+
+                if self.at(OdinKind::Text) {
+                    self.wrap(OdinKind::String);
+
+                    continue;
+                }
+
+                if is_name(self.current().unwrap_or(OdinKind::ErrorToken)) {
+                    self.wrap(OdinKind::IdentifierNode);
+
+                    continue;
+                }
+
+                self.emit();
+            }
+
+            let _ = self.eat(OdinKind::BraceClose);
+        }
+
         self.events
             .start_at(checkpoint, OdinKind::ImportDeclaration);
         self.events.finish();
@@ -564,6 +596,12 @@ impl Parser<'_> {
     }
 
     fn bound_declaration(&mut self, checkpoint: Checkpoint) {
+        if self.binds_a_universal() {
+            self.constant_declaration(checkpoint);
+
+            return;
+        }
+
         if !self.at_name() {
             self.statement_at(checkpoint);
 
@@ -577,6 +615,21 @@ impl Parser<'_> {
             Some(OdinKind::Colon) => self.variable_declaration(checkpoint),
             Some(_) | None => self.statement_at(checkpoint),
         }
+    }
+
+    fn binds_a_universal(&self) -> bool {
+        let position = self.significant(self.position);
+
+        self.kind_at(position).is_some_and(is_universal)
+            && self.kind_at(self.significant(position + 1)) == Some(OdinKind::ColonColon)
+    }
+
+    fn universal(&mut self) {
+        let Some(kind) = self.current().and_then(literal_node) else {
+            return;
+        };
+
+        self.wrap(kind);
     }
 
     fn binder(&self) -> Option<OdinKind> {
@@ -604,7 +657,12 @@ impl Parser<'_> {
     }
 
     fn constant_declaration(&mut self, checkpoint: Checkpoint) {
-        self.name_list();
+        if self.binds_a_universal() {
+            self.universal();
+        } else {
+            self.name_list();
+        }
+
         self.bump();
         self.attributes();
 
@@ -619,7 +677,7 @@ impl Parser<'_> {
         if kind == OdinKind::ConstTypeDeclaration {
             self.type_of();
         } else if kind == OdinKind::ConstDeclaration {
-            self.expression();
+            self.expression_list();
         } else {
             self.container_value();
         }
@@ -638,6 +696,14 @@ impl Parser<'_> {
             };
 
             if kind == OdinKind::Directive {
+                if self
+                    .tokens
+                    .get(position as usize)
+                    .is_some_and(|token| token.text(self.source) == b"#type")
+                {
+                    return OdinKind::ConstDeclaration;
+                }
+
                 position = self.significant(position + 1);
 
                 continue;
@@ -719,7 +785,7 @@ impl Parser<'_> {
         }
 
         if self.eat(OdinKind::Colon) {
-            self.expression();
+            self.expression_list();
 
             self.events
                 .start_at(checkpoint, OdinKind::ConstTypeDeclaration);
@@ -787,6 +853,10 @@ impl Parser<'_> {
 
                 if self.at(OdinKind::Number) {
                     self.wrap(OdinKind::NumberNode);
+                }
+
+                if self.at(OdinKind::ParenOpen) {
+                    self.expression_with(false);
                 }
 
                 continue;
@@ -891,7 +961,7 @@ impl Parser<'_> {
         }
 
         if self.at_name() && self.names_a_parameter() {
-            self.name_list();
+            self.parameter_name_list();
             self.bump();
             self.directives();
             self.type_of();
@@ -912,10 +982,47 @@ impl Parser<'_> {
         self.events.finish();
     }
 
+    fn parameter_name_list(&mut self) {
+        for _ in 0..self.steps() {
+            self.directives();
+
+            if self.at(OdinKind::Dollar) && self.ahead(1).is_some_and(is_name) {
+                self.bump();
+            }
+
+            if !self.at_name() {
+                break;
+            }
+
+            self.name();
+
+            if !self.eat(OdinKind::Comma) {
+                break;
+            }
+        }
+    }
+
+    fn past_prefixes(&self, from: u32) -> u32 {
+        let mut position = from;
+
+        for _ in 0..self.steps() {
+            match self.kind_at(position) {
+                Some(OdinKind::Directive | OdinKind::Dollar) => {
+                    position = self.significant(position + 1);
+                }
+                Some(_) | None => break,
+            }
+        }
+
+        position
+    }
+
     fn names_a_parameter(&self) -> bool {
         let mut position = self.significant(self.position);
 
         for _ in 0..self.steps() {
+            position = self.past_prefixes(position);
+
             if !self.kind_at(position).is_some_and(is_name) {
                 return false;
             }
@@ -1004,7 +1111,11 @@ impl Parser<'_> {
 
         if keyword == Some(OdinKind::BitFieldKeyword) {
             if !self.at(OdinKind::BraceOpen) {
-                self.named_type();
+                if self.at_name() {
+                    self.named_type();
+                } else {
+                    self.type_of();
+                }
             }
 
             self.bit_field_block();
@@ -1068,12 +1179,21 @@ impl Parser<'_> {
 
         self.name();
 
+        let mut qualified = false;
+
         for _ in 0..self.steps() {
             if !self.eat(OdinKind::Dot) {
                 break;
             }
 
             self.name();
+
+            qualified = true;
+        }
+
+        if qualified {
+            self.events.start_at(checkpoint, OdinKind::FieldType);
+            self.events.finish();
         }
 
         self.events.start_at(checkpoint, OdinKind::Type);
@@ -1441,7 +1561,8 @@ impl Parser<'_> {
         matches!(
             self.ahead(1),
             Some(
-                OdinKind::ForKeyword
+                OdinKind::BraceOpen
+                    | OdinKind::ForKeyword
                     | OdinKind::IfKeyword
                     | OdinKind::SwitchKeyword
                     | OdinKind::WhenKeyword
@@ -1451,6 +1572,7 @@ impl Parser<'_> {
 
     fn tags_an_assignment(&self) -> bool {
         let start = self.significant(self.position + 1);
+        let mut depth = 0_u32;
 
         for step in 0..self.steps() {
             let position = start + step;
@@ -1459,19 +1581,42 @@ impl Parser<'_> {
                 return false;
             };
 
-            if matches!(kind, OdinKind::Newline | OdinKind::Semicolon) {
-                return false;
-            }
-
-            if assignment_of(kind).is_some() {
-                return true;
-            }
-
             if matches!(
                 kind,
                 OdinKind::BraceOpen | OdinKind::BracketOpen | OdinKind::ParenOpen
             ) {
+                depth += 1;
+
+                continue;
+            }
+
+            if matches!(
+                kind,
+                OdinKind::BraceClose | OdinKind::BracketClose | OdinKind::ParenClose
+            ) {
+                if depth == 0 {
+                    return false;
+                }
+
+                depth -= 1;
+
+                continue;
+            }
+
+            if depth > 0 {
+                continue;
+            }
+
+            if matches!(kind, OdinKind::Newline | OdinKind::Semicolon) {
                 return false;
+            }
+
+            if matches!(kind, OdinKind::Colon | OdinKind::ColonColon) {
+                return true;
+            }
+
+            if assignment_of(kind).is_some() {
+                return true;
             }
         }
 
@@ -1650,7 +1795,7 @@ impl Parser<'_> {
                 self.expression_statement_with(checkpoint, false);
             }
 
-            if !self.eat(OdinKind::Semicolon) {
+            if !self.follows_a_semicolon() && !self.eat(OdinKind::Semicolon) {
                 break;
             }
 
@@ -1676,6 +1821,16 @@ impl Parser<'_> {
     fn for_header(&mut self) {
         let held = self.anchor();
 
+        if self.at_name() && self.binder().is_some() {
+            self.bound_declaration(held);
+
+            if self.follows_a_semicolon() || self.eat(OdinKind::Semicolon) {
+                self.for_clauses();
+            }
+
+            return;
+        }
+
         self.expression_list_iteration();
 
         if self.eat(OdinKind::InKeyword) {
@@ -1683,8 +1838,6 @@ impl Parser<'_> {
 
             return;
         }
-
-        let _ = held;
 
         if let Some(node) = self.current().and_then(assignment_of) {
             self.bump();
@@ -1697,6 +1850,10 @@ impl Parser<'_> {
             return;
         }
 
+        self.for_clauses();
+    }
+
+    fn for_clauses(&mut self) {
         if !self.at(OdinKind::Semicolon) {
             self.expression_with(false);
         }
@@ -1708,6 +1865,26 @@ impl Parser<'_> {
 
             self.expression_statement_with(tail, false);
         }
+    }
+
+    fn follows_a_semicolon(&self) -> bool {
+        let mut position = self.position;
+
+        while position > 0 {
+            position -= 1;
+
+            let Some(kind) = self.kind_at(position) else {
+                return false;
+            };
+
+            if is_layout(kind) {
+                continue;
+            }
+
+            return kind == OdinKind::Semicolon;
+        }
+
+        false
     }
 
     fn switch_statement(&mut self, checkpoint: Checkpoint, _typed: bool) {
@@ -1883,6 +2060,14 @@ impl Parser<'_> {
     }
 
     fn type_of(&mut self) {
+        for _ in 0..self.steps() {
+            if !self.at(OdinKind::Directive) {
+                break;
+            }
+
+            self.wrap(OdinKind::Tag);
+        }
+
         let checkpoint = self.anchor();
 
         self.expression_staged(CONTEXT_TYPE);
@@ -1911,6 +2096,14 @@ impl Parser<'_> {
     }
 
     fn element_type(&mut self) {
+        for _ in 0..self.steps() {
+            if !self.at(OdinKind::Directive) {
+                break;
+            }
+
+            self.wrap(OdinKind::Tag);
+        }
+
         let checkpoint = self.anchor();
 
         self.expression_staged(CONTEXT_ELEMENT);
@@ -1990,11 +2183,10 @@ impl Parser<'_> {
     }
 
     fn in_a_type(&self, base: u32) -> bool {
-        matches!(self.context(base), CONTEXT_ELEMENT | CONTEXT_TYPE)
-    }
-
-    fn takes_arguments(&self, base: u32) -> bool {
-        self.context(base) == CONTEXT_TYPE
+        matches!(
+            self.context(base),
+            CONTEXT_CONDITIONAL | CONTEXT_ELEMENT | CONTEXT_TYPE
+        )
     }
 
     fn machine(&mut self, base: u32) {
@@ -2217,16 +2409,6 @@ impl Parser<'_> {
 
         match Some(kind) {
             None => Step::Done,
-            Some(OdinKind::Minus) if self.signs_a_number() => {
-                let checkpoint = self.anchor();
-
-                self.open(OdinKind::NumberNode);
-                self.emit();
-                self.emit();
-                self.events.finish();
-
-                self.settle(checkpoint, true)
-            }
             Some(held) if is_name(held) => self.leaf(OdinKind::IdentifierNode),
             Some(OdinKind::MinusMinusMinus) => self.leaf(OdinKind::Uninitialized),
             Some(OdinKind::Directive) => self.directive_operand(base),
@@ -2262,7 +2444,7 @@ impl Parser<'_> {
         match Some(kind) {
             None => Step::Done,
             Some(OdinKind::BitSetKeyword) => self.bit_set_type(base),
-            Some(OdinKind::ProcKeyword) => self.procedure_operand(),
+            Some(OdinKind::ProcKeyword) => self.procedure_operand(self.in_a_type(base)),
             Some(OdinKind::BitFieldKeyword) => self.record_operand(OdinKind::BitFieldType),
             Some(OdinKind::StructKeyword) => self.record_operand(OdinKind::StructType),
             Some(OdinKind::EnumKeyword) => self.enumeration_operand(),
@@ -2304,25 +2486,6 @@ impl Parser<'_> {
         }
     }
 
-    fn signs_a_number(&self) -> bool {
-        let held = self.significant(self.position);
-        let next = self.significant(held + 1);
-
-        if self.kind_at(next) != Some(OdinKind::Number) {
-            return false;
-        }
-
-        let Some(left) = self.tokens.get(held as usize) else {
-            return false;
-        };
-
-        let Some(right) = self.tokens.get(next as usize) else {
-            return false;
-        };
-
-        left.end() == right.offset
-    }
-
     fn leaf(&mut self, kind: OdinKind) -> Step {
         let checkpoint = self.anchor();
 
@@ -2341,7 +2504,14 @@ impl Parser<'_> {
     fn directive_operand(&mut self, base: u32) -> Step {
         let checkpoint = self.anchor();
 
+        let typing = self
+            .tokens
+            .get(self.position as usize)
+            .is_some_and(|token| token.text(self.source) == b"#type");
+
         self.wrap(OdinKind::Tag);
+
+        let marked = self.anchor();
 
         let Some(kind) = self.current() else {
             return self.settle(checkpoint, true);
@@ -2372,8 +2542,15 @@ impl Parser<'_> {
         }
 
         if kind == OdinKind::ProcKeyword {
-            let _ = self.procedure_operand();
-            self.reduce_tag(checkpoint);
+            let held = self.anchor();
+            let _ = self.procedure_operand(typing || self.in_a_type(base));
+
+            if typing {
+                self.events.start_at(held, OdinKind::Type);
+                self.events.finish();
+            }
+
+            self.reduce_tag(marked);
 
             return Step::Operator;
         }
@@ -2388,7 +2565,7 @@ impl Parser<'_> {
             return self.settle(checkpoint, true);
         }
 
-        self.reduce_tag(checkpoint);
+        self.reduce_tag(marked);
 
         step
     }
@@ -2488,10 +2665,48 @@ impl Parser<'_> {
     }
 
     fn opens_a_cast(&self) -> bool {
-        matches!(
+        if !matches!(
             self.ahead(1),
             Some(OdinKind::BracketOpen | OdinKind::Caret | OdinKind::ProcKeyword)
-        )
+        ) {
+            return false;
+        }
+
+        let mut position = self.ahead_position(1);
+        let mut braces = 0_u32;
+        let mut depth = 0_u32;
+        let mut record = false;
+
+        for _ in 0..self.steps() {
+            match self.kind_at(position) {
+                None => return true,
+                Some(OdinKind::BracketOpen | OdinKind::ParenOpen) => depth += 1,
+                Some(OdinKind::ParenClose) if depth == 0 && braces == 0 => return true,
+                Some(OdinKind::BracketClose | OdinKind::ParenClose) => {
+                    depth = depth.saturating_sub(1);
+                }
+                Some(
+                    OdinKind::BitFieldKeyword
+                    | OdinKind::EnumKeyword
+                    | OdinKind::StructKeyword
+                    | OdinKind::UnionKeyword,
+                ) => record = true,
+                Some(OdinKind::BraceOpen) => {
+                    if depth == 0 && braces == 0 && !record {
+                        return false;
+                    }
+
+                    braces += 1;
+                    record = false;
+                }
+                Some(OdinKind::BraceClose) => braces = braces.saturating_sub(1),
+                Some(_) => {}
+            }
+
+            position = self.significant(position + 1);
+        }
+
+        true
     }
 
     fn parenthesized_cast(&mut self) -> Step {
@@ -2658,7 +2873,8 @@ impl Parser<'_> {
 
         self.bump();
         let _ = self.eat(OdinKind::BracketOpen);
-        self.bare_type();
+
+        self.expression_with(false);
 
         if self.eat(OdinKind::Semicolon) {
             self.type_of();
@@ -2676,7 +2892,7 @@ impl Parser<'_> {
         self.settle(checkpoint, true)
     }
 
-    fn procedure_operand(&mut self) -> Step {
+    fn procedure_operand(&mut self, typed: bool) -> Step {
         let checkpoint = self.anchor();
 
         self.bump();
@@ -2694,14 +2910,27 @@ impl Parser<'_> {
         self.qualifiers();
 
         if self.at(OdinKind::MinusMinusMinus) {
+            let kind = if typed {
+                OdinKind::ProcedureType
+            } else {
+                OdinKind::Procedure
+            };
+
             self.wrap(OdinKind::Uninitialized);
-            self.events.start_at(checkpoint, OdinKind::Procedure);
+            self.events.start_at(checkpoint, kind);
             self.events.finish();
 
             return self.settle(checkpoint, true);
         }
 
         if !self.at(OdinKind::BraceOpen) && !self.brace_follows() {
+            self.events.start_at(checkpoint, OdinKind::ProcedureType);
+            self.events.finish();
+
+            return self.settle(checkpoint, true);
+        }
+
+        if typed {
             self.events.start_at(checkpoint, OdinKind::ProcedureType);
             self.events.finish();
 
@@ -2799,13 +3028,7 @@ impl Parser<'_> {
         if self.in_a_type(base) {
             match Some(kind) {
                 Some(OdinKind::Dot) => return self.field_type(),
-                Some(OdinKind::ParenOpen) => {
-                    if !self.takes_arguments(base) {
-                        return Step::Done;
-                    }
-
-                    return self.polymorphic_type();
-                }
+                Some(OdinKind::ParenOpen) => return self.polymorphic_type(),
                 Some(OdinKind::Slash) => return self.specialized_type(),
                 Some(_) | None => {}
             }
@@ -2818,7 +3041,7 @@ impl Parser<'_> {
         match Some(kind) {
             Some(OdinKind::Dot) => self.member(base),
             Some(OdinKind::Caret) => {
-                self.reduce_for(POWER_CAST);
+                self.reduce_for(POWER_TRAILER);
 
                 self.postfix(OdinKind::Address, false)
             }
@@ -2849,7 +3072,37 @@ impl Parser<'_> {
             return None;
         }
 
+        if matches!(kind, OdinKind::IfKeyword | OdinKind::WhenKeyword)
+            && self.opens_a_line()
+            && self.frames[self.innermost_group(base) as usize].variant == Variant::Top
+        {
+            return None;
+        }
+
         infix_of(kind)
+    }
+
+    fn opens_a_line(&self) -> bool {
+        let position = self.significant(self.position);
+
+        let Some(token) = self.tokens.get(position as usize) else {
+            return false;
+        };
+
+        if position == 0 {
+            return false;
+        }
+
+        let Some(behind) = self.tokens.get(position as usize - 1) else {
+            return false;
+        };
+
+        let from = behind.end() as usize;
+        let to = token.offset as usize;
+
+        self.source
+            .get(from..to)
+            .is_some_and(|held| held.contains(&b'\n'))
     }
 
     fn ternary_frame(&self, base: u32) -> Option<u32> {
@@ -2913,13 +3166,37 @@ impl Parser<'_> {
     }
 
     fn type_argument(&mut self) {
-        if self.current().and_then(literal_node).is_some() {
+        if self.current().and_then(literal_node).is_some() || self.opens_a_literal() {
             self.expression();
 
             return;
         }
 
         self.type_of();
+    }
+
+    fn opens_a_literal(&self) -> bool {
+        if !self.at_name() {
+            return false;
+        }
+
+        let mut steps = 1_u32;
+
+        for _ in 0..self.steps() {
+            if self.ahead(steps) == Some(OdinKind::BraceOpen) {
+                return true;
+            }
+
+            if self.ahead(steps) != Some(OdinKind::Dot)
+                || !self.ahead(steps + 1).is_some_and(is_name)
+            {
+                return false;
+            }
+
+            steps += 2;
+        }
+
+        false
     }
 
     fn specialized_type(&mut self) -> Step {
@@ -2971,7 +3248,7 @@ impl Parser<'_> {
     }
 
     fn member(&mut self, base: u32) -> Step {
-        self.reduce_for(POWER_RANGE_LEFT);
+        self.reduce_for(POWER_TRAILER);
 
         if self.value_count == 0 {
             return Step::Done;

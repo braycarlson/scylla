@@ -396,6 +396,63 @@ fn a_file_that_does_not_parse_is_refused() {
 }
 
 #[test]
+fn a_source_that_never_closes_a_string_or_a_comment_is_refused() {
+    const SOURCES: [&[u8]; 5] = [
+        b"\"",
+        b"' ",
+        b"/* ",
+        b"a { content: \"x; }\n",
+        b"a { content: 'x }\n",
+    ];
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    for source in SOURCES {
+        assert_eq!(
+            held.format(source, &mut out),
+            Outcome::Refusal,
+            "{:?}",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn an_escaped_quote_in_a_selector_opens_no_string() {
+    let source: &[u8] = b".tw\\:bg-\\[url\\(\\'x.png\\'\\)\\] { background: url(a.png); }\n";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(OUT_BYTES_MAX);
+    let mut second = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(second.as_bytes()),
+        String::from_utf8_lossy(&once)
+    );
+
+    assert!(String::from_utf8_lossy(&once).contains("background: url(a.png)"));
+}
+
+#[test]
+fn a_trailing_escape_reads_the_same_with_or_without_a_final_newline() {
+    let mut held = Held::reserve();
+    let mut bare = Buffer::reserve(OUT_BYTES_MAX);
+    let mut ended = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(b"gin: ol\\", &mut bare), Outcome::Complete);
+    assert_eq!(held.format(b"gin: ol\\\n", &mut ended), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(bare.as_bytes()),
+        String::from_utf8_lossy(ended.as_bytes())
+    );
+}
+
+#[test]
 fn a_range_reads_back_the_lines_it_names() {
     let source: &[u8] = b".a{\ncolor:red;\n}\n";
     let mut held = Held::reserve();

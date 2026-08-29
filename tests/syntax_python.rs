@@ -24,8 +24,8 @@ use scylla::tree::{Events, Tree};
 use scylla::trivia::{self, Gap};
 
 const NOT_PYTHON: [&str; 1] = ["not-python"];
-const EVERY_CATEGORY: [&str; 1] = ["not-python"];
-const SCOPE_CATEGORY: [&str; 2] = ["not-python", "pep-695-type-parameter-scopes"];
+const EVERY_CATEGORY: [&str; 2] = ["fstring-self-documenting-spans", "not-python"];
+const SCOPE_CATEGORY: [&str; 1] = ["not-python"];
 const CONTINUATION: u8 = b'\\';
 const RAW_COUNT_MAX: u32 = 0x0004_0000;
 const TOKEN_COUNT_MAX: u32 = 0x0004_0000;
@@ -200,7 +200,8 @@ impl Machine {
             ScopeKind::Module => "top".to_owned(),
             ScopeKind::Comprehension => "genexpr".to_owned(),
             ScopeKind::Lambda => "lambda".to_owned(),
-            ScopeKind::Type => "type params".to_owned(),
+            ScopeKind::Type | ScopeKind::TypeAlias => self.owner_name(source, index),
+            ScopeKind::TypeVariable => self.owner_name(source, index),
             ScopeKind::Class | ScopeKind::Function => {
                 let view = View::new(&self.tree, self.tokens(), &self.raw, scope.node);
 
@@ -213,14 +214,87 @@ impl Machine {
         }
     }
 
+    fn compiler_state(&self, index: u32) -> Vec<(&'static [u8], &'static str)> {
+        let scope = self.tables.scopes[index as usize];
+
+        if scope.kind == ScopeKind::Class {
+            let parent = scope.parent;
+
+            if parent != scylla::tree::NONE
+                && self.tables.scopes[parent as usize].kind == ScopeKind::Type
+            {
+                return vec![
+                    (b".type_params".as_slice(), "f"),
+                    (b"__type_params__".as_slice(), "al"),
+                ];
+            }
+
+            return Vec::new();
+        }
+
+        if scope.kind != ScopeKind::Type {
+            return Vec::new();
+        }
+
+        match self.raw_kind(self.tree.at(scope.node).parent) {
+            PythonKind::AsyncFunctionDef | PythonKind::FunctionDef => {
+                let mut held = vec![(b".defaults".as_slice(), "lp")];
+
+                if scope.parent != scylla::tree::NONE
+                    && self.tables.scopes[scope.parent as usize].kind == ScopeKind::Class
+                {
+                    held.push((b"__classdict__".as_slice(), "f"));
+                }
+
+                held
+            }
+            PythonKind::ClassDef => vec![
+                (b".generic_base".as_slice(), "al"),
+                (b".type_params".as_slice(), "al"),
+            ],
+            _ => Vec::new(),
+        }
+    }
+
+    fn owner_name(&self, source: &[u8], index: u32) -> String {
+        let scope = self.tables.scopes[index as usize];
+        let mut node = scope.node;
+
+        if self.raw_kind(node) == PythonKind::TypeParams {
+            node = self.tree.at(node).parent;
+        }
+
+        let view = View::new(&self.tree, self.tokens(), &self.raw, node);
+
+        if self.raw_kind(node) == PythonKind::TypeAlias {
+            if let Some(named) = view.children().find(|held| held.kind() == PythonKind::Name) {
+                if let Some(position) = named.token_first(PythonKind::Identifier) {
+                    return String::from_utf8_lossy(named.token_at(position).text(source))
+                        .into_owned();
+                }
+            }
+        }
+
+        match view.token_first(PythonKind::Identifier) {
+            None => String::new(),
+            Some(position) => {
+                String::from_utf8_lossy(view.token_at(position).text(source)).into_owned()
+            }
+        }
+    }
+
+    fn raw_kind(&self, node: u32) -> PythonKind {
+        self.tree.at(node).kind
+    }
+
     fn scope_kind(&self, index: u32) -> &'static str {
         match self.tables.scopes[index as usize].kind {
             ScopeKind::Class => "class",
             ScopeKind::Module => "module",
-            ScopeKind::Comprehension
-            | ScopeKind::Function
-            | ScopeKind::Lambda
-            | ScopeKind::Type => "function",
+            ScopeKind::Type => "type parameters",
+            ScopeKind::TypeAlias => "type alias",
+            ScopeKind::TypeVariable => "type variable",
+            ScopeKind::Comprehension | ScopeKind::Function | ScopeKind::Lambda => "function",
         }
     }
 
@@ -260,21 +334,29 @@ impl Machine {
         scylla::tree::NONE
     }
 
-    fn uses_class_cell(&self, source: &[u8], index: u32) -> bool {
+    fn class_cell(&self, source: &[u8], index: u32) -> Option<&'static str> {
         let scope = self.tables.scopes[index as usize];
 
-        if !matches!(scope.kind, ScopeKind::Function | ScopeKind::Lambda) {
-            return false;
+        if !matches!(
+            scope.kind,
+            ScopeKind::Class | ScopeKind::Function | ScopeKind::Lambda
+        ) {
+            return None;
         }
 
-        if self.class_owner(index) == scylla::tree::NONE {
-            return false;
-        }
-
-        self.tables.references.iter().any(|reference| {
+        let named = self.tables.references.iter().any(|reference| {
             reference.scope == index
                 && matches!(&source[reference.name.range()], b"super" | b"__class__")
-        })
+        });
+
+        if !named {
+            return None;
+        }
+
+        let held =
+            scope.kind != ScopeKind::Class && self.class_owner(index) != scylla::tree::NONE;
+
+        Some(if held { "f" } else { "g" })
     }
 
     fn binds(&self, source: &[u8], scope: u32, name: &[u8]) -> bool {
@@ -282,6 +364,18 @@ impl Machine {
             binding.scope == scope
                 && &source[binding.name.range()] == name
                 && !matches!(binding.kind, BindingKind::Global | BindingKind::Nonlocal)
+        })
+    }
+
+    fn captures(&self, source: &[u8], reader: u32, module: u32, name: &[u8]) -> bool {
+        if self.tables.scopes[reader as usize].kind != ScopeKind::Comprehension {
+            return false;
+        }
+
+        self.tables.bindings.iter().any(|binding| {
+            binding.scope == module
+                && binding.kind == BindingKind::ComprehensionTarget
+                && source[binding.name.range()] == *name
         })
     }
 
@@ -296,7 +390,11 @@ impl Machine {
             let kind = self.tables.scopes[held as usize].kind;
 
             if kind == ScopeKind::Module {
-                return scylla::tree::NONE;
+                return if self.captures(source, scope, held, name) {
+                    held
+                } else {
+                    scylla::tree::NONE
+                };
             }
 
             if kind != ScopeKind::Class && self.binds(source, held, name) {
@@ -330,6 +428,28 @@ impl Machine {
         names
     }
 
+    fn mangling(&self, source: &[u8], index: u32) -> Vec<u8> {
+        let mut held = index;
+
+        for _ in 0..self.tables.scopes.count() {
+            let scope = self.tables.scopes[held as usize];
+
+            if scope.kind == ScopeKind::Class {
+                let name = self.scope_name(source, held);
+
+                return name.trim_start_matches('_').as_bytes().to_vec();
+            }
+
+            if scope.parent == scylla::tree::NONE {
+                break;
+            }
+
+            held = scope.parent;
+        }
+
+        Vec::new()
+    }
+
     fn letters_of(&self, source: &[u8], index: u32, name: &[u8]) -> String {
         let mut held = Marks::EMPTY;
 
@@ -339,6 +459,7 @@ impl Machine {
         let local = held.bound && !held.declared_global && !held.declared_nonlocal;
 
         let free = !local
+            && !held.declared_global
             && (held.declared_nonlocal || self.owner_of(source, index, name) != scylla::tree::NONE);
 
         let global = module || held.declared_global || (!local && !free);
@@ -420,6 +541,38 @@ impl Machine {
             held.bound = true;
             held.assigned = true;
         }
+
+        if !held.bound && self.walrus_above(source, index, name) {
+            held.assigned = true;
+        }
+    }
+
+    fn walrus_above(&self, source: &[u8], index: u32, name: &[u8]) -> bool {
+        if self.tables.scopes[index as usize].kind != ScopeKind::Comprehension {
+            return false;
+        }
+
+        let mut held = self.tables.scopes[index as usize].parent;
+
+        for _ in 0..self.tables.scopes.count() {
+            if held == scylla::tree::NONE {
+                return false;
+            }
+
+            let found = self.tables.bindings.iter().any(|binding| {
+                binding.scope == held
+                    && binding.kind == BindingKind::WalrusTarget
+                    && source[binding.name.range()] == *name
+            });
+
+            if found {
+                return true;
+            }
+
+            held = self.tables.scopes[held as usize].parent;
+        }
+
+        false
     }
 
     fn scopes(&self, source: &[u8]) -> Vec<(String, String, u32, String)> {
@@ -433,14 +586,24 @@ impl Machine {
                 symbols.push((b".0".to_vec(), "lp".to_owned()));
             }
 
-            if self.uses_class_cell(source, index) {
-                symbols.push((b"__class__".to_vec(), "f".to_owned()));
+            for (name, letters) in self.compiler_state(index) {
+                symbols.push((name.to_vec(), letters.to_owned()));
             }
 
-            for name in self.symbol_names(source, index) {
+            let names = self.symbol_names(source, index);
+
+            if let Some(letters) = self.class_cell(source, index) {
+                if !names.iter().any(|known| known == b"__class__") {
+                    symbols.push((b"__class__".to_vec(), letters.to_owned()));
+                }
+            }
+
+            let owner = self.mangling(source, index);
+
+            for name in names {
                 let letters = self.letters_of(source, index, &name);
 
-                symbols.push((name, letters));
+                symbols.push((mangled(&name, &owner), letters));
             }
 
             held.push(symbols);
@@ -524,6 +687,10 @@ impl Machine {
                     .collect();
 
                 for name in free {
+                    if synthetic(&name) {
+                        continue;
+                    }
+
                     let owner = if name == b"__class__" {
                         self.class_owner(index)
                     } else {
@@ -842,6 +1009,27 @@ fn classify_runs_the_corpus_without_an_unclaimed_byte() {
         "the corpus lost its Python files: {compared} classified, floor {}",
         floor::CORPUS_CLASSIFY_PYTHON
     );
+}
+
+fn synthetic(name: &[u8]) -> bool {
+    matches!(
+        name,
+        b".defaults" | b".generic_base" | b".type_params" | b"__classdict__" | b"__type_params__"
+    )
+}
+
+fn mangled(name: &[u8], owner: &[u8]) -> Vec<u8> {
+    if owner.is_empty() || !name.starts_with(b"__") || name.ends_with(b"__") {
+        return name.to_vec();
+    }
+
+    let mut found = Vec::with_capacity(1 + owner.len() + name.len());
+
+    found.push(b'_');
+    found.extend_from_slice(owner);
+    found.extend_from_slice(name);
+
+    found
 }
 
 fn census_of(rows: &[(String, u32, u32)]) -> Vec<(String, u32)> {

@@ -410,6 +410,42 @@ fn a_file_that_does_not_parse_is_refused() {
 }
 
 #[test]
+fn a_source_that_never_closes_a_string_or_a_comment_is_refused() {
+    const SOURCES: [&[u8]; 4] = [b"' ", b"\":\\\\", b"/* ", b"const a = \"open\n"];
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    for source in SOURCES {
+        assert_eq!(
+            held.format(source, &mut out),
+            Outcome::Refusal,
+            "{:?}",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn an_operator_does_not_reach_into_the_comment_behind_it() {
+    let source: &[u8] = b"tyy<<!--y[";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(OUT_BYTES_MAX);
+    let mut second = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(held.comments(source), held.comments(&once));
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(second.as_bytes()),
+        String::from_utf8_lossy(&once)
+    );
+}
+
+#[test]
 fn a_range_reads_back_the_lines_it_names() {
     let source: &[u8] = b"function f() {\nlet x=1;\nreturn x;\n}\n";
     let mut held = Held::reserve();

@@ -21,15 +21,15 @@ pub(crate) const CORPUS_WALK_GO: usize = 7_679;
 pub(crate) const CORPUS_WALK_JAVASCRIPT: usize = 411;
 pub(crate) const CORPUS_WALK_ODIN: usize = 1_943;
 pub(crate) const CORPUS_WALK_PYTHON: usize = 4_057;
-pub(crate) const CORPUS_WALK_RUST: usize = 3_108;
+pub(crate) const CORPUS_WALK_RUST: usize = 3_008;
 pub(crate) const CORPUS_WALK_TYPESCRIPT: usize = 13_483;
 pub(crate) const CORPUS_WALK_ZIG: usize = 249;
 
-pub(crate) const CORPUS_SCOPE_PYTHON: usize = 4_058;
+pub(crate) const CORPUS_SCOPE_PYTHON: usize = 4_057;
 
-pub(crate) const CORPUS_SEMANTIC_GO: usize = 7_727;
-pub(crate) const CORPUS_SEMANTIC_JAVASCRIPT: usize = 13_892;
-pub(crate) const CORPUS_SEMANTIC_PYTHON: usize = 4_060;
+pub(crate) const CORPUS_SEMANTIC_GO: usize = 7_677;
+pub(crate) const CORPUS_SEMANTIC_JAVASCRIPT: usize = 13_890;
+pub(crate) const CORPUS_SEMANTIC_PYTHON: usize = 4_055;
 
 pub(crate) const CORPUS_LOSSLESS: usize = 31_723;
 

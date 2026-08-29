@@ -8,7 +8,6 @@ import sys
 import token
 import tokenize
 
-
 FLAGS = (
     ('assigned', 'a'),
     ('free', 'f'),
@@ -17,7 +16,6 @@ FLAGS = (
     ('local', 'l'),
     ('parameter', 'p'),
 )
-
 
 def line_starts(source):
     starts = [0]
@@ -43,7 +41,6 @@ def line_starts(source):
 
     return starts
 
-
 def offset_of(starts, length, line, column):
     if line is None or column is None:
         return None
@@ -54,7 +51,6 @@ def offset_of(starts, length, line, column):
         return None
 
     return min(starts[index] + column, length)
-
 
 def walk_ast(tree, starts, length):
     rows = []
@@ -74,7 +70,6 @@ def walk_ast(tree, starts, length):
 
     return rows
 
-
 def walk_scopes(table):
     rows = []
     stack = [table]
@@ -83,12 +78,18 @@ def walk_scopes(table):
         scope = stack.pop()
         symbols = []
 
+        named = scope.get_name() == 'top' and scope.get_type() != 'module'
+
         for symbol in sorted(scope.get_symbols(), key=lambda held: held.get_name()):
             letters = ''.join(
                 letter
                 for name, letter in FLAGS
                 if getattr(symbol, 'is_' + name)()
             )
+
+            if named and 'l' in letters:
+                letters = letters.replace('g', '')
+
             symbols.append(f'{symbol.get_name()}:{letters}')
 
         rows.append([
@@ -103,7 +104,6 @@ def walk_scopes(table):
     rows.sort()
 
     return rows
-
 
 def walk_symtable(table):
     rows = []
@@ -137,7 +137,6 @@ def walk_symtable(table):
 
     return rows
 
-
 def walk_tokens(text, starts, length):
     rows = []
     reader = io.StringIO(text).readline
@@ -167,7 +166,6 @@ def walk_tokens(text, starts, length):
 
     return rows
 
-
 def dump(source, path):
     text = source.decode('utf-8')
     starts = line_starts(source)
@@ -183,7 +181,6 @@ def dump(source, path):
         'version': platform.python_version(),
     }
 
-
 def sources(root):
     found = []
 
@@ -198,7 +195,6 @@ def sources(root):
     found.sort()
 
     return found
-
 
 def main(argv):
     if len(argv) != 3:
@@ -225,14 +221,19 @@ def main(argv):
         os.makedirs(os.path.dirname(target), exist_ok=True)
 
         with open(target, 'w', encoding='utf-8') as handle:
-            json.dump(dumped, handle, separators=(',', ':'), sort_keys=True)
+            json.dump(
+                dumped,
+                handle,
+                ensure_ascii=False,
+                separators=(',', ':'),
+                sort_keys=True,
+            )
             handle.write('\n')
 
     for relative, reason in skipped:
         print(f'skipped {relative} ({reason})', file=sys.stderr)
 
     return 0
-
 
 if __name__ == '__main__':
     sys.exit(main(sys.argv))

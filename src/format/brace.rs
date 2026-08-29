@@ -1,6 +1,7 @@
 use crate::bounded::{Buffer, Span, count_of};
-use crate::format::ir::{Document, Element, Source as ElementSource};
+use crate::format::ir::{Document, Element};
 use crate::format::print::{self, Options};
+use crate::scan::{line_break_width, string_is_terminated};
 use crate::token::{Punctuation, Token, TokenKind};
 
 pub const NEST_DEPTH_MAX: u32 = 128;
@@ -112,6 +113,50 @@ const fn ends_operand(kind: TokenKind) -> bool {
     )
 }
 
+pub fn closed(source: &[u8], tokens: &[Token]) -> bool {
+    for token in tokens {
+        let text = token.text(source);
+
+        let held = match token.kind {
+            TokenKind::Comment => comment_closed(text),
+            TokenKind::String => string_closed(text),
+            _ => true,
+        };
+
+        if !held {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn comment_closed(text: &[u8]) -> bool {
+    if !text.starts_with(b"/*") {
+        return true;
+    }
+
+    text.len() >= 4 && text.ends_with(b"*/")
+}
+
+fn string_closed(text: &[u8]) -> bool {
+    let mut prefix = 0;
+
+    while prefix < text.len() && text[prefix].is_ascii_alphabetic() {
+        prefix += 1;
+    }
+
+    let Some(&quote) = text.get(prefix) else {
+        return true;
+    };
+
+    if !matches!(quote, b'"' | b'\'' | b'`') {
+        return true;
+    }
+
+    string_is_terminated(text)
+}
+
 pub fn balanced(tokens: &[Token]) -> bool {
     let mut depth = 0;
     let mut stack = [TokenKind::BlockStart; NEST_DEPTH_MAX as usize];
@@ -146,12 +191,32 @@ fn breaks(source: &[u8], from: u32, to: u32) -> u32 {
     assert!(from <= to);
     assert!(to as usize <= source.len());
 
+    let stop = to as usize;
     let mut found = 0;
+    let mut offset = from as usize;
 
-    for byte in &source[from as usize..to as usize] {
-        if *byte == b'\n' {
+    while offset < stop {
+        if source[offset] == b'\\' {
+            let mut cursor = offset + 1;
+
+            while cursor < stop && matches!(source[cursor], b' ' | b'\t') {
+                cursor += 1;
+            }
+
+            let width = line_break_width(source, cursor);
+
+            if width > 0 {
+                offset = cursor + width;
+
+                continue;
+            }
+        }
+
+        if source[offset] == b'\n' {
             found += 1;
         }
+
+        offset += 1;
     }
 
     found
@@ -1038,12 +1103,7 @@ impl Emitter<'_> {
 
         let span = token.span();
 
-        if self.source[span.range()].contains(&b'\n') {
-            return self.document.push(Element::Verbatim(span));
-        }
-
-        self.document
-            .push(Element::Text(ElementSource::Document, span))
+        self.document.push(Element::Verbatim(span))
     }
 }
 

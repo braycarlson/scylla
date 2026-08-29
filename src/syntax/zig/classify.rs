@@ -1,6 +1,6 @@
-use crate::bounded::BoundedVec;
+use crate::bounded::{BoundedVec, count_of};
 use crate::syntax::zig::kind::ZigKind;
-use crate::token::{Token, TokenKind, Tokens};
+use crate::token::{Token, TokenKind, Tokens, operator_limit_of};
 
 #[cfg(test)]
 const KEYWORDS: [(&[u8], ZigKind); 46] = [
@@ -134,11 +134,12 @@ pub fn classify(
         let token = tokens[position];
         let offset = token.offset as usize;
         let end = token.end() as usize;
+        let limit = operator_limit_of(tokens, position, count_of(end));
         let mut cursor = offset;
         let mut stop = offset;
 
         for _ in 0..=(end - offset) {
-            let (kind, reach) = kind_of(source, token.kind, cursor, end);
+            let (kind, reach) = kind_of(&source[..limit as usize], token.kind, cursor, end);
 
             if !push(source, out, raw, token.kind, kind, cursor, reach) {
                 return false;

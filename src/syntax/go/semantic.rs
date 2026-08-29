@@ -68,6 +68,12 @@ pub struct Binding {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct Names {
+    count: u32,
+    covered: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Reference {
     pub context: Context,
     pub name: Span,
@@ -369,6 +375,7 @@ impl Semantic {
     fn binding_in(&self, source: &[u8], scope: u32, name: &[u8], namespace: Namespace) -> u32 {
         let hash = name_hash(name);
         let mut index = self.heads[self.bucket_of(scope, hash)];
+        let mut found = NONE;
 
         for _ in 0..=self.bindings.count() {
             if index == NONE {
@@ -382,18 +389,19 @@ impl Semantic {
                 && held.namespace == namespace
                 && &source[held.name.range()] == name
             {
-                return index;
+                found = index;
             }
 
             index = held.scope_previous;
         }
 
-        NONE
+        found
     }
 
     fn binding_before(&self, source: &[u8], scope: u32, name: &[u8], reference: &Reference) -> u32 {
         let hash = name_hash(name);
         let mut index = self.heads[self.bucket_of(scope, hash)];
+        let mut found = NONE;
 
         for _ in 0..=self.bindings.count() {
             if index == NONE {
@@ -412,13 +420,13 @@ impl Semantic {
                 && held.name_hash == hash
                 && &source[held.name.range()] == name
             {
-                return index;
+                found = index;
             }
 
             index = held.scope_previous;
         }
 
-        NONE
+        found
     }
 }
 
@@ -500,18 +508,19 @@ impl<'run> Builder<'run> {
         position
     }
 
-    fn leading_names(&self, node: u32, out: &mut [u32; NAME_COUNT_MAX], count: &mut usize) {
-        *count = 0;
-
+    fn leading_names(&self, node: u32) -> Names {
         let mut child = self.tree.at(node).child_first;
+        let mut count = 0;
 
-        while child != NONE && *count < NAME_COUNT_MAX {
+        while child != NONE && count < self.tree.count() {
             if self.kind_of(child) != GoKind::Ident {
-                return;
+                return Names {
+                    count,
+                    covered: false,
+                };
             }
 
-            out[*count] = child;
-            *count += 1;
+            count += 1;
 
             let after = self.significant(self.tree.at(child).token_end);
 
@@ -528,9 +537,26 @@ impl<'run> Builder<'run> {
             }
         }
 
-        if child == NONE {
-            *count = 0;
+        Names {
+            count,
+            covered: child == NONE,
         }
+    }
+
+    fn among_leading(&self, parent: u32, node: u32, count: u32) -> bool {
+        let mut child = self.tree.at(parent).child_first;
+        let mut index = 0;
+
+        while child != NONE && index < count {
+            if child == node {
+                return true;
+            }
+
+            child = self.tree.at(child).sibling_next;
+            index += 1;
+        }
+
+        false
     }
 
     const fn scope_kind_of(kind: GoKind) -> Option<ScopeKind> {
@@ -657,7 +683,7 @@ impl<'run> Builder<'run> {
             self.range(node);
         }
 
-        if kind == GoKind::TypeSwitchStmt {
+        if kind == GoKind::CaseClause {
             self.guard(node);
         }
 
@@ -780,7 +806,7 @@ impl<'run> Builder<'run> {
     }
 
     fn receiver_parameters(&mut self, node: u32) {
-        let mut stack = [NONE; NAME_COUNT_MAX];
+        let mut stack = [NONE; STACK_DEPTH_MAX];
         let mut depth = 1;
 
         stack[0] = node;
@@ -820,7 +846,7 @@ impl<'run> Builder<'run> {
             }
 
             for child in self.children(held) {
-                if depth >= NAME_COUNT_MAX {
+                if depth >= STACK_DEPTH_MAX {
                     return;
                 }
 
@@ -927,15 +953,23 @@ impl<'run> Builder<'run> {
                 continue;
             }
 
-            let mut names = [NONE; NAME_COUNT_MAX];
-            let mut count = 0;
+            let held = self.leading_names(child);
 
-            self.leading_names(child, &mut names, &mut count);
+            if held.covered {
+                continue;
+            }
 
-            for held in &names[..count] {
-                let name = self.span_of(*held);
+            let mut name = self.tree.at(child).child_first;
+            let mut index = 0;
 
-                let _ = self.record_in(scope, kind, name, *held);
+            while name != NONE && index < held.count {
+                let span = self.span_of(name);
+                let next = self.tree.at(name).sibling_next;
+
+                let _ = self.record_in(scope, kind, span, name);
+
+                name = next;
+                index += 1;
             }
         }
     }
@@ -950,27 +984,18 @@ impl<'run> Builder<'run> {
         };
 
         let from = self.end_of(node);
-        let mut names = [NONE; NAME_COUNT_MAX];
-        let mut count = 0;
+        let held = self.leading_names(node);
+        let mut name = self.tree.at(node).child_first;
+        let mut index = 0;
 
-        self.leading_names(node, &mut names, &mut count);
+        while name != NONE && index < held.count {
+            let span = self.span_of(name);
+            let next = self.tree.at(name).sibling_next;
 
-        if count == 0 {
-            let held = self.child_at(node, 0);
+            let _ = self.record_from(from, kind, span, name);
 
-            if self.kind_of(held) == GoKind::Ident {
-                let name = self.span_of(held);
-
-                let _ = self.record_from(from, kind, name, held);
-            }
-
-            return;
-        }
-
-        for held in &names[..count] {
-            let name = self.span_of(*held);
-
-            let _ = self.record_from(from, kind, name, *held);
+            name = next;
+            index += 1;
         }
     }
 
@@ -1058,22 +1083,48 @@ impl<'run> Builder<'run> {
     }
 
     fn guard(&mut self, node: u32) {
-        for child in self.children(node) {
+        let block = self.tree.at(node).parent;
+
+        if block == NONE {
+            return;
+        }
+
+        let switch = self.tree.at(block).parent;
+
+        if switch == NONE || self.kind_of(switch) != GoKind::TypeSwitchStmt {
+            return;
+        }
+
+        let held = self.guard_of(switch);
+
+        if held == NONE {
+            return;
+        }
+
+        let name = self.span_of(held);
+        let scope = self.scope();
+
+        let _ = self.record_in(scope, BindingKind::Short, name, held);
+    }
+
+    fn guard_of(&self, switch: u32) -> u32 {
+        for child in self.children(switch) {
             if self.kind_of(child) != GoKind::AssignStmt {
+                continue;
+            }
+
+            if !self.holds(child, GoKind::TypeKeyword) {
                 continue;
             }
 
             let held = self.child_at(child, 0);
 
-            if self.kind_of(held) != GoKind::Ident {
-                continue;
+            if self.kind_of(held) == GoKind::Ident {
+                return held;
             }
-
-            let name = self.span_of(held);
-            let from = self.end_of(child);
-
-            let _ = self.record_from(from, BindingKind::Short, name, held);
         }
+
+        NONE
     }
 
     fn label(&mut self, node: u32) {
@@ -1157,16 +1208,16 @@ impl<'run> Builder<'run> {
 
     fn package_of(&self, specifier: Span) -> Span {
         let text = self.text_of(specifier);
-        let mut start = 0;
+        let mut start = segment_of(text);
+        let mut end = text.len();
 
-        for (index, byte) in text.iter().enumerate() {
-            if *byte == b'/' {
-                start = index + 1;
-            }
+        if start > 0 && versioned(&text[start..]) {
+            end = start - 1;
+            start = segment_of(&text[..end]);
         }
 
         Span {
-            length: specifier.length - count_of(start),
+            length: count_of(end - start),
             offset: specifier.offset + count_of(start),
         }
     }
@@ -1256,10 +1307,22 @@ impl<'run> Builder<'run> {
                 return true;
             }
 
+            if self.guards(parent) {
+                return false;
+            }
+
             return self.declared(self.span_of(node));
         }
 
         true
+    }
+
+    fn guards(&self, node: u32) -> bool {
+        let parent = self.tree.at(node).parent;
+
+        parent != NONE
+            && self.kind_of(parent) == GoKind::TypeSwitchStmt
+            && self.holds(node, GoKind::TypeKeyword)
     }
 
     fn declares(&self, parent: u32, node: u32) -> bool {
@@ -1279,16 +1342,13 @@ impl<'run> Builder<'run> {
             return declares != NONE && self.tree.at(node).token_start < declares;
         }
 
-        let mut names = [NONE; NAME_COUNT_MAX];
-        let mut count = 0;
+        let held = self.leading_names(parent);
 
-        self.leading_names(parent, &mut names, &mut count);
-
-        if count == 0 && kind == GoKind::ValueSpec {
-            return self.child_at(parent, 0) == node;
+        if held.covered && kind == GoKind::Field {
+            return false;
         }
 
-        names[..count].contains(&node)
+        self.among_leading(parent, node, held.count)
     }
 
     fn record(&mut self, kind: BindingKind, name: Span, node: u32) -> u32 {
@@ -1381,7 +1441,27 @@ fn bucket_count_of(binding_count_max: u32) -> u32 {
     binding_count_max.next_power_of_two().max(16)
 }
 
-const NAME_COUNT_MAX: usize = 1 << 6;
+fn segment_of(path: &[u8]) -> usize {
+    let mut start = 0;
+
+    for (index, byte) in path.iter().enumerate() {
+        if *byte == b'/' {
+            start = index + 1;
+        }
+    }
+
+    start
+}
+
+fn versioned(segment: &[u8]) -> bool {
+    if segment.len() < 2 || segment[0] != b'v' {
+        return false;
+    }
+
+    segment[1..].iter().all(u8::is_ascii_digit)
+}
+
+const STACK_DEPTH_MAX: usize = 1 << 6;
 const STEP_MAX: u32 = 1 << 12;
 
 #[cfg(test)]

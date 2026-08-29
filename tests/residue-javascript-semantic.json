@@ -7,6 +7,16 @@
   {
     "fixture": "bat/tests/benchmarks/highlighting-speed-src/jquery.js",
     "category": "oxlint",
-    "reason": "The oracle reports no `no-unused-vars` row at all for this file: run alone under oxlint 1.79.0 the rule yields nothing across 280KB of jQuery 3.x, while the same catch clause written on its own \u2014 `try { run(); } catch (e) { fallback = 1; }` \u2014 reports `Catch parameter 'e' is caught but never used.` The ten rows scylla reports are all unused catch parameters and each is genuinely unused. The oracle is the limit; the file stays in the corpus for the other two rules, whose rows match."
+    "reason": "The oracle reports no `no-unused-vars` row at all for this file: run alone under oxlint 1.79.0 the rule yields nothing across 280KB of jQuery 3.x, while the same catch clause written on its own — `try { run(); } catch (e) { fallback = 1; }` — reports `Catch parameter 'e' is caught but never used.` The ten rows scylla reports are all unused catch parameters and each is genuinely unused. The oracle is the limit; the file stays in the corpus for the other two rules, whose rows match."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/test/simulation/fixtures/fixing/typescript/tsc_error_1015.ts",
+    "category": "oxlint",
+    "reason": "The file is invalid TypeScript: `function sum(a: number, b?: number = 10)` gives an optional parameter an initializer, which the grammar forbids. oxlint answers the file with the single diagnostic `TS(1015) A parameter cannot have a question mark and an initializer.` and lints nothing else in it, so the golden carries no rows at all; the same file with the `?` removed reports the `sum` scylla reports. Closing this would mean scylla implementing TypeScript's own diagnostics, of which oxlint stops on every one, and modelling two of them leaves the contract no more true than modelling none. The row scylla reports is correct: nothing reads `sum`."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/test/simulation/fixtures/fixing/typescript/tsc_error_2391.ts",
+    "category": "oxlint",
+    "reason": "The file is invalid TypeScript: `class Class { constructor() { ... } function1(); }` writes a method with no body and no implementation under it. oxlint answers the file with the single diagnostic `TS(2391) Function implementation is missing or not immediately following the declaration.` and lints nothing else in it, so the golden carries no rows at all. The two rows scylla reports, `Class` and the `const tomato` its constructor writes, are both correct. See the note on `tsc_error_1015.ts`: the limit is that scylla implements no TypeScript diagnostics, and oxlint stops on all of them."
   }
 ]

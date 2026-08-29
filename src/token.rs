@@ -127,6 +127,30 @@ pub const fn is_significant(kind: TokenKind) -> bool {
     !matches!(kind, TokenKind::Comment | TokenKind::Newline)
 }
 
+pub fn operator_limit_of(tokens: &[Token], position: usize, end: u32) -> u32 {
+    assert!(position < tokens.len());
+
+    let mut reach = end;
+    let mut index = position + 1;
+
+    while index < tokens.len() {
+        let held = tokens[index];
+
+        if held.offset != reach {
+            break;
+        }
+
+        if !matches!(held.kind, TokenKind::Number | TokenKind::Punctuation(_)) {
+            break;
+        }
+
+        reach = held.end();
+        index += 1;
+    }
+
+    reach
+}
+
 pub fn previous_significant_in_line(tokens: &[Token], before: u32) -> u32 {
     assert!(before as usize <= tokens.len());
 

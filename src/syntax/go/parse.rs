@@ -497,7 +497,8 @@ impl Parser<'_> {
     }
 
     fn opens_type_parameters(&self) -> bool {
-        let after = self.significant(self.position + 1);
+        let opener = self.significant(self.position);
+        let after = self.significant(opener + 1);
         let held = self.kind_at(after);
 
         if held != Some(GoKind::Identifier) {
@@ -506,7 +507,88 @@ impl Parser<'_> {
 
         let next = self.kind_at(self.significant(after + 1));
 
-        !matches!(next, Some(GoKind::BracketClose))
+        if next == Some(GoKind::BracketClose) {
+            return false;
+        }
+
+        if self.holds_a_separator(opener) {
+            return true;
+        }
+
+        if matches!(next, Some(GoKind::ParenOpen | GoKind::Star)) {
+            return self.holds_a_type_element(opener);
+        }
+
+        matches!(
+            next,
+            Some(
+                GoKind::Arrow
+                    | GoKind::BracketOpen
+                    | GoKind::ChanKeyword
+                    | GoKind::FuncKeyword
+                    | GoKind::Identifier
+                    | GoKind::InterfaceKeyword
+                    | GoKind::MapKeyword
+                    | GoKind::StructKeyword
+                    | GoKind::Tilde
+            )
+        )
+    }
+
+    fn holds_a_type_element(&self, from: u32) -> bool {
+        let stop = self.balanced_end(from);
+        let mut position = from + 1;
+
+        while position < stop {
+            let Some(kind) = self.kind_at(position) else {
+                return false;
+            };
+
+            if matches!(
+                kind,
+                GoKind::ChanKeyword
+                    | GoKind::FuncKeyword
+                    | GoKind::InterfaceKeyword
+                    | GoKind::MapKeyword
+                    | GoKind::StructKeyword
+                    | GoKind::Tilde
+            ) {
+                return true;
+            }
+
+            position += 1;
+        }
+
+        false
+    }
+
+    fn holds_a_separator(&self, from: u32) -> bool {
+        let stop = self.balanced_end(from);
+        let mut position = from + 1;
+
+        for _ in 0..SCAN_STEP_MAX {
+            if position >= stop {
+                return false;
+            }
+
+            let Some(kind) = self.kind_at(position) else {
+                return false;
+            };
+
+            if kind == GoKind::Comma {
+                return true;
+            }
+
+            if is_opener(kind) {
+                position = self.balanced_end(position);
+
+                continue;
+            }
+
+            position += 1;
+        }
+
+        false
     }
 
     fn value_specification(&mut self) {
@@ -604,6 +686,10 @@ impl Parser<'_> {
     }
 
     fn field_list(&mut self, opener: GoKind) {
+        self.field_list_of(opener, false);
+    }
+
+    fn field_list_of(&mut self, opener: GoKind, methods: bool) {
         let closer = if opener == GoKind::BracketOpen {
             GoKind::BracketClose
         } else if opener == GoKind::BraceOpen {
@@ -626,7 +712,7 @@ impl Parser<'_> {
 
             let before = self.position;
 
-            self.field(named, closer);
+            self.field(named, methods);
 
             if !self.eat(GoKind::Comma) {
                 self.terminator();
@@ -642,7 +728,7 @@ impl Parser<'_> {
     }
 
     fn fields_are_named(&self, closer: GoKind) -> bool {
-        let mut position = self.significant(self.position + 1);
+        let mut position = self.significant(self.significant(self.position) + 1);
         let mut start = true;
 
         for _ in 0..SCAN_STEP_MAX {
@@ -698,16 +784,18 @@ impl Parser<'_> {
         opens_a_type(next) || next == GoKind::StringLiteral
     }
 
-    fn field(&mut self, named: bool, closer: GoKind) {
+    fn field(&mut self, named: bool, methods: bool) {
         let checkpoint = self.anchor();
 
         self.open(GoKind::Field);
 
-        if named && self.at(GoKind::Identifier) && !self.embeds() {
+        let written = named && self.at(GoKind::Identifier) && !self.embeds();
+
+        if written {
             self.name_list();
         }
 
-        if self.at(GoKind::ParenOpen) && closer == GoKind::BraceClose {
+        if methods && written && self.at(GoKind::ParenOpen) {
             let held = self.anchor();
 
             self.field_list(GoKind::ParenOpen);
@@ -829,7 +917,9 @@ impl Parser<'_> {
                 self.terminator();
             }
             Some(GoKind::Semicolon) => {
+                self.open(GoKind::EmptyStmt);
                 self.bump();
+                self.events.finish();
             }
             Some(GoKind::Identifier)
                 if self.ahead(1) == Some(GoKind::Colon) && self.ahead(2) != Some(GoKind::Equal) =>
@@ -914,6 +1004,7 @@ impl Parser<'_> {
     fn header_holds(&self, held: GoKind) -> bool {
         let mut position = self.significant(self.position);
         let mut previous = GoKind::ErrorToken;
+        let mut functions = 0;
         let mut typed = false;
 
         for _ in 0..SCAN_STEP_MAX {
@@ -925,8 +1016,12 @@ impl Parser<'_> {
                 let literal =
                     typed || matches!(previous, GoKind::InterfaceKeyword | GoKind::StructKeyword);
 
-                if !literal {
+                if !literal && functions == 0 {
                     return false;
+                }
+
+                if !literal {
+                    functions -= 1;
                 }
 
                 position = self.balanced_end(position);
@@ -934,6 +1029,10 @@ impl Parser<'_> {
                 typed = false;
 
                 continue;
+            }
+
+            if kind == GoKind::FuncKeyword {
+                functions += 1;
             }
 
             if is_opener(kind) {
@@ -1253,6 +1352,16 @@ impl Parser<'_> {
         self.frames[group as usize].stage == 1
     }
 
+    fn bodies(&self, base: u32) -> bool {
+        let group = self.innermost_group(base);
+
+        if self.frames[group as usize].variant != Variant::Top {
+            return true;
+        }
+
+        self.frames[group as usize].stage != 0
+    }
+
     fn machine(&mut self, base: u32) {
         let mut operand = true;
 
@@ -1506,7 +1615,7 @@ impl Parser<'_> {
                 let checkpoint = self.anchor();
 
                 self.bump();
-                self.field_list(GoKind::BraceOpen);
+                self.field_list_of(GoKind::BraceOpen, true);
                 self.events.start_at(checkpoint, GoKind::InterfaceType);
                 self.events.finish();
                 self.push_value(checkpoint);
@@ -1553,9 +1662,12 @@ impl Parser<'_> {
 
     fn channel_type(&mut self) -> Step {
         let checkpoint = self.anchor();
-        let _ = self.eat(GoKind::Arrow);
+        let received = self.eat(GoKind::Arrow);
         let _ = self.eat(GoKind::ChanKeyword);
-        let _ = self.eat(GoKind::Arrow);
+
+        if !received {
+            let _ = self.eat(GoKind::Arrow);
+        }
 
         let frame = Frame {
             checkpoint,
@@ -1629,7 +1741,7 @@ impl Parser<'_> {
 
     fn function_literal(&mut self, base: u32) -> Step {
         let checkpoint = self.anchor();
-        let structures = self.structures(base) && !self.holds_a_type();
+        let structures = self.bodies(base) && !self.holds_a_type();
 
         self.open(GoKind::FuncType);
         self.bump();
@@ -1711,7 +1823,11 @@ impl Parser<'_> {
 
     fn trailer_step(&mut self, kind: GoKind, base: u32) -> Option<Step> {
         if kind == GoKind::ParenOpen {
-            self.drain_types(1);
+            if self.holds_a_type() {
+                self.drain_types(2);
+            } else {
+                self.drain_types(1);
+            }
 
             return Some(self.trailer(Variant::Call));
         }
@@ -1733,13 +1849,23 @@ impl Parser<'_> {
     }
 
     fn holds_a_type(&self) -> bool {
-        if self.frame_count == 0 {
-            return false;
+        let mut index = self.frame_count;
+
+        while index > 0 {
+            let held = self.frames[index as usize - 1];
+
+            if held.variant != Variant::Unary || held.stage == 0 {
+                return false;
+            }
+
+            if held.stage == 1 {
+                return true;
+            }
+
+            index -= 1;
         }
 
-        let top = self.frames[self.frame_count as usize - 1];
-
-        top.variant == Variant::Unary && top.stage == 1
+        false
     }
 
     fn drain_types(&mut self, stage: u8) {
