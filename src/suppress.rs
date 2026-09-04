@@ -768,6 +768,7 @@ fn opens_at(source: &[u8], comment: Span, start: u32) -> bool {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Markers {
     pub annotation: &'static [u8],
+    pub close: &'static [u8],
     pub disable: &'static [u8],
     pub enable: &'static [u8],
     pub file: &'static [u8],
@@ -1160,14 +1161,33 @@ pub fn codes_written(codes: u128, prefix: &[u8], width: usize, target: &mut [u8]
     Some(length)
 }
 
+fn closed<'held>(listed: &'held [u8], close: &[u8]) -> &'held [u8] {
+    if close.is_empty() {
+        return listed;
+    }
+
+    match crate::scan::find(listed, close) {
+        Some(offset) => &listed[..offset],
+        None => listed,
+    }
+}
+
 fn code_end(text: &[u8], start: usize) -> usize {
     let mut offset = start;
 
-    while offset < text.len() && text[offset].is_ascii_alphanumeric() {
+    while offset < text.len() && named(text[offset]) {
         offset += 1;
     }
 
+    while offset > start && !text[offset - 1].is_ascii_alphanumeric() {
+        offset -= 1;
+    }
+
     offset
+}
+
+fn named(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'/' | b'_')
 }
 
 fn directive_of(
@@ -1193,7 +1213,7 @@ fn directive_of(
             open += 1;
         }
 
-        let listed = &body[open..];
+        let listed = closed(&body[open..], markers.close);
         let (codes, unknown, wildcard) = codes_of(listed, code_of);
 
         return Some(Parsed {
@@ -1937,6 +1957,7 @@ mod tests {
 
     const TIGERSTYLE: Markers = Markers {
         annotation: b"#[",
+        close: b"",
         disable: b"tigerstyle-disable:",
         enable: b"tigerstyle-enable:",
         file: b"tigerstyle-file-ignore:",
@@ -2132,5 +2153,92 @@ mod tests {
         assert_eq!(found.span, Span::new(0, 27));
         assert!(!found.trailing);
         assert_eq!(&SOURCE[found.payload.range()], b"TS002");
+    }
+
+    const PARHELION: Markers = Markers {
+        annotation: b"",
+        close: b")",
+        disable: b"parhelion: off",
+        enable: b"parhelion: on",
+        file: b"parhelion: ok-file",
+        line: b"parhelion: ok",
+    };
+
+    fn parhelion_code(code: &[u8]) -> Option<u32> {
+        match code {
+            b"GL001" | b"glue/registration-args" => Some(1),
+            b"GL015" | b"glue/unregistered-name" => Some(15),
+            _ => None,
+        }
+    }
+
+    fn parhelion_of(text: &[u8]) -> Parsed {
+        directive_of(text, &PARHELION, &parhelion_code).expect("the directive parses")
+    }
+
+    #[test]
+    fn a_code_token_runs_through_a_rule_name() {
+        let parsed = parhelion_of(b"{# parhelion: ok(glue/unregistered-name) #}");
+
+        assert_eq!(parsed.kind, Region::Line);
+        assert_eq!(parsed.codes, 1 << 15);
+        assert!(!parsed.unknown);
+    }
+
+    #[test]
+    fn a_closing_delimiter_ends_the_list_and_the_prose_after_it_is_not_a_code() {
+        let parsed = parhelion_of(b"{# parhelion: ok(GL001) the api is legacy #}");
+
+        assert_eq!(parsed.codes, 1 << 1);
+
+        assert!(
+            !parsed.unknown,
+            "the reason after the close is prose, not an unknown code"
+        );
+    }
+
+    #[test]
+    fn a_close_that_never_arrives_reads_the_whole_list() {
+        let parsed = parhelion_of(b"{# parhelion: ok(GL001, GL015 #}");
+
+        assert_eq!(parsed.codes, (1 << 1) | (1 << 15));
+        assert!(!parsed.unknown);
+    }
+
+    #[test]
+    fn a_file_marker_wins_over_the_line_marker_it_contains() {
+        let parsed = parhelion_of(b"{# parhelion: ok-file(GL001) #}");
+
+        assert_eq!(parsed.kind, Region::File);
+        assert_eq!(parsed.codes, 1 << 1);
+    }
+
+    #[test]
+    fn a_marker_after_prose_still_parses() {
+        let parsed = parhelion_of(b"{# TODO drop this parhelion: ok(GL015) #}");
+
+        assert_eq!(parsed.codes, 1 << 15);
+        assert!(!parsed.unknown);
+    }
+
+    #[test]
+    fn a_close_before_the_marker_is_not_the_end_of_the_list() {
+        let parsed = parhelion_of(b"{# see build() parhelion: ok(GL001) why #}");
+
+        assert_eq!(parsed.codes, 1 << 1);
+        assert!(!parsed.unknown);
+    }
+
+    #[test]
+    fn a_trailing_separator_is_not_part_of_the_code() {
+        assert_eq!(
+            parsed_of(b"// tigerstyle-ignore: TS002."),
+            (Region::Line, 1 << 2, false)
+        );
+
+        assert_eq!(
+            parsed_of(b"// tigerstyle-ignore: TS002-"),
+            (Region::Line, 1 << 2, false)
+        );
     }
 }
