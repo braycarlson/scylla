@@ -453,6 +453,16 @@ impl Parser<'_, '_> {
 
         let frame = self.frames[self.frame_count as usize];
 
+        let owed = match frame.variant {
+            Variant::Binary => 2,
+            Variant::Unary => 1,
+            _ => 0,
+        };
+
+        if self.value_count < frame.values + owed {
+            self.record(SyntaxErrorKind::ExpectedExpression);
+        }
+
         if frame.variant == Variant::Yield && frame.elements > 0 {
             self.events.start_at(frame.content, PythonKind::Tuple);
             self.events.finish();
@@ -528,6 +538,7 @@ impl Parser<'_, '_> {
         }
 
         if self.value_count == 0 {
+            self.record(SyntaxErrorKind::ExpectedExpression);
             self.bump();
 
             return Step::Operand;

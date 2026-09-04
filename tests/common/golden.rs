@@ -20,6 +20,50 @@ pub(crate) struct Fixture {
     pub(crate) source: Vec<u8>,
 }
 
+pub(crate) fn corpus_templates(root: &Path) -> Vec<(String, Vec<u8>)> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+
+    while let Some(directory) = pending.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let Ok(held) = std::fs::metadata(&path) else {
+                continue;
+            };
+
+            if held.is_dir() {
+                pending.push(path);
+
+                continue;
+            }
+
+            if path.extension().is_none_or(|extension| extension != "html") {
+                continue;
+            }
+
+            let Ok(source) = std::fs::read(&path) else {
+                continue;
+            };
+
+            found.push((
+                path.strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned(),
+                source,
+            ));
+        }
+    }
+
+    found.sort();
+
+    found
+}
+
 pub(crate) fn fixtures() -> Vec<Fixture> {
     let root = root();
     let templates = root.join("tests/fixtures/templates");

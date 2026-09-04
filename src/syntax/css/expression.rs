@@ -175,7 +175,7 @@ pub fn plain_value_end(source: &[u8], start: usize) -> Option<usize> {
             continue;
         }
 
-        if is_delimiter(byte) {
+        if is_delimiter(byte) || scan::whitespace_width(source, offset) > 0 {
             break;
         }
 

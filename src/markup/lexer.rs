@@ -194,7 +194,7 @@ impl<'source, 'tokens> Lexer<'source, 'tokens> {
             return true;
         };
 
-        if byte.is_ascii_whitespace() || matches!(byte, b'>' | b'=' | b'"' | b'\'') {
+        if byte.is_ascii_whitespace() || matches!(byte, b'>' | b'=') {
             return true;
         }
 
@@ -511,7 +511,7 @@ impl<'source, 'tokens> Lexer<'source, 'tokens> {
             return true;
         }
 
-        if byte == b'"' || byte == b'\'' {
+        if self.after_equals && (byte == b'"' || byte == b'\'') {
             self.advance(1);
             self.push(MarkupKind::Quote, start, self.position);
 

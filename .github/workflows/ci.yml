@@ -54,6 +54,12 @@ jobs:
       SCYLLA_CORPUS_GOTYPES: ${{ github.workspace }}/corpus/goldens/gotypes
       SCYLLA_CORPUS_OXLINT: ${{ github.workspace }}/corpus/goldens/oxlint
       SCYLLA_CORPUS_RUFF: ${{ github.workspace }}/corpus/goldens/ruff
+      SCYLLA_CORPUS_TSSCOPE: ${{ github.workspace }}/corpus/goldens/tsscope
+      SCYLLA_CORPUS_CSS: ${{ github.workspace }}/corpus/goldens/css
+      SCYLLA_CORPUS_ZLS: ${{ github.workspace }}/corpus/goldens/zls
+      SCYLLA_CORPUS_SCIP: ${{ github.workspace }}/corpus/goldens/scip
+      SCYLLA_CORPUS_OLS: ${{ github.workspace }}/corpus/goldens/ols
+      SCYLLA_CORPUS_MARKUP: ${{ github.workspace }}/corpus/goldens/markup
       SCYLLA_CORPUS_REQUIRED: 1
     steps:
       - uses: actions/checkout@v7

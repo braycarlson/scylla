@@ -406,6 +406,11 @@ impl Parser<'_, '_> {
         self.events.start(RustKind::File);
         self.inner_attributes();
         self.items_until(RustKind::ErrorToken);
+
+        if self.current().is_some() {
+            self.record(SyntaxErrorKind::UnexpectedToken);
+        }
+
         self.events.finish();
     }
 
@@ -1439,7 +1444,7 @@ impl Parser<'_, '_> {
     }
 
     fn parameters(&mut self) {
-        if !self.eat(RustKind::ParenOpen) {
+        if !self.expect(RustKind::ParenOpen, SyntaxErrorKind::UnexpectedToken) {
             return;
         }
 

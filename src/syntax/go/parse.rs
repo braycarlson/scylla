@@ -11,6 +11,7 @@ use crate::syntax::go::expression::{
     is_literal,
     is_prefix,
     opens_a_type,
+    operands_of,
 };
 use crate::syntax::go::kind::GoKind;
 use crate::syntax::{SyntaxError, SyntaxErrorKind};
@@ -36,6 +37,7 @@ struct Parser<'run> {
     position: u32,
     raw: &'run [GoKind],
     significant_next: u32,
+    source: &'run [u8],
     tokens: &'run [Token],
     tree: &'run mut Tree<GoKind>,
     value_count: u32,
@@ -108,6 +110,22 @@ impl Parser<'_> {
         position
     }
 
+    fn preceding(&self, from: u32) -> Option<GoKind> {
+        let mut position = from;
+
+        while position > 0 {
+            position -= 1;
+
+            let kind = self.kind_at(position)?;
+
+            if !is_layout(kind) {
+                return Some(kind);
+            }
+        }
+
+        None
+    }
+
     fn current(&self) -> Option<GoKind> {
         self.kind_at(self.significant(self.position))
     }
@@ -135,6 +153,10 @@ impl Parser<'_> {
             return;
         };
 
+        if kind == GoKind::Identifier && !self.name_is_lettered(self.position) {
+            self.record(SyntaxErrorKind::ExpectedIdentifier);
+        }
+
         if is_layout(kind) {
             self.events.layout(self.position);
         } else {
@@ -146,6 +168,23 @@ impl Parser<'_> {
         if self.position > self.significant_next {
             self.significant_next = self.scan_significant(self.position);
         }
+    }
+
+    fn name_is_lettered(&self, position: u32) -> bool {
+        let Some(token) = self.tokens.get(position as usize) else {
+            return true;
+        };
+
+        let text = token.text(self.source);
+
+        if text.is_ascii() {
+            return true;
+        }
+
+        core::str::from_utf8(text).is_ok_and(|name| {
+            name.chars()
+                .all(|held| held.is_alphanumeric() || held == '_')
+        })
     }
 
     fn skip_trivia(&mut self) {
@@ -308,6 +347,10 @@ impl Parser<'_> {
 
         let frame = self.frames[self.frame_count as usize];
 
+        if self.value_count < operands_of(frame.variant) + frame.values {
+            self.record(SyntaxErrorKind::ExpectedType);
+        }
+
         self.events.start_at(frame.checkpoint, frame.kind);
         self.events.finish();
         self.value_count = frame.values;
@@ -339,12 +382,7 @@ impl Parser<'_> {
         if self.at(GoKind::PackageKeyword) {
             self.bump();
 
-            if self.at(GoKind::Identifier) {
-                self.identifier();
-            } else {
-                self.record(SyntaxErrorKind::ExpectedIdentifier);
-            }
-
+            self.required_identifier();
             self.terminator();
         } else {
             self.record(SyntaxErrorKind::UnexpectedToken);
@@ -371,9 +409,26 @@ impl Parser<'_> {
     }
 
     fn terminator(&mut self) {
-        if !self.eat(GoKind::Semicolon) {
-            let _ = self.eat(GoKind::Newline);
+        if self.eat(GoKind::Semicolon) || self.eat(GoKind::Newline) {
+            return;
         }
+
+        if !matches!(
+            self.current(),
+            None | Some(GoKind::BraceClose | GoKind::ParenClose | GoKind::BracketClose)
+        ) {
+            self.record(SyntaxErrorKind::UnexpectedToken);
+        }
+    }
+
+    fn required_identifier(&mut self) {
+        if self.at(GoKind::Identifier) {
+            self.identifier();
+
+            return;
+        }
+
+        self.record(SyntaxErrorKind::ExpectedIdentifier);
     }
 
     fn identifier(&mut self) {
@@ -464,7 +519,7 @@ impl Parser<'_> {
             return;
         }
 
-        self.value_specification();
+        self.value_specification(keyword);
     }
 
     fn import_specification(&mut self) {
@@ -485,15 +540,28 @@ impl Parser<'_> {
 
     fn type_specification(&mut self) {
         self.open(GoKind::TypeSpec);
-        self.identifier();
+        self.required_identifier();
 
         if self.at(GoKind::BracketOpen) && self.opens_type_parameters() {
-            self.field_list(GoKind::BracketOpen);
+            self.type_parameters();
         }
 
         let _ = self.eat(GoKind::Equal);
-        self.type_of();
+        self.required_type();
         self.events.finish();
+    }
+
+    fn type_parameters(&mut self) {
+        let opener = self.significant(self.position);
+        let after = self.significant(opener + 1);
+
+        if self.kind_at(after) == Some(GoKind::BracketClose) {
+            self.record(SyntaxErrorKind::ExpectedIdentifier);
+        } else if !self.fields_are_named(GoKind::BracketClose) {
+            self.record(SyntaxErrorKind::ExpectedType);
+        }
+
+        self.field_list(GoKind::BracketOpen);
     }
 
     fn opens_type_parameters(&self) -> bool {
@@ -591,16 +659,29 @@ impl Parser<'_> {
         false
     }
 
-    fn value_specification(&mut self) {
+    fn value_specification(&mut self, keyword: GoKind) {
         self.open(GoKind::ValueSpec);
+
+        if !self.at(GoKind::Identifier) {
+            self.record(SyntaxErrorKind::ExpectedIdentifier);
+        }
+
         self.name_list();
 
-        if !self.at(GoKind::Equal) && self.current().is_some() && !self.ends_here() {
+        let typed = !self.at(GoKind::Equal) && self.current().is_some() && !self.ends_here();
+
+        if typed {
             self.type_of();
         }
 
-        if self.eat(GoKind::Equal) {
+        let valued = self.eat(GoKind::Equal);
+
+        if valued {
             self.expression_list();
+        }
+
+        if !typed && !valued && keyword == GoKind::VarKeyword {
+            self.record(SyntaxErrorKind::ExpectedType);
         }
 
         self.events.finish();
@@ -633,14 +714,20 @@ impl Parser<'_> {
         self.open(GoKind::FuncType);
         self.bump();
 
-        if self.at(GoKind::ParenOpen) {
+        let received = self.at(GoKind::ParenOpen);
+
+        if received {
             self.field_list(GoKind::ParenOpen);
         }
 
-        self.identifier();
+        self.required_identifier();
 
         if self.at(GoKind::BracketOpen) {
-            self.field_list(GoKind::BracketOpen);
+            if received {
+                self.record(SyntaxErrorKind::UnexpectedToken);
+            }
+
+            self.type_parameters();
         }
 
         self.signature();
@@ -711,8 +798,11 @@ impl Parser<'_> {
             }
 
             let before = self.position;
+            let written = self.field(named, methods);
 
-            self.field(named, methods);
+            if named && !written && opener != GoKind::BraceOpen {
+                self.record(SyntaxErrorKind::ExpectedType);
+            }
 
             if !self.eat(GoKind::Comma) {
                 self.terminator();
@@ -784,7 +874,7 @@ impl Parser<'_> {
         opens_a_type(next) || next == GoKind::StringLiteral
     }
 
-    fn field(&mut self, named: bool, methods: bool) {
+    fn field(&mut self, named: bool, methods: bool) -> bool {
         let checkpoint = self.anchor();
 
         self.open(GoKind::Field);
@@ -793,6 +883,10 @@ impl Parser<'_> {
 
         if written {
             self.name_list();
+        }
+
+        if methods && written && self.at(GoKind::BracketOpen) {
+            self.record(SyntaxErrorKind::UnexpectedToken);
         }
 
         if methods && written && self.at(GoKind::ParenOpen) {
@@ -813,6 +907,8 @@ impl Parser<'_> {
         self.events.finish();
 
         let _ = checkpoint;
+
+        written
     }
 
     fn embeds(&self) -> bool {
@@ -910,8 +1006,15 @@ impl Parser<'_> {
                 | GoKind::FallthroughKeyword
                 | GoKind::GotoKeyword,
             ) => {
+                let branch = self.current();
+
                 self.open(GoKind::BranchStmt);
                 self.bump();
+
+                if branch == Some(GoKind::GotoKeyword) && !self.at(GoKind::Identifier) {
+                    self.record(SyntaxErrorKind::ExpectedIdentifier);
+                }
+
                 self.identifier();
                 self.events.finish();
                 self.terminator();
@@ -945,7 +1048,20 @@ impl Parser<'_> {
     fn wrapped_statement(&mut self, kind: GoKind) {
         self.open(kind);
         self.bump();
+
+        let start = self.significant(self.position);
+
         self.expression();
+
+        let end = self.significant(self.position);
+
+        let wrapped = self.kind_at(start) == Some(GoKind::ParenOpen)
+            && self.significant(self.balanced_end(start)) == end;
+
+        if end == start || wrapped || self.preceding(end) != Some(GoKind::ParenClose) {
+            self.record(SyntaxErrorKind::ExpectedExpression);
+        }
+
         self.events.finish();
         self.terminator();
     }
@@ -1073,32 +1189,42 @@ impl Parser<'_> {
     }
 
     fn if_statement(&mut self) {
-        self.open(GoKind::IfStmt);
-        self.bump();
+        let mut opened = 0;
 
-        if self.header_semicolon() {
-            self.simple_statement(2);
-            let _ = self.eat(GoKind::Semicolon);
-        }
+        for _ in 0..self.steps() {
+            self.open(GoKind::IfStmt);
+            self.bump();
+            opened += 1;
 
-        self.expression_header();
-        self.block();
+            if self.header_semicolon() {
+                self.simple_statement(2);
+                let _ = self.eat(GoKind::Semicolon);
+            }
 
-        if self.eat(GoKind::ElseKeyword) {
-            if self.at(GoKind::IfKeyword) {
-                if self.descend() {
-                    self.if_statement();
-                    self.ascend();
-                }
-            } else {
+            if self.at(GoKind::BraceOpen) {
+                self.record(SyntaxErrorKind::ExpectedExpression);
+            }
+
+            self.expression_header();
+            self.block();
+
+            if !self.eat(GoKind::ElseKeyword) {
+                self.terminator();
+
+                break;
+            }
+
+            if !self.at(GoKind::IfKeyword) {
                 self.block();
                 self.terminator();
+
+                break;
             }
-        } else {
-            self.terminator();
         }
 
-        self.events.finish();
+        for _ in 0..opened {
+            self.events.finish();
+        }
     }
 
     fn for_statement(&mut self) {
@@ -1149,6 +1275,10 @@ impl Parser<'_> {
         self.bump();
 
         if !self.at(GoKind::RangeKeyword) {
+            if self.range_variables() > 2 {
+                self.record(SyntaxErrorKind::UnexpectedToken);
+            }
+
             self.expression_list_staged(2);
 
             if assigns(self.current().unwrap_or(GoKind::ErrorToken)) {
@@ -1161,6 +1291,38 @@ impl Parser<'_> {
         self.block();
         self.events.finish();
         self.terminator();
+    }
+
+    fn range_variables(&self) -> u32 {
+        let mut position = self.significant(self.position);
+        let mut found = 1;
+
+        for _ in 0..SCAN_STEP_MAX {
+            let Some(kind) = self.kind_at(position) else {
+                return found;
+            };
+
+            if kind == GoKind::Comma {
+                found += 1;
+                position += 1;
+
+                continue;
+            }
+
+            if assigns(kind) || kind == GoKind::RangeKeyword || is_closer(kind) {
+                return found;
+            }
+
+            if is_opener(kind) {
+                position = self.balanced_end(position);
+
+                continue;
+            }
+
+            position += 1;
+        }
+
+        found
     }
 
     fn switch_statement(&mut self) {
@@ -1333,6 +1495,16 @@ impl Parser<'_> {
 
     fn type_of(&mut self) {
         self.expression_with(false);
+    }
+
+    fn required_type(&mut self) {
+        let before = self.significant(self.position);
+
+        self.type_of();
+
+        if self.significant(self.position) == before {
+            self.record(SyntaxErrorKind::ExpectedType);
+        }
     }
 
     fn heads_a_clause(&self, base: u32) -> bool {
@@ -1543,6 +1715,10 @@ impl Parser<'_> {
 
         let frame = self.frames[group as usize];
 
+        if frame.variant == Variant::Index && frame.stage != 1 && self.value_count == frame.values {
+            self.record(SyntaxErrorKind::ExpectedExpression);
+        }
+
         self.frame_count = group;
 
         let kind = if frame.variant == Variant::Index {
@@ -1623,6 +1799,13 @@ impl Parser<'_> {
                 Step::Operator
             }
             Some(GoKind::FuncKeyword) => self.function_literal(base),
+            Some(GoKind::Tilde) => {
+                if self.frames[self.innermost_group(base) as usize].variant == Variant::Paren {
+                    self.record(SyntaxErrorKind::ExpectedType);
+                }
+
+                self.unary(GoKind::UnaryExpr, POWER_UNARY)
+            }
             Some(GoKind::ParenOpen) => {
                 let checkpoint = self.anchor();
 
@@ -1716,7 +1899,9 @@ impl Parser<'_> {
 
         self.bump();
 
-        if !self.at(GoKind::BracketClose) {
+        if self.at(GoKind::DotDotDot) {
+            self.wrap(GoKind::Ellipsis);
+        } else if !self.at(GoKind::BracketClose) {
             self.expression();
         }
 
@@ -1796,6 +1981,17 @@ impl Parser<'_> {
 
         if kind == GoKind::Colon && frame.variant == Variant::Index {
             self.reduce_above(group + 1);
+
+            if self.frames[group as usize].stage == 1 {
+                let colon = self.significant(self.position);
+
+                if self.preceding(colon) == Some(GoKind::Colon)
+                    || self.kind_at(self.significant(colon + 1)) == Some(GoKind::BracketClose)
+                {
+                    self.record(SyntaxErrorKind::ExpectedExpression);
+                }
+            }
+
             self.bump();
             self.frames[group as usize].stage = 1;
 
@@ -1833,6 +2029,20 @@ impl Parser<'_> {
         }
 
         if kind == GoKind::BracketOpen {
+            if self.holds_a_type() {
+                let open = self.significant(self.position);
+                let first = self.significant(open + 1);
+
+                if self.kind_at(first).is_some_and(is_literal)
+                    && matches!(
+                        self.kind_at(self.significant(first + 1)),
+                        Some(GoKind::BracketClose | GoKind::Comma)
+                    )
+                {
+                    self.record(SyntaxErrorKind::ExpectedType);
+                }
+            }
+
             return Some(self.trailer(Variant::Index));
         }
 
@@ -1996,6 +2206,7 @@ pub fn build(
         position: 0,
         raw,
         significant_next: 0,
+        source,
         tokens,
         tree,
         value_count: 0,
@@ -2009,6 +2220,26 @@ pub fn build(
     let recorded = parser.outcome;
     let buffered = events.outcome();
     let replayed = replay(events, tree);
+    let mut truncated = false;
+
+    for (position, kind) in raw.iter().enumerate() {
+        if *kind != GoKind::Comment {
+            continue;
+        }
+
+        let text = tokens[position].text(source);
+
+        if !text.starts_with(b"/*") || text.len() >= 4 && text.ends_with(b"*/") {
+            continue;
+        }
+
+        let held = tree.push_error(SyntaxError {
+            kind: SyntaxErrorKind::UnexpectedToken,
+            span: tokens[position].span(),
+        });
+
+        truncated = truncated || !held;
+    }
 
     if recorded != Structure::Complete {
         return recorded;
@@ -2016,6 +2247,10 @@ pub fn build(
 
     if buffered != Structure::Complete {
         return buffered;
+    }
+
+    if truncated {
+        return Structure::Truncated;
     }
 
     replayed

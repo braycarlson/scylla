@@ -599,6 +599,10 @@ impl Parser<'_, '_> {
 
         let frame = self.frames[self.frame_count as usize];
 
+        if frame.variant == Variant::Ternary && frame.stage == 0 {
+            self.record(SyntaxErrorKind::ExpectedColon);
+        }
+
         self.events.start_at(frame.checkpoint, frame.kind);
         self.events.finish();
         self.value_count = frame.values;
@@ -712,6 +716,10 @@ impl Parser<'_, '_> {
 
         let frame = self.frames[group as usize];
 
+        if frame.variant == Variant::Paren && self.value_count == frame.values {
+            self.record(SyntaxErrorKind::ExpectedExpression);
+        }
+
         self.frame_count = group;
 
         if frame.variant == Variant::Argument {
@@ -743,6 +751,16 @@ impl Parser<'_, '_> {
 
     fn expression_single(&mut self) {
         self.expression_with(false);
+    }
+
+    fn required_expression(&mut self) {
+        let before = self.significant(self.position);
+
+        self.expression_single();
+
+        if self.significant(self.position) == before {
+            self.record(SyntaxErrorKind::ExpectedExpression);
+        }
     }
 
     fn expression_with(&mut self, sequence: bool) {
@@ -1603,7 +1621,7 @@ impl Parser<'_, '_> {
             current if is_property_name(current) => {
                 self.wrap(TypeScriptKind::PropertyIdentifier);
             }
-            _ => {}
+            _ => self.record(SyntaxErrorKind::ExpectedIdentifier),
         }
 
         self.events.finish();
@@ -2263,11 +2281,7 @@ impl Parser<'_, '_> {
 
         let reached = matches!(
             self.ahead(1),
-            Some(
-                TypeScriptKind::BracketOpen
-                    | TypeScriptKind::Dot
-                    | TypeScriptKind::QuestionDot
-            )
+            Some(TypeScriptKind::BracketOpen | TypeScriptKind::Dot | TypeScriptKind::QuestionDot)
         );
 
         if is_name(kind) && !reached {
@@ -2395,6 +2409,11 @@ impl Parser<'_, '_> {
     fn run(&mut self) {
         self.events.start(TypeScriptKind::Program);
         self.statements_until(TypeScriptKind::ErrorToken);
+
+        if self.current().is_some() {
+            self.record(SyntaxErrorKind::UnexpectedToken);
+        }
+
         self.events.finish();
     }
 
@@ -2606,7 +2625,14 @@ impl Parser<'_, '_> {
     fn expression_statement(&mut self) {
         self.open(TypeScriptKind::ExpressionStatement);
         self.expression();
-        let _ = self.eat(TypeScriptKind::Semicolon);
+
+        if !self.eat(TypeScriptKind::Semicolon)
+            && !self.breaks_line()
+            && !matches!(self.current(), None | Some(TypeScriptKind::BraceClose))
+        {
+            self.record(SyntaxErrorKind::UnexpectedToken);
+        }
+
         self.events.finish();
     }
 
@@ -2660,7 +2686,7 @@ impl Parser<'_, '_> {
         self.type_annotation();
 
         if self.eat(TypeScriptKind::Equal) {
-            self.expression_single();
+            self.required_expression();
         }
 
         self.events.finish();
@@ -2786,7 +2812,8 @@ impl Parser<'_, '_> {
             SyntaxErrorKind::UnexpectedToken,
         );
 
-        if is_name(self.current().unwrap_or(TypeScriptKind::ErrorToken)) && !self.word(b"implements")
+        if is_name(self.current().unwrap_or(TypeScriptKind::ErrorToken))
+            && !self.word(b"implements")
         {
             self.wrap(TypeScriptKind::TypeIdentifier);
         }
@@ -5085,7 +5112,8 @@ impl Parser<'_, '_> {
         matches!(
             self.ahead(1),
             None | Some(
-                TypeScriptKind::BracketClose
+                TypeScriptKind::BraceClose
+                    | TypeScriptKind::BracketClose
                     | TypeScriptKind::Colon
                     | TypeScriptKind::Comma
                     | TypeScriptKind::Equal
@@ -5114,7 +5142,10 @@ impl Parser<'_, '_> {
                 continue;
             }
 
-            if (self.word(b"abstract") || self.word(b"declare") || self.word(b"readonly"))
+            if (self.word(b"abstract")
+                || self.word(b"accessor")
+                || self.word(b"declare")
+                || self.word(b"readonly"))
                 && !self.opens_a_type()
             {
                 abstracted = abstracted || self.word(b"abstract");

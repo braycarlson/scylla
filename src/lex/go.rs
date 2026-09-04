@@ -1,4 +1,5 @@
 use crate::language::Lexer;
+use crate::scan::Numbers;
 use crate::scan::{
     identifier_scan,
     is_identifier_start_at,
@@ -9,7 +10,6 @@ use crate::scan::{
     string_scan,
     word_in,
 };
-use crate::scan::Numbers;
 use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static GO: GoLexer = GoLexer;
@@ -446,6 +446,10 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
         );
     }
 
+    if byte == b'<' && next == Some(b'-') {
+        return (TokenKind::Punctuation(Punctuation::Less), offset + 2);
+    }
+
     if (byte == b'+' && next == Some(b'+')) || (byte == b'-' && next == Some(b'-')) {
         return (TokenKind::Punctuation(Punctuation::Other), offset + 2);
     }
@@ -796,24 +800,34 @@ mod tests {
     }
 
     #[test]
-    fn the_channel_arrow_lexes_as_two_tokens() {
+    fn the_channel_arrow_lexes_as_one_token() {
         let source = b"func f(c chan int) {\n\tc <- 1\n}\n";
         let tokens = tests_support::lex(&GO, source);
 
         let arrow = tokens
             .iter()
-            .position(|token| token.text(source) == b"<")
-            .expect("the arrow opens with a less-than");
+            .position(|token| token.text(source) == b"<-")
+            .expect("the channel arrow lexes whole");
 
         assert_eq!(
             tokens[arrow].kind,
             TokenKind::Punctuation(Punctuation::Less)
         );
+    }
 
-        assert_eq!(
-            tokens[arrow + 1].kind,
-            TokenKind::Punctuation(Punctuation::Other)
-        );
+    #[test]
+    fn a_channel_arrow_before_a_minus_does_not_take_a_newline() {
+        let source = b"package i\nfunc f() {\n\tc <--x\n}\n";
+        let tokens = tests_support::lex(&GO, source);
+
+        let arrow = tokens
+            .iter()
+            .position(|token| token.text(source) == b"<-")
+            .expect("the channel arrow lexes whole");
+
+        assert_eq!(tokens[arrow + 1].text(source), b"-");
+        assert_eq!(tokens[arrow + 2].text(source), b"x");
+        assert_eq!(tokens[arrow + 3].kind, TokenKind::Newline);
     }
 
     #[test]

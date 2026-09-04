@@ -16,7 +16,6 @@ use std::sync::{Condvar, Mutex};
 use std::thread::{JoinHandle, spawn};
 
 pub const WORKER_COUNT_MAX: u32 = 64;
-
 const DRAIN_WAIT_MICROS: u64 = 100;
 
 type Trampoline = fn(NonNull<()>, u32, u32);
@@ -366,7 +365,10 @@ fn announce(shared: &'static Shared) {
 
     let seen = shared.started.fetch_add(1, Ordering::AcqRel);
 
-    assert!(seen < WORKER_COUNT_MAX, "a pool announces at most its workers");
+    assert!(
+        seen < WORKER_COUNT_MAX,
+        "a pool announces at most its workers"
+    );
 
     drop(held);
 

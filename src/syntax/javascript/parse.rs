@@ -396,6 +396,10 @@ impl Parser<'_, '_> {
 
         let frame = self.frames[self.frame_count as usize];
 
+        if frame.variant == Variant::Ternary && frame.stage == 0 {
+            self.record(SyntaxErrorKind::ExpectedColon);
+        }
+
         self.events.start_at(frame.checkpoint, frame.kind);
         self.events.finish();
         self.value_count = frame.values;
@@ -509,6 +513,10 @@ impl Parser<'_, '_> {
 
         let frame = self.frames[group as usize];
 
+        if frame.variant == Variant::Paren && self.value_count == frame.values {
+            self.record(SyntaxErrorKind::ExpectedExpression);
+        }
+
         self.frame_count = group;
 
         if frame.variant == Variant::Argument {
@@ -540,6 +548,16 @@ impl Parser<'_, '_> {
 
     fn expression_single(&mut self) {
         self.expression_with(false);
+    }
+
+    fn required_expression(&mut self) {
+        let before = self.significant(self.position);
+
+        self.expression_single();
+
+        if self.significant(self.position) == before {
+            self.record(SyntaxErrorKind::ExpectedExpression);
+        }
     }
 
     fn expression_with(&mut self, sequence: bool) {
@@ -1338,7 +1356,7 @@ impl Parser<'_, '_> {
             current if is_property_name(current) => {
                 self.wrap(JavaScriptKind::PropertyIdentifier);
             }
-            _ => {}
+            _ => self.record(SyntaxErrorKind::ExpectedIdentifier),
         }
 
         self.events.finish();
@@ -1905,6 +1923,11 @@ impl Parser<'_, '_> {
     fn run(&mut self) {
         self.events.start(JavaScriptKind::Program);
         self.statements_until(JavaScriptKind::ErrorToken);
+
+        if self.current().is_some() {
+            self.record(SyntaxErrorKind::UnexpectedToken);
+        }
+
         self.events.finish();
     }
 
@@ -2010,7 +2033,14 @@ impl Parser<'_, '_> {
     fn expression_statement(&mut self) {
         self.open(JavaScriptKind::ExpressionStatement);
         self.expression();
-        let _ = self.eat(JavaScriptKind::Semicolon);
+
+        if !self.eat(JavaScriptKind::Semicolon)
+            && !self.breaks_line()
+            && !matches!(self.current(), None | Some(JavaScriptKind::BraceClose))
+        {
+            self.record(SyntaxErrorKind::UnexpectedToken);
+        }
+
         self.events.finish();
     }
 
@@ -2057,7 +2087,7 @@ impl Parser<'_, '_> {
         self.pattern();
 
         if self.eat(JavaScriptKind::Equal) {
-            self.expression_single();
+            self.required_expression();
         }
 
         self.events.finish();

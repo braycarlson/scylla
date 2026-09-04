@@ -399,8 +399,7 @@ fn gaps_are_blank(source: &[u8], tokens: &[Token], name: &str) {
     );
 
     assert_eq!(
-        end_previous,
-        length,
+        end_previous, length,
         "{name} leaves bytes past its last gap"
     );
 }
@@ -443,8 +442,7 @@ fn invariants_hold(machine: &Machine, name: &str) {
             let held = walk[child as usize];
 
             assert_eq!(
-                held.parent,
-                index,
+                held.parent, index,
                 "{name}: node {child} disowns its parent"
             );
 
@@ -882,6 +880,59 @@ fn the_normalized_walk_matches_the_goldens() {
 }
 
 #[test]
+fn the_statement_census_matches_the_corpus_goldens() {
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    let found = corpus();
+
+    if found.is_empty() {
+        return;
+    }
+
+    let carried = oracle::residue_of("residue-rust.json", &NOT_RUST);
+    let mut abstained = 0;
+    let mut machine = Machine::reserve();
+    let mut compared = 0;
+
+    for fixture in &found {
+        if carried.contains(&fixture.name) {
+            continue;
+        }
+
+        let Some(golden) = oracle::golden(&held, &fixture.name) else {
+            abstained += 1;
+
+            continue;
+        };
+
+        if golden.broken {
+            abstained += 1;
+
+            continue;
+        }
+
+        let _ = machine.parse(&fixture.source);
+
+        assert_eq!(
+            machine.census(),
+            census_of(&golden.ast),
+            "{} counts its statements differently",
+            fixture.name
+        );
+
+        compared += 1;
+    }
+
+    assert!(
+        compared >= floor::CORPUS_CENSUS_RUST,
+        "the corpus lost its Rust files: {compared} counted, {abstained} abstained, floor {}",
+        floor::CORPUS_CENSUS_RUST
+    );
+}
+
+#[test]
 fn the_normalized_walk_matches_the_corpus_goldens() {
     let Some(held) = corpus::golden() else {
         return;
@@ -959,7 +1010,6 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
 fn every_residue_row_names_a_file_that_diverges() {
     let carried = oracle::residue_of("residue-rust.json", &EVERY_CATEGORY);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-rust");
-
     let mut machine = Machine::reserve();
     let mut named = Vec::new();
 

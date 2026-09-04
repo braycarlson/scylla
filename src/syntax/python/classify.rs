@@ -1,5 +1,6 @@
 use crate::bounded::BoundedVec;
 use crate::lex::python_token_at;
+use crate::scan::string_is_terminated;
 use crate::syntax::python::fstring;
 use crate::syntax::python::kind::PythonKind;
 use crate::token::{Token, TokenKind, Tokens};
@@ -126,7 +127,10 @@ pub fn classify(
             continue;
         }
 
-        if token.kind == TokenKind::String && fstring::is_format(token.text(source)) {
+        if token.kind == TokenKind::String
+            && fstring::is_format(token.text(source))
+            && string_is_terminated(token.text(source), false)
+        {
             if !fstring::expand(source, token.span(), out, raw) {
                 return false;
             }
@@ -234,6 +238,10 @@ fn is_word(bytes: &[u8]) -> bool {
 
 fn number_join(source: &[u8], end: usize, kind: PythonKind) -> (PythonKind, usize) {
     if source.get(end) != Some(&b'.') {
+        return (kind, end);
+    }
+
+    if kind != PythonKind::NumberInteger {
         return (kind, end);
     }
 
@@ -362,6 +370,10 @@ fn operator_of(bytes: &[u8]) -> PythonKind {
 }
 
 fn string_of(bytes: &[u8]) -> PythonKind {
+    if !string_is_terminated(bytes, false) {
+        return PythonKind::ErrorToken;
+    }
+
     let prefix_end = bytes
         .iter()
         .position(|byte| matches!(*byte, b'"' | b'\''))
@@ -437,5 +449,18 @@ mod tests {
         for entry in &OPERATORS {
             assert_eq!(operator_of(entry.0), entry.1);
         }
+    }
+
+    #[test]
+    fn a_string_that_never_closes_is_an_error_token() {
+        assert_eq!(string_of(b"'''"), PythonKind::ErrorToken);
+        assert_eq!(string_of(b"\"\"\""), PythonKind::ErrorToken);
+        assert_eq!(string_of(b"'ab"), PythonKind::ErrorToken);
+        assert_eq!(string_of(b"f\"{a}"), PythonKind::ErrorToken);
+
+        assert_eq!(string_of(b"'''x'''"), PythonKind::StringPlain);
+        assert_eq!(string_of(b"'ab'"), PythonKind::StringPlain);
+        assert_eq!(string_of(b"f\"{a}\""), PythonKind::StringFormat);
+        assert_eq!(string_of(b"rb\"x\""), PythonKind::StringBytes);
     }
 }

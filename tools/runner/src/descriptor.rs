@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use oracle_treesitter::Correction;
 use scylla::bounded::BoundedVec;
 use scylla::lex::{CSS, GO, JAVASCRIPT, ODIN, PYTHON, RUST, TYPESCRIPT, ZIG};
 use scylla::syntax::css::kind::CSSKind;
@@ -28,23 +29,30 @@ use scylla::syntax::zig::{classify::classify as zig_classify, parse as zig_parse
 use scylla::syntax::Structure;
 use scylla::token::{Token, Tokens};
 use scylla::tree::{Events, Tree};
+use scylla::trivia::CONTINUATION_NONE;
 
 use crate::analyzer::{Analyzer, Native};
+use crate::arbiter::{Arbiter, Program, Reading, Setup};
 use crate::binder;
-use crate::format::{program_of, Reference, Shape, Subprocess};
+use crate::format::{program_of, Reference, Rewrites, Shape, Subprocess};
 use crate::normalize::{self, Normalizer};
 use crate::oracle::{Batch, Oracle, Ruff, Syn, TreeSitter, Version};
 use crate::printer;
 
 pub struct Descriptor {
     pub analyzer: Box<dyn Analyzer>,
+    pub arbiter: Option<Box<dyn Arbiter>>,
+    pub continuation: u8,
     pub extensions: &'static [&'static str],
+    pub rewrites: Rewrites,
     pub name: &'static str,
     pub normalizer: Option<&'static Normalizer>,
     pub oracle: Box<dyn Oracle>,
     pub reference: Option<Box<dyn Reference>>,
     pub regroups: bool,
 }
+
+const CONTINUATION: u8 = b'\\';
 
 pub const EVERY_LANGUAGE: [&str; 9] = [
     "css",
@@ -58,7 +66,7 @@ pub const EVERY_LANGUAGE: [&str; 9] = [
     "zig",
 ];
 
-pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
+pub fn descriptor_of(name: &str, tools: &Path, corpus: &Path) -> Result<Descriptor, String> {
     match name {
         "css" => Ok(Descriptor {
             analyzer: Box::new(Native::reserve(
@@ -69,14 +77,25 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::Css::reserve()),
                 None,
             )),
+            arbiter: postcss(tools),
+            continuation: CONTINUATION_NONE,
             extensions: &["css"],
+            rewrites: Rewrites {
+                cases: true,
+                counts: true,
+                folds: true,
+                quotes: true,
+                separators: true,
+                ..Rewrites::default()
+            },
             name: "css",
             normalizer: Some(&normalize::CSS),
             oracle: Box::new(TreeSitter::of(
                 "tree-sitter",
                 &tree_sitter_css::LANGUAGE.into(),
+                Correction::None,
             )?),
-            reference: None,
+            reference: biome(tools, "css"),
             regroups: false,
         }),
         "go" => Ok(Descriptor {
@@ -88,7 +107,13 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::Go::reserve()),
                 None,
             )),
+            arbiter: None,
+            continuation: CONTINUATION_NONE,
             extensions: &["go"],
+            rewrites: Rewrites {
+                semicolons: true,
+                ..Rewrites::default()
+            },
             name: "go",
             normalizer: None,
             oracle: Box::new(Batch::of(
@@ -113,14 +138,29 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::JavaScript::reserve()),
                 None,
             )),
+            arbiter: estree(tools, "js"),
+            continuation: CONTINUATION_NONE,
             extensions: &["cjs", "js", "mjs"],
+            rewrites: Rewrites {
+                commas: true,
+                constructs: true,
+                grouped: true,
+                keys: true,
+                numbers: true,
+                parens: true,
+                returns: true,
+                terminators: true,
+                unions: true,
+                ..Rewrites::default()
+            },
             name: "javascript",
             normalizer: Some(&normalize::JAVASCRIPT),
             oracle: Box::new(TreeSitter::of(
                 "tree-sitter",
                 &tree_sitter_javascript::LANGUAGE.into(),
+                Correction::None,
             )?),
-            reference: None,
+            reference: biome(tools, "js"),
             regroups: false,
         }),
         "odin" => Ok(Descriptor {
@@ -132,12 +172,16 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::Odin::reserve()),
                 None,
             )),
+            arbiter: odin(tools),
+            continuation: CONTINUATION,
             extensions: &["odin"],
+            rewrites: Rewrites::default(),
             name: "odin",
             normalizer: Some(&normalize::ODIN),
             oracle: Box::new(TreeSitter::of(
                 "tree-sitter",
                 &tree_sitter_odin::LANGUAGE.into(),
+                Correction::Odin,
             )?),
             reference: None,
             regroups: false,
@@ -151,7 +195,17 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::Python::reserve()),
                 Some(Box::new(binder::Python::reserve())),
             )),
+            arbiter: None,
+            continuation: CONTINUATION,
             extensions: &["py", "pyi"],
+            rewrites: Rewrites {
+                cases: true,
+                groups: true,
+                joins: true,
+                semicolons: true,
+                zeros: true,
+                ..Rewrites::default()
+            },
             name: "python",
             normalizer: None,
             oracle: Box::new(Ruff),
@@ -167,7 +221,18 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::Rust::reserve()),
                 None,
             )),
+            arbiter: rust(corpus),
+            continuation: CONTINUATION_NONE,
             extensions: &["rs"],
+            rewrites: Rewrites {
+                arms: true,
+                blocks: true,
+                commas: true,
+                imports: true,
+                orders: true,
+                terminators: true,
+                ..Rewrites::default()
+            },
             name: "rust",
             normalizer: None,
             oracle: Box::new(Syn),
@@ -183,14 +248,30 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::TypeScript::reserve()),
                 None,
             )),
+            arbiter: estree(tools, "tsx"),
+            continuation: CONTINUATION_NONE,
             extensions: &["tsx"],
+            rewrites: Rewrites {
+                commas: true,
+                constructs: true,
+                grouped: true,
+                keys: true,
+                members: true,
+                numbers: true,
+                parens: true,
+                returns: true,
+                terminators: true,
+                unions: true,
+                ..Rewrites::default()
+            },
             name: "tsx",
             normalizer: Some(&normalize::TYPESCRIPT),
             oracle: Box::new(TreeSitter::of(
                 "tree-sitter",
                 &tree_sitter_typescript::LANGUAGE_TSX.into(),
+                Correction::TypeScript,
             )?),
-            reference: None,
+            reference: biome(tools, "tsx"),
             regroups: false,
         }),
         "typescript" => Ok(Descriptor {
@@ -202,14 +283,30 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::TypeScript::reserve()),
                 None,
             )),
+            arbiter: estree(tools, "ts"),
+            continuation: CONTINUATION_NONE,
             extensions: &["cts", "mts", "ts"],
+            rewrites: Rewrites {
+                commas: true,
+                constructs: true,
+                grouped: true,
+                keys: true,
+                members: true,
+                numbers: true,
+                parens: true,
+                returns: true,
+                terminators: true,
+                unions: true,
+                ..Rewrites::default()
+            },
             name: "typescript",
             normalizer: Some(&normalize::TYPESCRIPT),
             oracle: Box::new(TreeSitter::of(
                 "tree-sitter",
                 &tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+                Correction::TypeScript,
             )?),
-            reference: None,
+            reference: biome(tools, "ts"),
             regroups: false,
         }),
         "zig" => Ok(Descriptor {
@@ -221,7 +318,13 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
                 Box::new(printer::Zig::reserve()),
                 None,
             )),
+            arbiter: None,
+            continuation: CONTINUATION_NONE,
             extensions: &["zig"],
+            rewrites: Rewrites {
+                casts: true,
+                ..Rewrites::default()
+            },
             name: "zig",
             normalizer: None,
             oracle: Box::new(Batch::of(
@@ -239,6 +342,127 @@ pub fn descriptor_of(name: &str, tools: &Path) -> Result<Descriptor, String> {
         }),
         other => Err(format!("`{other}` names no language the runner carries")),
     }
+}
+
+fn biome(tools: &Path, extension: &str) -> Option<Box<dyn Reference>> {
+    let program = program_of("BIOME", Path::new("biome"));
+
+    Subprocess::of(
+        "biome",
+        program.clone(),
+        &[
+            "format",
+            &format!("--stdin-file-path=input.{extension}"),
+            "--indent-style=space",
+            "--indent-width=4",
+            "--line-width=88",
+            "--javascript-formatter-quote-style=double",
+            "--semicolons=always",
+        ],
+        "ts",
+        Shape::Stream,
+        &Version {
+            arguments: &["--version"],
+            pin: &tools.join("oracle-biome/PIN"),
+            program: &program.to_string_lossy(),
+        },
+    )
+    .ok()
+    .map(|held| Box::new(held) as Box<dyn Reference>)
+}
+
+fn estree(tools: &Path, extension: &'static str) -> Option<Box<dyn Arbiter>> {
+    scripted(
+        "typescript-estree",
+        tools.join("oracle-tsscope/accepts.mjs"),
+        &tools.join("oracle-tsscope/PIN"),
+        extension,
+    )
+}
+
+fn odin(tools: &Path) -> Option<Box<dyn Arbiter>> {
+    let program = tools.join("arbiter-odin/odin");
+    let named = program.to_string_lossy().into_owned();
+
+    Program::of(Setup {
+        arguments: &["check", "-file", "-no-entry-point"],
+        environment: &[],
+        extension: "odin",
+        identifier: "odin",
+        program: program.clone(),
+        reading: Reading::Syntax,
+        version: Some(&Version {
+            arguments: &["version"],
+            pin: &tools.join("arbiter-odin/PIN"),
+            program: &named,
+        }),
+    })
+    .ok()
+    .map(|held| Box::new(held) as Box<dyn Arbiter>)
+}
+
+fn postcss(tools: &Path) -> Option<Box<dyn Arbiter>> {
+    scripted(
+        "postcss",
+        tools.join("oracle-css/accepts.mjs"),
+        &tools.join("oracle-css/PIN"),
+        "css",
+    )
+}
+
+fn rust(corpus: &Path) -> Option<Box<dyn Arbiter>> {
+    Program::of(Setup {
+        arguments: &["--edition", "2024", "-Zparse-crate-root-only"],
+        environment: &[("RUSTC_BOOTSTRAP", "1")],
+        extension: "rs",
+        identifier: "rustc",
+        program: toolchain(corpus, "rustc")?,
+        reading: Reading::Status,
+        version: None,
+    })
+    .ok()
+    .map(|held| Box::new(held) as Box<dyn Arbiter>)
+}
+
+fn scripted(
+    identifier: &'static str,
+    script: PathBuf,
+    pin: &Path,
+    extension: &'static str,
+) -> Option<Box<dyn Arbiter>> {
+    let script = script.to_string_lossy().into_owned();
+    let program = program_of("NODE", Path::new("node"));
+    let named = program.to_string_lossy().into_owned();
+
+    Program::of(Setup {
+        arguments: &[&script],
+        environment: &[],
+        extension,
+        identifier,
+        program: program.clone(),
+        reading: Reading::Word,
+        version: Some(&Version {
+            arguments: &[&script, "--version"],
+            pin,
+            program: &named,
+        }),
+    })
+    .ok()
+    .map(|held| Box::new(held) as Box<dyn Arbiter>)
+}
+
+fn toolchain(corpus: &Path, name: &str) -> Option<PathBuf> {
+    let mut held = std::fs::canonicalize(corpus.join("rust")).ok()?;
+
+    while held.pop() {
+        let found = held.join("bin").join(name);
+
+        if found.is_file() {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 fn gofmt(tools: &Path) -> Option<Box<dyn Reference>> {
@@ -264,7 +488,7 @@ fn rustfmt(tools: &Path) -> Option<Box<dyn Reference>> {
         program_of("RUSTFMT", Path::new("rustfmt")),
         &["--edition", "2024", "--emit", "stdout", "--quiet"],
         "rs",
-        Shape::Stdout,
+        Shape::Stream,
         &Version {
             arguments: &["--version"],
             pin: &tools.join("oracle-rustfmt/PIN"),

@@ -41,11 +41,7 @@ use scylla::tree::{Events, Kind, Structure, Tree};
 fn main() {
     println!(
         "{:<40} {:>9}    {:>13}    {:>16}    {:>9}",
-        "benchmark",
-        "bytes",
-        "minimum",
-        "median",
-        "throughput",
+        "benchmark", "bytes", "minimum", "median", "throughput",
     );
 
     css_benches();
@@ -223,7 +219,6 @@ fn sources_of(directory: &str, extension: &str) -> Vec<Vec<u8>> {
 
 fn corpus_of(directory: &str, extension: &str) -> Vec<u8> {
     let sources = sources_of(directory, extension);
-
     let mut out = Vec::with_capacity(BYTES_TARGET + (1 << 16));
 
     while out.len() < BYTES_TARGET {
@@ -699,7 +694,7 @@ fn rust_benches() {
 
     drop(semantic);
 
-    let mut formatter = scylla::format::rust::Formatter::reserve(ELEMENT_COUNT_MAX);
+    let mut formatter = scylla::format::rust::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX);
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     measure("format-rust", corpus.len(), &mut || {
@@ -866,7 +861,7 @@ fn zig_benches() {
 
     drop(semantic);
 
-    let mut formatter = scylla::format::zig::Formatter::reserve(ELEMENT_COUNT_MAX);
+    let mut formatter = scylla::format::zig::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX);
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     measure("format-zig", corpus.len(), &mut || {
@@ -913,7 +908,7 @@ fn odin_benches() {
 
     drop(semantic);
 
-    let mut formatter = scylla::format::odin::Formatter::reserve(ELEMENT_COUNT_MAX);
+    let mut formatter = scylla::format::odin::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX);
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     let options = Options {
@@ -957,7 +952,7 @@ fn css_benches() {
 
     drop(semantic);
 
-    let mut formatter = scylla::format::css::Formatter::reserve(ELEMENT_COUNT_MAX);
+    let mut formatter = scylla::format::css::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX);
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     measure("format-css", corpus.len(), &mut || {
@@ -1068,7 +1063,8 @@ fn javascript_benches() {
         });
     }
 
-    let mut formatter = scylla::format::javascript::Formatter::reserve(ELEMENT_COUNT_MAX);
+    let mut formatter =
+        scylla::format::javascript::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX);
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     measure("format-javascript", corpus.len(), &mut || {
@@ -1154,7 +1150,8 @@ fn typescript_benches() {
 
     drop(semantic);
 
-    let mut formatter = scylla::format::typescript::Formatter::reserve(ELEMENT_COUNT_MAX);
+    let mut formatter =
+        scylla::format::typescript::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX);
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     measure("format-typescript", corpus.len(), &mut || {
@@ -1440,7 +1437,6 @@ const WORDS: &[&[u8]] = &[b"elif", b"else", b"empty", b"plural"];
 fn markup_benches() {
     let corpus = corpus_of("templates", "html");
     let sources = sources_of("templates", "html");
-
     let small = sources.iter().map(Vec::len).sum::<usize>();
     let mut index = lines::Index::reserve(LINE_COUNT_MAX);
     let mut map = BlockMap::reserve(1 << 16);

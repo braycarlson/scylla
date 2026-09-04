@@ -1,0 +1,11 @@
+{
+    "cargo": {
+        "buildScripts": {
+            "enable": false
+        },
+        "sysroot": null
+    },
+    "procMacro": {
+        "enable": false
+    }
+}

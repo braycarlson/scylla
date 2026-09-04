@@ -5,11 +5,17 @@ pub mod go;
 pub mod ir;
 pub mod javascript;
 pub mod markup;
+pub mod mask;
 pub mod odin;
+pub mod policy;
 pub mod print;
 pub mod python;
+pub mod reach;
 pub mod rust;
+pub mod stream;
+pub mod text;
 pub mod typescript;
+pub mod walk;
 pub mod zig;
 
 use crate::bounded::{Buffer, Span};
@@ -110,21 +116,25 @@ impl Formatters {
         let count = limits.element_count_max;
 
         Self {
-            css: wanted[Language::Css.index()].then(|| css::Formatter::reserve(count)),
+            css: wanted[Language::Css.index()]
+                .then(|| css::Formatter::reserve(count, limits.scratch_bytes_max)),
             go: wanted[Language::Go.index()]
                 .then(|| go::Formatter::reserve(count, limits.scratch_bytes_max)),
             javascript: wanted[Language::JavaScript.index()]
-                .then(|| javascript::Formatter::reserve(count)),
-            odin: wanted[Language::Odin.index()].then(|| odin::Formatter::reserve(count)),
+                .then(|| javascript::Formatter::reserve(count, limits.scratch_bytes_max)),
+            odin: wanted[Language::Odin.index()]
+                .then(|| odin::Formatter::reserve(count, limits.scratch_bytes_max)),
             python: wanted[Language::Python.index()].then(|| PythonFormatter {
                 formatter: python::Formatter::reserve(count, limits.arena_bytes_max),
                 lines: lines::Index::reserve(limits.line_count_max),
                 pragmas: Pragmas::reserve(limits.pragma_count_max),
             }),
-            rust: wanted[Language::Rust.index()].then(|| rust::Formatter::reserve(count)),
+            rust: wanted[Language::Rust.index()]
+                .then(|| rust::Formatter::reserve(count, limits.scratch_bytes_max)),
             typescript: (wanted[Language::TypeScript.index()] || wanted[Language::Tsx.index()])
-                .then(|| typescript::Formatter::reserve(count)),
-            zig: wanted[Language::Zig.index()].then(|| zig::Formatter::reserve(count)),
+                .then(|| typescript::Formatter::reserve(count, limits.scratch_bytes_max)),
+            zig: wanted[Language::Zig.index()]
+                .then(|| zig::Formatter::reserve(count, limits.scratch_bytes_max)),
         }
     }
 

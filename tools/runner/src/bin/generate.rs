@@ -114,7 +114,6 @@ fn run() -> Result<usize, String> {
 
 fn resolved(rules: &HashMap<String, Value>) -> HashMap<String, String> {
     let mut found: HashMap<String, String> = HashMap::new();
-
     let mut names: Vec<&String> = rules.keys().collect();
 
     names.sort();

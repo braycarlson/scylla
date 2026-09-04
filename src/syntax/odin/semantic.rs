@@ -121,6 +121,10 @@ impl Iterator for Children<'_> {
 }
 
 impl BindingKind {
+    pub const fn annotated(self) -> bool {
+        matches!(self, Self::Field | Self::Parameter)
+    }
+
     pub const fn hoists(self) -> bool {
         matches!(
             self,
@@ -355,9 +359,12 @@ impl Semantic {
 
             let held = self.bindings[index as usize];
 
+            let opened =
+                held.from <= reference.name.offset || held.name.offset == reference.name.offset;
+
             if held.scope == scope
                 && held.namespace == reference.namespace
-                && held.from <= reference.name.offset
+                && opened
                 && held.name_hash == hash
                 && &source[held.name.range()] == name
             {
@@ -474,7 +481,7 @@ impl<'run> Builder<'run> {
 
     const fn scope_kind_of(kind: OdinKind) -> Option<ScopeKind> {
         match Some(kind) {
-            Some(OdinKind::Procedure) => Some(ScopeKind::Procedure),
+            Some(OdinKind::Procedure | OdinKind::ProcedureType) => Some(ScopeKind::Procedure),
             Some(
                 OdinKind::BitFieldDeclaration
                 | OdinKind::EnumDeclaration
@@ -590,7 +597,11 @@ impl<'run> Builder<'run> {
         }
 
         let name = self.span_of(held);
-        let from = if kind.hoists() { 0 } else { self.end_of(node) };
+        let from = if kind.hoists() && !kind.annotated() {
+            0
+        } else {
+            self.end_of(node)
+        };
 
         let _ = self.record_from(from, kind, name, held);
     }
@@ -610,7 +621,11 @@ impl<'run> Builder<'run> {
 
         self.leading_names(node, &mut names, &mut count);
 
-        let from = if kind.hoists() { 0 } else { self.end_of(node) };
+        let from = if kind.hoists() && !kind.annotated() {
+            0
+        } else {
+            self.end_of(node)
+        };
 
         for held in &names[..count] {
             if assigned != NONE && self.tree.at(*held).token_start > assigned {
@@ -1013,7 +1028,11 @@ impl<'run> Builder<'run> {
             return NONE;
         };
 
-        let opens = if held.kind.is_ordered() { from } else { 0 };
+        let opens = if held.kind.is_ordered() || kind.annotated() {
+            from
+        } else {
+            0
+        };
         let previous = self.previous_of(scope, name, kind.namespace());
         let index = self.semantic.bindings.count();
 
@@ -1094,10 +1113,10 @@ mod tests {
         "Member Light scope 1 from 0",
         "Member Dark scope 1 from 0",
         "Type Holder scope 0 from 0",
-        "Field field scope 2 from 0",
-        "Field shade scope 2 from 0",
+        "Field field scope 2 from 135",
+        "Field shade scope 2 from 150",
         "Procedure Handler scope 0 from 0",
-        "Parameter one scope 3 from 0",
+        "Parameter one scope 3 from 179",
         "Procedure top scope 0 from 0",
     ];
 
@@ -1128,7 +1147,7 @@ mod tests {
         "Import c scope 0 from 0",
         "Import lib scope 0 from 0",
         "Procedure native scope 0 from 0",
-        "Parameter one scope 1 from 0",
+        "Parameter one scope 1 from 140",
         "Procedure call scope 0 from 0",
     ];
 
@@ -1151,8 +1170,8 @@ mod tests {
 
     const PROCEDURES_BINDINGS: [&str; 16] = [
         "Procedure build scope 0 from 0",
-        "Parameter one scope 1 from 0",
-        "Parameter two scope 1 from 0",
+        "Parameter one scope 1 from 38",
+        "Parameter two scope 1 from 51",
         "Result held scope 1 from 0",
         "Result ok scope 1 from 0",
         "Var kept scope 2 from 104",
@@ -1162,9 +1181,9 @@ mod tests {
         "Var inner scope 6 from 204",
         "Label outer scope 2 from 0",
         "Procedure teardown scope 0 from 0",
-        "Parameter one scope 12 from 0",
+        "Parameter one scope 12 from 390",
         "Procedure read scope 0 from 0",
-        "Parameter one scope 14 from 0",
+        "Parameter one scope 14 from 418",
         "Procedure group scope 0 from 0",
     ];
 
@@ -1223,11 +1242,11 @@ mod tests {
 
     const USING_BINDINGS: [&str; 6] = [
         "Type Holder scope 0 from 0",
-        "Field field scope 1 from 0",
+        "Field field scope 1 from 46",
         "Procedure read scope 0 from 0",
-        "Parameter self scope 2 from 0",
+        "Parameter self scope 2 from 76",
         "Procedure plain scope 0 from 0",
-        "Parameter self scope 4 from 0",
+        "Parameter self scope 4 from 143",
     ];
 
     const USING_FACTS: [&str; 0] = [];

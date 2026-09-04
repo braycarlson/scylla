@@ -1,32 +1,7 @@
 [
   {
-    "fixture": "functions.rs",
-    "category": "rustfmt-line-breaking",
-    "reason": "rustfmt reflows a signature it does not like the width of and indents a `where` clause's bounds one level under the item. The emitter keeps the source's line breaks and derives indentation from bracket nesting, and a `where` clause opens no bracket, so its bounds keep the column the source gave them."
-  },
-  {
-    "fixture": "items.rs",
-    "category": "rustfmt-item-ordering",
-    "reason": "rustfmt sorts a run of `use` declarations and reorders the names inside a use tree. Reordering moves tokens the source wrote, which the preservation relation of decision 10 forbids, so scylla re-indents the block and leaves the order alone."
-  },
-  {
-    "fixture": "macros.rs",
-    "category": "rustfmt-macro-spacing",
-    "reason": "A macro-rules pattern is not Rust expression syntax: `$held:expr` binds a fragment specifier with no space around its colon, and rustfmt lays a macro body out by its own rules. The emitter spaces the colon the way it spaces every other one and keeps the body's own line breaks."
-  },
-  {
-    "fixture": "patterns.rs",
-    "category": "rustfmt-line-breaking",
-    "reason": "rustfmt explodes a struct pattern across lines once it passes the width, and it spaces the rest pattern `..` from the brace that follows it. The emitter never moves a line break the source did not write, and the coarse token stream lexes `..` as two dots, which the field-access rule keeps tight."
-  },
-  {
     "fixture": "constness.rs",
     "category": "rustfmt-line-breaking",
     "reason": "rustfmt indents a `where` clause's bounds one level under the item and breaks an associated type's value onto its own line ahead of the `where`. The emitter keeps the source's line breaks and derives indentation from bracket nesting, and a `where` clause opens no bracket, so its bounds keep the column the source gave them. This is the same divergence `functions.rs` carries, reached through the const-trait syntax rather than through a signature width."
-  },
-  {
-    "fixture": "constness.rs",
-    "category": "rustfmt-macro-spacing",
-    "reason": "rustfmt reproduces a macro's parameter list byte for byte, so `$item:item` keeps its colon tight. The emitter prints the token stream through its own spacing rules, which put a space behind a colon, and a declarative macro's parameter list is token soup that carries no syntax to tell the two colons apart."
   }
 ]

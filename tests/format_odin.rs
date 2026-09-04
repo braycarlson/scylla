@@ -37,7 +37,7 @@ impl Held {
     fn reserve() -> Self {
         Self {
             events: Events::reserve(EVENT_COUNT_MAX),
-            formatter: Formatter::reserve(ELEMENT_COUNT_MAX),
+            formatter: Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX),
             lexed: Tokens::reserve(TOKEN_COUNT_MAX),
             raw: BoundedVec::reserve(TOKEN_COUNT_MAX),
             tokens: Tokens::reserve(TOKEN_COUNT_MAX),
@@ -421,6 +421,161 @@ fn a_line_continuation_does_not_break_the_statement_it_joins() {
 }
 
 #[test]
+fn an_unclosed_triple_quoted_string_is_refused() {
+    const SOURCES: [&[u8]; 4] = [
+        b"\"\"\"",
+        b"\"\"\"\n",
+        b"```",
+        b"\"\"\"\"\"\"\"\"\"\"\"\"\"\"\"",
+    ];
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    for source in SOURCES {
+        assert_eq!(
+            held.format(source, &mut out),
+            Outcome::Refusal,
+            "{:?}",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn a_closed_triple_quoted_string_still_formats() {
+    let source: &[u8] = b"main :: proc() {\n\ttext := \"\"\"a\nb\"\"\"\n}\n";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(OUT_BYTES_MAX);
+    let mut second = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(second.as_bytes(), once);
+}
+
+#[test]
+fn a_mark_that_was_apart_from_its_name_is_not_glued_to_it() {
+    let source: &[u8] = b"@\x0c@\x0c\xc0";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(OUT_BYTES_MAX);
+    let mut second = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(second.as_bytes(), once);
+}
+
+#[test]
+fn a_mark_written_against_its_name_stays_against_it() {
+    let source: &[u8] = b"@(private)\nmain :: proc() {\n\t#partial switch x {\n\t}\n}\n";
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut out), Outcome::Complete);
+
+    let formatted = String::from_utf8_lossy(out.as_bytes()).into_owned();
+
+    assert!(formatted.contains("@(private)"), "{formatted}");
+    assert!(formatted.contains("#partial switch"), "{formatted}");
+}
+
+#[test]
+fn a_build_tag_keeps_no_blank_between_itself_and_the_comment_it_trails() {
+    const SOURCES: [&[u8]; 3] = [
+        b"#+build linux // only there\npackage main\n",
+        b"#+private //x\n",
+        b"#+//&",
+    ];
+
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(OUT_BYTES_MAX);
+    let mut second = Buffer::reserve(OUT_BYTES_MAX);
+
+    for source in SOURCES {
+        assert_eq!(
+            held.format(source, &mut first),
+            Outcome::Complete,
+            "{:?}",
+            String::from_utf8_lossy(source)
+        );
+
+        let once = first.as_bytes().to_vec();
+
+        assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+
+        assert_eq!(
+            second.as_bytes(),
+            once,
+            "{:?} grows a blank each pass",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn a_block_comment_that_never_closes_its_nesting_is_refused() {
+    const SOURCES: [&[u8]; 3] = [b"/*/*/", b"x/*/*/", b"/* /*"];
+    const CLOSED: [&[u8]; 2] = [b"/* a */\n", b"/* /* b */ */\n"];
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    for source in SOURCES {
+        assert_eq!(
+            held.format(source, &mut out),
+            Outcome::Refusal,
+            "{:?}",
+            String::from_utf8_lossy(source)
+        );
+    }
+
+    for source in CLOSED {
+        assert_eq!(
+            held.format(source, &mut out),
+            Outcome::Complete,
+            "{:?}",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn a_dot_apart_from_a_digit_is_not_glued_into_a_number() {
+    let source: &[u8] = b"d.\x0c0";
+    let mut held = Held::reserve();
+    let mut first = Buffer::reserve(OUT_BYTES_MAX);
+    let mut second = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut first), Outcome::Complete);
+
+    let once = first.as_bytes().to_vec();
+
+    assert_eq!(held.format(&once, &mut second), Outcome::Complete);
+    assert_eq!(second.as_bytes(), once);
+}
+
+#[test]
+fn a_dot_written_against_its_field_stays_against_it() {
+    let source: &[u8] = b"main :: proc() {\n\tx := held . field\n\ty := held.other\n}\n";
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut out), Outcome::Complete);
+
+    let formatted = String::from_utf8_lossy(out.as_bytes()).into_owned();
+
+    assert!(formatted.contains("held.field"), "{formatted}");
+    assert!(formatted.contains("held.other"), "{formatted}");
+}
+
+#[test]
 fn a_range_reads_back_the_lines_it_names() {
     let source: &[u8] = b"main :: proc() {\nx:=1\n}\n";
     let mut held = Held::reserve();
@@ -563,6 +718,9 @@ fn formatting_keeps_every_word_it_was_given() {
         let before = held.words(&source);
         let after = held.words(&formatted);
 
-        assert_eq!(before, after, "{name} split, joined, lost, or gained a word");
+        assert_eq!(
+            before, after,
+            "{name} split, joined, lost, or gained a word"
+        );
     }
 }

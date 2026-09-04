@@ -401,13 +401,29 @@ fn tag_scan(source: &[u8], start: usize) -> usize {
 
     while offset + 1 < line {
         if source[offset] == b'/' && source[offset + 1] == b'/' {
-            return offset;
+            return blanks_trimmed(source, start, offset);
         }
 
         offset += 1;
     }
 
-    line
+    blanks_trimmed(source, start, line)
+}
+
+fn blanks_trimmed(source: &[u8], start: usize, end: usize) -> usize {
+    assert!(start <= end);
+    assert!(end <= source.len());
+
+    let mut offset = end;
+
+    while offset > start && (source[offset - 1] == b' ' || source[offset - 1] == b'\t') {
+        offset -= 1;
+    }
+
+    assert!(offset >= start);
+    assert!(offset <= end);
+
+    offset
 }
 
 fn is_assert_name(text: &[u8], source: &[u8], end: usize) -> bool {
@@ -601,14 +617,19 @@ mod tests {
 
     #[test]
     fn a_triple_quoted_string_lexes_as_one_token_across_lines() {
-        assert_eq!(counted(b"s := \"\"\"\na \" b\n\"\"\"\n", TokenKind::String), 1);
+        assert_eq!(
+            counted(b"s := \"\"\"\na \" b\n\"\"\"\n", TokenKind::String),
+            1
+        );
         assert_eq!(counted(b"s := ```\na ` b\n```\n", TokenKind::String), 1);
         assert_eq!(counted(b"s := \"\" + \"a\"\n", TokenKind::String), 2);
     }
 
     #[test]
     fn a_tag_stops_where_a_trailing_comment_starts() {
-        assert_eq!(tag_scan(b"#+build linux // only there\n", 0), 14);
+        assert_eq!(tag_scan(b"#+build linux // only there\n", 0), 13);
+        assert_eq!(tag_scan(b"#+build linux\t// only there\n", 0), 13);
+        assert_eq!(tag_scan(b"#+build linux   \n", 0), 13);
         assert_eq!(tag_scan(b"#+build linux\n", 0), 13);
         assert_eq!(tag_scan(b"#+build linux", 0), 13);
         assert_eq!(tag_scan(b"//x\n", 0), 0);
@@ -1003,7 +1024,7 @@ mod tests {
         let source = b"#+build linux // only there\npackage main\n";
         let tokens = tests_support::lex(&ODIN, source);
 
-        assert_eq!(tokens[0].text(source), b"#+build linux ");
+        assert_eq!(tokens[0].text(source), b"#+build linux");
         assert_eq!(tokens[1].kind, TokenKind::Comment);
         assert_eq!(tokens[1].text(source), b"// only there");
     }

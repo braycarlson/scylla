@@ -261,7 +261,10 @@ fn the_binder_reads_a_flat_literal_of_any_width() {
     let (parsed, complete, _) = bound(held.as_bytes());
 
     assert_eq!(parsed, Structure::Complete, "{parsed:?}");
-    assert!(complete, "the binder truncated a flat literal of {NAME_COUNT}");
+    assert!(
+        complete,
+        "the binder truncated a flat literal of {NAME_COUNT}"
+    );
 }
 
 #[test]

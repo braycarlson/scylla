@@ -17,6 +17,7 @@ use scylla::syntax::zig::parse;
 use scylla::token::{TokenKind, Tokens};
 use scylla::tree::{Events, Tree};
 
+const CASTS: [&str; 4] = ["alignCast", "constCast", "ptrCast", "volatileCast"];
 const ELEMENT_COUNT_MAX: u32 = 1 << 18;
 const ERROR_COUNT_MAX: u32 = 1 << 12;
 const EVENT_COUNT_MAX: u32 = 1 << 20;
@@ -37,7 +38,7 @@ impl Held {
     fn reserve() -> Self {
         Self {
             events: Events::reserve(EVENT_COUNT_MAX),
-            formatter: Formatter::reserve(ELEMENT_COUNT_MAX),
+            formatter: Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX),
             lexed: Tokens::reserve(TOKEN_COUNT_MAX),
             raw: BoundedVec::reserve(TOKEN_COUNT_MAX),
             tokens: Tokens::reserve(TOKEN_COUNT_MAX),
@@ -135,7 +136,13 @@ impl Held {
                     return "<string>".to_owned();
                 }
 
-                String::from_utf8_lossy(token.text(source)).into_owned()
+                let text = String::from_utf8_lossy(token.text(source)).into_owned();
+
+                if CASTS.contains(&text.trim_start_matches('@')) {
+                    return "<cast>".to_owned();
+                }
+
+                text
             })
             .collect()
     }
@@ -494,6 +501,321 @@ fn formatting_keeps_every_word_it_was_given() {
         let before = held.words(&source);
         let after = held.words(&formatted);
 
-        assert_eq!(before, after, "{name} split, joined, lost, or gained a word");
+        assert_eq!(
+            before, after,
+            "{name} split, joined, lost, or gained a word"
+        );
     }
+}
+
+#[test]
+fn a_switch_prong_lists_its_cases_without_the_columns_a_row_takes() {
+    const SOURCE: &[u8] = b"const E = enum { aaa, b, cccccccccc, d };\nfn f(e: E) u8 {\n    return switch (e) {\n        .aaa, .b => 1,\n        .cccccccccc, .d => 2,\n    };\n}\nconst t = [_]u32{\n    1, 2,\n    400, 5,\n};\n";
+    const WANTED: &[u8] = b"const E = enum { aaa, b, cccccccccc, d };\nfn f(e: E) u8 {\n    return switch (e) {\n        .aaa, .b => 1,\n        .cccccccccc, .d => 2,\n    };\n}\nconst t = [_]u32{\n    1,   2,\n    400, 5,\n};\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_body_whose_head_stands_on_a_continuation_indents_from_that_line() {
+    const SOURCE: &[u8] = b"fn f() u8 {\n    const held =\n        for ([_]u8{ 1, 2, 3 }) |value| {\n            if (value == 2) break value;\n        } else 0;\n    return held;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn an_operator_chain_steps_a_level_where_the_operators_bind_harder() {
+    const SOURCE: &[u8] = b"const a: u64 = 1;\nconst b: u64 = 2;\nconst c: u64 = 3;\nconst d: u64 = 4;\nfn f() u64 {\n    const p =\n        a +\n        b *\n        c +\n        d;\n    const q =\n        a *\n        b +\n        c;\n    return p + q;\n}\n";
+    const WANTED: &[u8] = b"const a: u64 = 1;\nconst b: u64 = 2;\nconst c: u64 = 3;\nconst d: u64 = 4;\nfn f() u64 {\n    const p =\n        a +\n        b *\n            c +\n        d;\n    const q =\n        a *\n        b +\n        c;\n    return p + q;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_bracket_inside_a_headers_condition_indents_from_the_line_it_opened_on() {
+    const SOURCE: &[u8] = b"fn f() void {\n    if (aaa and\n        other(\n        one,\n        two,\n    )) {\n        stage();\n    }\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    if (aaa and\n        other(\n            one,\n            two,\n        ))\n    {\n        stage();\n    }\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_body_whose_header_ends_over_indented_takes_a_line_of_its_own() {
+    const SOURCE: &[u8] = b"fn f() void {\n    if (aaa and\n        bbb) {\n        one();\n    }\n    if (call(\n        aaa,\n    ) == 0) {\n        two();\n    }\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    if (aaa and\n        bbb)\n    {\n        one();\n    }\n    if (call(\n        aaa,\n    ) == 0) {\n        two();\n    }\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_headers_body_steps_in_from_the_header_and_its_else_steps_back() {
+    const SOURCE: &[u8] = b"fn f() void {\n    const held =\n        if (a)\n        if (b)\n        one\n        else\n        two\n        else\n        three;\n    _ = held;\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    const held =\n        if (a)\n            if (b)\n                one\n            else\n                two\n        else\n            three;\n    _ = held;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_continuation_opened_inside_another_steps_in_from_it() {
+    const SOURCE: &[u8] = b"fn f() void {\n    const held =\n        if (a)\n        one\n    else\n        two;\n    _ = held;\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    const held =\n        if (a)\n            one\n        else\n            two;\n    _ = held;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_remark_takes_the_level_of_the_code_below_it() {
+    const SOURCE: &[u8] = b"fn f() void {\n    const held = value.first()\n    // A remark standing inside a continuation.\n        .second();\n    _ = held;\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    const held = value.first()\n        // A remark standing inside a continuation.\n        .second();\n    _ = held;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_continue_clause_stands_at_the_level_its_header_took() {
+    const SOURCE: &[u8] = b"fn f() void {\n    var i: u8 = 0;\n    while (i < ten and\n        i < twenty) //\n        : (i += 1) {\n        one();\n    }\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    var i: u8 = 0;\n    while (i < ten and\n        i < twenty) //\n    : (i += 1) {\n        one();\n    }\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_run_of_nested_casts_is_written_in_one_order() {
+    const SOURCE: &[u8] = b"fn f(ctx: *anyopaque) void {\n    const held = @constCast(@alignCast(@ptrCast(ctx)));\n    _ = held;\n}\n";
+    const WANTED: &[u8] = b"fn f(ctx: *anyopaque) void {\n    const held = @ptrCast(@alignCast(@constCast(ctx)));\n    _ = held;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_slices_own_sentinel_takes_the_blank_a_types_sentinel_does_not() {
+    const SOURCE: &[u8] = b"fn f(buffer: []u8, read: usize) void {\n    var one: [614:0]u8 = undefined;\n    const two = buffer[0..read :0];\n    _ = one;\n    _ = two;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn a_line_past_a_multiline_string_steps_back_out_of_it() {
+    const SOURCE: &[u8] = b"fn f(buf: []u8) void {\n    const held = call(\n        \\\\one\n    ++\n        \\\\two\n        , buf);\n    const kept = .{\n        \\\\three\n        ,\n        4,\n    };\n    _ = held;\n    _ = kept;\n}\n";
+    const WANTED: &[u8] = b"fn f(buf: []u8) void {\n    const held = call(\n        \\\\one\n    ++\n        \\\\two\n    , buf);\n    const kept = .{\n        \\\\three\n        ,\n        4,\n    };\n    _ = held;\n    _ = kept;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_sole_element_hugs_the_brace_holding_it_however_it_parts() {
+    const SOURCE: &[u8] = b"fn f() void {\n    try p(\"a\", .{ sized(\n        one,\n    ) });\n    try p(\"a\", .{ one, sized(\n        two,\n    ) });\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    try p(\"a\", .{sized(\n        one,\n    )});\n    try p(\"a\", .{ one, sized(\n        two,\n    ) });\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn an_element_spelling_lines_of_its_own_takes_a_row_of_its_own() {
+    const SOURCE: &[u8] = b"const held = .{\n    .{\n        one, Mapping{\n            .name = \"two\",\n        },\n    },\n    .{ three, Mapping{\n        .name = \"four\",\n    } },\n};\n";
+    const WANTED: &[u8] = b"const held = .{\n    .{\n        one,\n        Mapping{\n            .name = \"two\",\n        },\n    },\n    .{ three, Mapping{\n        .name = \"four\",\n    } },\n};\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_payload_the_source_parted_steps_in_from_the_header_opening_it() {
+    const SOURCE: &[u8] = b"fn f() void {\n    for (one, two) |\n    first,\n    second,\n    | {\n        _ = .{ first, second };\n    }\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    for (one, two) |\n        first,\n        second,\n    | {\n        _ = .{ first, second };\n    }\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_conditions_operator_under_a_trailing_remark_keeps_the_headers_level() {
+    const SOURCE: &[u8] = b"fn f(link: []const u8) void {\n    if (one(link) // external.\n        or two(link) // email.\n    ) {\n        return;\n    }\n}\n";
+    const WANTED: &[u8] = b"fn f(link: []const u8) void {\n    if (one(link) // external.\n    or two(link) // email.\n    ) {\n        return;\n    }\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_remark_between_two_operands_keeps_the_precedence_the_chain_stands_at() {
+    const SOURCE: &[u8] = b"const a = if (element_count >=\n    // one\n    capacity +\n    // two\n    1 +\n    // three\n    2)\n    naive\nelse\n    naive - 1;\n";
+    const WANTED: &[u8] = b"const a = if (element_count >=\n    // one\n    capacity +\n        // two\n        1 +\n        // three\n        2)\n    naive\nelse\n    naive - 1;\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn an_arm_body_under_a_remark_run_keeps_the_arms_own_level() {
+    const SOURCE: &[u8] = b"fn f(n: u8) ?u8 {\n    return switch (n) {\n        0 =>\n            // one\n            // two\n            call(\n                a,\n            ),\n        else => null,\n    };\n}\n";
+    const WANTED: &[u8] = b"fn f(n: u8) ?u8 {\n    return switch (n) {\n        0 =>\n        // one\n        // two\n        call(\n            a,\n        ),\n        else => null,\n    };\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_struct_initialiser_field_under_a_trailing_remark_keeps_its_own_level() {
+    const SOURCE: &[u8] = b"const g = init(gpa, .{\n    .alpha = one,\n    .beta = //\n        two,\n});\nconst v = struct {\n    alpha: u8 = //\n        one,\n};\n";
+    const WANTED: &[u8] = b"const g = init(gpa, .{\n    .alpha = one,\n    .beta = //\n    two,\n});\nconst v = struct {\n    alpha: u8 = //\n        one,\n};\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_body_an_orelse_opens_indents_from_the_line_it_opened_on() {
+    const SOURCE: &[u8] = b"fn f() void {\n    const held: i64 = if (client == 0)\n        @intCast(stamp)\n    else\n        clock.sync() orelse {\n        one();\n        return;\n    };\n    _ = held;\n}\n";
+    const WANTED: &[u8] = b"fn f() void {\n    const held: i64 = if (client == 0)\n        @intCast(stamp)\n    else\n        clock.sync() orelse {\n            one();\n            return;\n        };\n    _ = held;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_wrapping_negation_closes_up_against_its_operand() {
+    const SOURCE: &[u8] = b"fn f(less_than: u64, x: u64) void {\n    const t = -%less_than;\n    const u = x -% less_than;\n    _ = .{ t, u };\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
 }

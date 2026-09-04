@@ -87,11 +87,19 @@ pub fn gap_is_blank(source: &[u8], gap: Span, continuation: u8) -> bool {
         let blank = matches!(byte, b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r' | b' ')
             || (continuation != CONTINUATION_NONE && byte == continuation);
 
-        if !blank {
+        if blank {
+            offset += 1;
+
+            continue;
+        }
+
+        let width = crate::scan::whitespace_width(source, offset as usize);
+
+        if width == 0 {
             return false;
         }
 
-        offset += 1;
+        offset += count_of(width);
     }
 
     true

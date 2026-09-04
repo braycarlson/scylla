@@ -371,8 +371,7 @@ fn gaps_are_blank(source: &[u8], tokens: &[Token], name: &str) {
     );
 
     assert_eq!(
-        end_previous,
-        length,
+        end_previous, length,
         "{name} leaves bytes past its last gap"
     );
 }
@@ -415,8 +414,7 @@ fn invariants_hold(machine: &Machine, name: &str) {
             let held = walk[child as usize];
 
             assert_eq!(
-                held.parent,
-                index,
+                held.parent, index,
                 "{name}: node {child} disowns its parent"
             );
 
@@ -506,7 +504,10 @@ fn report(name: &str, held: &[(String, u32, u32)], expected: &[(String, u32, u32
 fn classify_is_total_over_the_fixtures() {
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/javascript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/javascript holds no source"
+    );
 
     let mut machine = Machine::reserve();
 
@@ -528,7 +529,10 @@ fn classify_is_total_over_the_fixtures() {
 fn the_gaps_over_the_fixtures_hold_only_blank_bytes() {
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/javascript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/javascript holds no source"
+    );
 
     let mut machine = Machine::reserve();
 
@@ -643,7 +647,10 @@ fn the_statement_census_matches_the_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-javascript");
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/javascript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/javascript holds no source"
+    );
 
     let mut machine = Machine::reserve();
     let mut compared = 0;
@@ -688,6 +695,28 @@ fn an_import_attribute_follows_the_module_string() {
 }
 
 #[test]
+fn a_backslash_outside_a_unicode_escape_is_an_error() {
+    const SOURCES: [&[u8]; 3] = [b"/\\/~", b"a\\b", b"\\"];
+
+    let mut machine = Machine::reserve();
+
+    for source in SOURCES {
+        machine.parse(source);
+
+        assert!(
+            !machine.tree.errors().is_empty(),
+            "{:?} parsed without an error",
+            String::from_utf8_lossy(source)
+        );
+    }
+
+    let escaped = b"let \\u0041 = 1;\n";
+
+    assert_eq!(machine.parse(escaped), Structure::Complete);
+    assert!(machine.tree.errors().is_empty());
+}
+
+#[test]
 fn a_with_statement_after_a_module_string_stays_a_statement() {
     let source = b"import held from \"./held\"\nwith (held) {}\n";
     let length = u32::try_from(source.len()).expect("a source fits in u32");
@@ -714,7 +743,10 @@ fn the_normalized_walk_matches_the_goldens() {
     let carried = oracle::residue_of("residue-javascript.json", &EVERY_CATEGORY);
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/javascript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/javascript holds no source"
+    );
 
     let mut machine = Machine::reserve();
     let mut compared = 0;
@@ -746,6 +778,59 @@ fn the_normalized_walk_matches_the_goldens() {
         compared >= floor::FIXTURE_WALK_JAVASCRIPT,
         "the JavaScript fixtures lost a walk: {compared} compared, floor {}",
         floor::FIXTURE_WALK_JAVASCRIPT
+    );
+}
+
+#[test]
+fn the_statement_census_matches_the_corpus_goldens() {
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    let found = corpus();
+
+    if found.is_empty() {
+        return;
+    }
+
+    let carried = oracle::residue_of("residue-javascript.json", &NOT_JAVASCRIPT);
+    let mut abstained = 0;
+    let mut machine = Machine::reserve();
+    let mut compared = 0;
+
+    for fixture in &found {
+        if carried.contains(&fixture.name) {
+            continue;
+        }
+
+        let Some(golden) = oracle::golden(&held, &fixture.name) else {
+            abstained += 1;
+
+            continue;
+        };
+
+        if golden.broken {
+            abstained += 1;
+
+            continue;
+        }
+
+        let _ = machine.parse(&fixture.source);
+
+        assert_eq!(
+            machine.census(),
+            census_of(&golden.ast),
+            "{} counts its statements differently",
+            fixture.name
+        );
+
+        compared += 1;
+    }
+
+    assert!(
+        compared >= floor::CORPUS_CENSUS_JAVASCRIPT,
+        "the corpus lost its JavaScript files: {compared} counted, {abstained} abstained, floor {}",
+        floor::CORPUS_CENSUS_JAVASCRIPT
     );
 }
 
@@ -827,7 +912,6 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
 fn every_residue_row_names_a_file_that_diverges() {
     let carried = oracle::residue_of("residue-javascript.json", &EVERY_CATEGORY);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-javascript");
-
     let mut machine = Machine::reserve();
     let mut named = Vec::new();
 

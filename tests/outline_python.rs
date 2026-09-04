@@ -263,8 +263,7 @@ fn a_bare_annotation_declares_a_name_and_binds_nothing() {
     assert_eq!(built.text(bare.annotation), "str");
 
     assert_eq!(
-        bare.value_token_start,
-        bare.value_token_end,
+        bare.value_token_start, bare.value_token_end,
         "a bare annotation binds nothing"
     );
 

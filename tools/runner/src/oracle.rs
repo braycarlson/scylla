@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use tree_sitter::{Node, Parser};
+use oracle_treesitter::{walk, Correction};
+use tree_sitter::Parser;
 
 use crate::blob::blob_of;
 
@@ -20,19 +21,28 @@ pub trait Oracle {
 }
 
 pub struct TreeSitter {
+    correction: Correction,
     identifier: &'static str,
     parser: Parser,
 }
 
 impl TreeSitter {
-    pub fn of(identifier: &'static str, language: &tree_sitter::Language) -> Result<Self, String> {
+    pub fn of(
+        identifier: &'static str,
+        language: &tree_sitter::Language,
+        correction: Correction,
+    ) -> Result<Self, String> {
         let mut parser = Parser::new();
 
         parser
             .set_language(language)
             .map_err(|error| format!("the {identifier} grammar is unusable: {error}"))?;
 
-        Ok(Self { identifier, parser })
+        Ok(Self {
+            correction,
+            identifier,
+            parser,
+        })
     }
 }
 
@@ -44,33 +54,14 @@ impl Oracle for TreeSitter {
     fn read(&mut self, source: &[u8]) -> Option<Read> {
         let tree = self.parser.parse(source, None)?;
         let root = tree.root_node();
-        let mut broken = false;
-        let mut cursor = root.walk();
-        let mut nodes = Vec::new();
-        let mut tokens = Vec::new();
-        let mut stack = vec![root];
+        let (rows, broken) = walk(root, source, &self.correction);
 
-        while let Some(node) = stack.pop() {
-            if node.is_error() || node.is_missing() {
-                broken = true;
-            }
+        let nodes = rows
+            .into_iter()
+            .map(|row| (row.0, row.1 as u32, row.2 as u32))
+            .collect();
 
-            if node.is_named() {
-                nodes.push((
-                    node.kind().to_owned(),
-                    node.start_byte() as u32,
-                    node.end_byte() as u32,
-                ));
-            }
-
-            let children: Vec<Node<'_>> = node.children(&mut cursor).collect();
-
-            for child in children.into_iter().rev() {
-                stack.push(child);
-            }
-        }
-
-        tokens.push((root.start_byte() as u32, root.end_byte() as u32));
+        let tokens = vec![(root.start_byte() as u32, root.end_byte() as u32)];
 
         Some(Read {
             accepted: !broken,
@@ -166,7 +157,10 @@ impl Batch {
 
         version.enforce(identifier)?;
 
-        let scratch = std::env::temp_dir().join(format!("scylla-runner-{identifier}"));
+        let scratch = std::env::temp_dir().join(format!(
+            "scylla-runner-{identifier}-{}",
+            std::process::id()
+        ));
 
         Ok(Self {
             binary,
@@ -360,7 +354,7 @@ fn number(text: &[u8], from: usize) -> (u32, usize) {
     (value, offset)
 }
 
-fn quoted(text: &[u8], from: usize) -> Option<(String, usize)> {
+pub fn quoted(text: &[u8], from: usize) -> Option<(String, usize)> {
     let mut offset = from;
 
     while offset < text.len() && text[offset] != b'"' {

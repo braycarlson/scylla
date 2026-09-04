@@ -627,11 +627,28 @@ impl Parser<'_> {
         self.events.finish();
     }
 
+    fn names_an_id(&self) -> bool {
+        matches!(
+            self.current(),
+            Some(
+                CSSKind::Escape
+                    | CSSKind::Identifier
+                    | CSSKind::Number
+                    | CSSKind::Text
+                    | CSSKind::Unit
+            )
+        )
+    }
+
     fn loose_suffix(&mut self, checkpoint: Checkpoint, kind: CSSKind) {
         match Some(kind) {
             Some(CSSKind::Hash) => {
                 self.bump();
-                self.wrap(CSSKind::IdName);
+
+                if self.names_an_id() {
+                    self.wrap(CSSKind::IdName);
+                }
+
                 self.events.start_at(checkpoint, CSSKind::IdSelector);
             }
             Some(CSSKind::Colon) => {
@@ -643,7 +660,11 @@ impl Parser<'_> {
             }
             Some(CSSKind::ColonColon) => {
                 self.bump();
-                self.wrap(CSSKind::TagName);
+
+                if self.names_an_id() {
+                    self.wrap(CSSKind::TagName);
+                }
+
                 self.selector_arguments(false);
 
                 self.events

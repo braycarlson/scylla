@@ -9,6 +9,7 @@ publish = false
 [dependencies]
 proc-macro2 = { version = "1", features = ["span-locations"] }
 ruff_python_parser = { git = "https://github.com/astral-sh/ruff", tag = "0.16.3" }
+oracle-treesitter = { path = "../oracle-treesitter" }
 scylla = { path = "../.." }
 syn = { version = "2", features = ["full", "visit", "extra-traits"] }
 tree-sitter = "0.25"

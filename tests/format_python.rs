@@ -126,11 +126,17 @@ impl Held {
                     return "<string>".to_owned();
                 }
 
-                String::from_utf8_lossy(token.text(source)).into_owned()
+                let text = String::from_utf8_lossy(token.text(source)).into_owned();
+
+                if token.kind == TokenKind::Number {
+                    return number(&text);
+                }
+
+                text
             })
             .collect::<Vec<String>>();
 
-        let mut found = Vec::with_capacity(held.len());
+        let mut found: Vec<String> = Vec::with_capacity(held.len());
 
         for (index, word) in held.iter().enumerate() {
             let trailing = word == ","
@@ -138,7 +144,21 @@ impl Held {
                     .get(index + 1)
                     .is_some_and(|next| matches!(next.as_str(), ")" | "]" | "}"));
 
-            if trailing || word == "(" || word == ")" {
+            if trailing || word == "(" || word == ")" || word == ";" {
+                continue;
+            }
+
+            if word == "<string>" && found.last().is_some_and(|last| last == "<string>") {
+                continue;
+            }
+
+            let leaning = found.last().is_some_and(|last| last == ".")
+                && word.starts_with(|first: char| first.is_ascii_digit());
+
+            if leaning {
+                found.pop();
+                found.push(number(&format!(".{word}")));
+
                 continue;
             }
 
@@ -168,7 +188,10 @@ impl Held {
             .filter(|kind| {
                 !matches!(
                     kind,
-                    PythonKind::Dedent | PythonKind::Indent | PythonKind::Newline
+                    PythonKind::Comment
+                        | PythonKind::Dedent
+                        | PythonKind::Indent
+                        | PythonKind::Newline
                 )
             })
             .collect()
@@ -193,12 +216,37 @@ impl Held {
             .enumerate()
             .filter(|(_, kind)| **kind == PythonKind::Comment)
             .map(|(index, _)| {
-                source[self.tokens.as_slice()[index].span().range()]
-                    .trim_ascii_end()
-                    .to_vec()
+                let text = source[self.tokens.as_slice()[index].span().range()].trim_ascii_end();
+
+                remark(text)
             })
             .collect()
     }
+}
+
+fn number(text: &str) -> String {
+    let held = text.to_lowercase();
+
+    let Some(at) = held.find('.') else {
+        return held;
+    };
+
+    let (before, rest) = held.split_at(at);
+    let after = rest.strip_prefix('.').unwrap_or_default();
+    let leading = if before.is_empty() { "0" } else { before };
+    let trailing = if after.is_empty() { "0" } else { after };
+
+    format!("{leading}.{trailing}")
+}
+
+fn remark(text: &[u8]) -> Vec<u8> {
+    let mut held = text.to_vec();
+
+    if held.starts_with(b"# ") {
+        held.remove(1);
+    }
+
+    held
 }
 
 fn first_difference(left: &[u8], right: &[u8]) -> Option<(usize, String, String)> {
@@ -221,10 +269,54 @@ fn first_difference(left: &[u8], right: &[u8]) -> Option<(usize, String, String)
     None
 }
 
-fn preserved(before: &[PythonKind], after: &[PythonKind]) -> bool {
+fn strung(kind: PythonKind) -> bool {
+    matches!(
+        kind,
+        PythonKind::FStringEnd
+            | PythonKind::FStringMiddle
+            | PythonKind::FStringStart
+            | PythonKind::StringBytes
+            | PythonKind::StringFormat
+            | PythonKind::StringPlain
+    )
+}
+
+fn collapsed(kinds: &[PythonKind]) -> Vec<PythonKind> {
+    let mut found: Vec<PythonKind> = Vec::with_capacity(kinds.len());
+
+    for kind in kinds {
+        if !strung(*kind) {
+            found.push(*kind);
+
+            continue;
+        }
+
+        if found.last().copied().is_some_and(strung) {
+            continue;
+        }
+
+        found.push(PythonKind::StringPlain);
+    }
+
+    found
+}
+
+fn preserved(source: &[PythonKind], printed: &[PythonKind]) -> bool {
+    let before = collapsed(source);
+    let after = collapsed(printed);
     let mut held = 0;
 
-    for kind in after {
+    for kind in &after {
+        while held < before.len()
+            && before[held] != *kind
+            && matches!(
+                before[held],
+                PythonKind::ParenClose | PythonKind::ParenOpen | PythonKind::Semicolon
+            )
+        {
+            held += 1;
+        }
+
         if held < before.len() && before[held] == *kind {
             held += 1;
 
@@ -237,6 +329,15 @@ fn preserved(before: &[PythonKind], after: &[PythonKind]) -> bool {
         ) {
             return false;
         }
+    }
+
+    while held < before.len()
+        && matches!(
+            before[held],
+            PythonKind::ParenClose | PythonKind::ParenOpen | PythonKind::Semicolon
+        )
+    {
+        held += 1;
     }
 
     held == before.len()
@@ -305,6 +406,20 @@ fn a_one_element_tuple_holding_a_broken_collection_gets_one_comma() {
 
     assert_eq!(held.format(source, &mut out), Outcome::Complete);
     assert!(!String::from_utf8_lossy(out.as_bytes()).contains(",,"));
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(source)
+    );
+}
+
+#[test]
+fn an_empty_collection_ending_a_call_is_no_magic_trailing_comma() {
+    let source: &[u8] = b"self.assertEqual(Child.check(), [])
+";
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(source, &mut out), Outcome::Complete);
     assert_eq!(
         String::from_utf8_lossy(out.as_bytes()),
         String::from_utf8_lossy(source)
@@ -886,6 +1001,659 @@ fn a_line_break_inside_a_string_takes_the_ending_once() {
 }
 
 #[test]
+fn a_stub_owes_no_blank_to_the_clause_that_continues_its_statement() {
+    assert_eq!(
+        plain(
+            b"if X:\n    def f(a) -> int: ...\nelse:\n    pass\n",
+            QuotePreference::Double
+        ),
+        "if X:\n\n    def f(a) -> int: ...\nelse:\n    pass\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"try:\n    class C: ...\nexcept E:\n    pass\nfinally:\n    pass\n",
+            QuotePreference::Double
+        ),
+        "try:\n\n    class C: ...\nexcept E:\n    pass\nfinally:\n    pass\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"if X:\n    def f(a) -> int: ...\n\n\nelse:\n    pass\n",
+            QuotePreference::Double
+        ),
+        "if X:\n\n    def f(a) -> int: ...\n\n\nelse:\n    pass\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"if X:\n    def f(a) -> int: ...\ny = 1\n",
+            QuotePreference::Double
+        ),
+        "if X:\n\n    def f(a) -> int: ...\n\n\ny = 1\n"
+    );
+}
+
+#[test]
+fn a_sole_multiline_string_takes_the_hug_a_call_gives_it_and_no_other_bracket() {
+    assert_eq!(
+        plain(
+            b"g(\n    a,\n    html=dedent(\"\"\"\n    <p>x</p>\"\"\"),\n)\n",
+            QuotePreference::Double
+        ),
+        "g(\n    a,\n    html=dedent(\"\"\"\n    <p>x</p>\"\"\"),\n)\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"g(\n    a,\n    html=(\"\"\"\n    <p>x</p>\"\"\"),\n)\n",
+            QuotePreference::Double
+        ),
+        "g(\n    a,\n    html=(\n        \"\"\"\n    <p>x</p>\"\"\"\n    ),\n)\n"
+    );
+
+    assert_eq!(
+        plain(b"x = t[\"\"\"\n<p>x</p>\"\"\"]\n", QuotePreference::Double),
+        "x = t[\n    \"\"\"\n<p>x</p>\"\"\"\n]\n"
+    );
+
+    assert_eq!(
+        plain(b"x = [\"\"\"\n<p>x</p>\"\"\"]\n", QuotePreference::Double),
+        "x = [\n    \"\"\"\n<p>x</p>\"\"\"\n]\n"
+    );
+}
+
+#[test]
+fn a_multiline_format_string_respaces_every_field_and_keeps_its_own_lines() {
+    assert_eq!(
+        plain(
+            b"x = f\"\"\"\nhead {a+b} mid\n{'-'*40}\nend\"\"\"\n",
+            QuotePreference::Double
+        ),
+        "x = f\"\"\"\nhead {a + b} mid\n{\"-\" * 40}\nend\"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"x = rf\"\"\"\n{'-'*40}\\d\nend\"\"\"\n",
+            QuotePreference::Double
+        ),
+        "x = rf\"\"\"\n{\"-\" * 40}\\d\nend\"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"x = f\"\"\"\nhead {g('''\nz''')} mid\nend\"\"\"\n",
+            QuotePreference::Double
+        ),
+        "x = f\"\"\"\nhead {g('''\nz''')} mid\nend\"\"\"\n"
+    );
+}
+
+#[test]
+fn a_value_that_is_one_bracket_pair_never_takes_the_optional_pair() {
+    let remark = "  # added to allow handlers to be removed in reverse of order initialized\n";
+
+    for value in ["[]", "()", "{}", "not []", "-[]", "([])"] {
+        let source = format!("_handlerList = {value}{remark}");
+        let wanted = source.replace("([])", "[]");
+
+        assert_eq!(plain(source.as_bytes(), QuotePreference::Double), wanted);
+    }
+
+    assert_eq!(
+        plain(
+            format!("_handlerList = [] + x{remark}").as_bytes(),
+            QuotePreference::Double
+        ),
+        format!("_handlerList = (\n    [] + x\n){remark}")
+    );
+
+    assert_eq!(
+        plain(
+            format!("_handlerList = call(){remark}").as_bytes(),
+            QuotePreference::Double
+        ),
+        format!("_handlerList = (\n    call()\n){remark}")
+    );
+}
+
+#[test]
+fn a_bare_tuple_value_wider_than_the_line_takes_the_pair_one_element_to_a_line() {
+    let wide = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, bbbbbbbbbbbbbbbbbbbb";
+
+    assert_eq!(
+        plain(
+            format!("self._connection = host, HTTPSConnection({wide})\n").as_bytes(),
+            QuotePreference::Double
+        ),
+        format!("self._connection = (\n    host,\n    HTTPSConnection({wide}),\n)\n")
+    );
+
+    assert_eq!(
+        plain(
+            b"self._connection = host, HTTPSConnection(a)\n",
+            QuotePreference::Double
+        ),
+        "self._connection = host, HTTPSConnection(a)\n"
+    );
+
+    assert_eq!(
+        plain(
+            format!("p = q = host, HTTPSConnection({wide})\n").as_bytes(),
+            QuotePreference::Double
+        ),
+        format!("p = q = (\n    host,\n    HTTPSConnection({wide}),\n)\n")
+    );
+}
+
+#[test]
+fn a_remark_run_trailing_an_import_keeps_the_gap_the_source_gave_it() {
+    assert_eq!(
+        plain(
+            b"from a import b\n# one\n# two\n\nx = 1\n",
+            QuotePreference::Double
+        ),
+        "from a import b\n# one\n# two\n\nx = 1\n"
+    );
+
+    assert_eq!(
+        plain(b"from a import b\n# remark\nx = 1\n", QuotePreference::Double),
+        "from a import b\n\n# remark\nx = 1\n"
+    );
+
+    assert_eq!(
+        plain(b"from a import b\n# one\n\n# two\nx = 1\n", QuotePreference::Double),
+        "from a import b\n# one\n\n# two\nx = 1\n"
+    );
+}
+
+#[test]
+fn a_statement_a_redundant_semicolon_ends_owes_the_next_one_no_blank() {
+    assert_eq!(
+        plain(b"x = 1;\n\ny = 2\n", QuotePreference::Double),
+        "x = 1\ny = 2\n"
+    );
+
+    assert_eq!(
+        plain(b"x = 1; y = 2;\n\nz = 3\n", QuotePreference::Double),
+        "x = 1\ny = 2\nz = 3\n"
+    );
+
+    assert_eq!(
+        plain(b"def g():\n    x = 1;\n\n    y = 2\n", QuotePreference::Double),
+        "def g():\n    x = 1\n    y = 2\n"
+    );
+
+    assert_eq!(
+        plain(b"x = 1;\n\ndef f():\n    pass\n", QuotePreference::Double),
+        "x = 1\n\n\ndef f():\n    pass\n"
+    );
+
+    assert_eq!(
+        plain(b"from a import b;\n\nx = 1\n", QuotePreference::Double),
+        "from a import b\n\nx = 1\n"
+    );
+}
+
+#[test]
+fn a_stub_body_reads_through_the_semicolon_that_ends_it() {
+    assert_eq!(
+        plain(b"def f(): ...;\nx = 1\n", QuotePreference::Double),
+        "def f(): ...\n\n\nx = 1\n"
+    );
+
+    assert_eq!(
+        plain(b"def f():\n    ...;\nx = 1\n", QuotePreference::Double),
+        "def f(): ...\n\n\nx = 1\n"
+    );
+
+    assert_eq!(
+        plain(b"def f(): ...;  # r\nx = 1\n", QuotePreference::Double),
+        "def f(): ...  # r\n\n\nx = 1\n"
+    );
+
+    assert_eq!(
+        plain(b"def f(): ...; x = 1\n", QuotePreference::Double),
+        "def f():\n    ...\n    x = 1\n"
+    );
+}
+
+#[test]
+fn a_bare_tuple_statement_takes_the_pair_the_source_left_off() {
+    let wide = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    assert_eq!(
+        plain(b"call(a),\n", QuotePreference::Double),
+        "(call(a),)\n"
+    );
+
+    assert_eq!(
+        plain(b"call(a), other\n", QuotePreference::Double),
+        "call(a), other\n"
+    );
+
+    assert_eq!(
+        plain(
+            format!("call({wide}), other_{wide}\n").as_bytes(),
+            QuotePreference::Double
+        ),
+        format!("(\n    call({wide}),\n    other_{wide},\n)\n")
+    );
+
+    assert_eq!(
+        plain(
+            format!("del {wide}, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, ccccccccccccccccc\n").as_bytes(),
+            QuotePreference::Double
+        ),
+        format!("del {wide}, bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb, ccccccccccccccccc\n")
+    );
+}
+
+#[test]
+fn a_multiline_string_an_operator_follows_takes_the_pair_around_it() {
+    assert_eq!(
+        plain(b"x = \"\"\"\nabc\"\"\"\n", QuotePreference::Double),
+        "x = \"\"\"\nabc\"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(b"x = \"\"\"\nabc\"\"\" % name\n", QuotePreference::Double),
+        "x = (\n    \"\"\"\nabc\"\"\"\n    % name\n)\n"
+    );
+
+    assert_eq!(
+        plain(b"x = name + \"\"\"\nabc\"\"\"\n", QuotePreference::Double),
+        "x = (\n    name\n    + \"\"\"\nabc\"\"\"\n)\n"
+    );
+
+    assert_eq!(
+        plain(b"x = \"\"\"\nabc\"\"\" % (a, b)\n", QuotePreference::Double),
+        "x = \"\"\"\nabc\"\"\" % (a, b)\n"
+    );
+
+    assert_eq!(
+        plain(b"x = \"\"\"\nabc\"\"\".strip()\n", QuotePreference::Double),
+        "x = \"\"\"\nabc\"\"\".strip()\n"
+    );
+}
+
+#[test]
+fn a_format_string_joined_onto_a_plain_one_measures_at_its_joined_width() {
+    let source = concat!(
+        "class C:\n    _make.__func__.__doc__ = (f'Make a new {typename} object from a",
+        " sequence '\n                              'or iterable')\n"
+    );
+
+    let wanted = concat!(
+        "class C:\n    _make.__func__.__doc__ = f\"Make a new {typename} object from a",
+        " sequence or iterable\"\n"
+    );
+
+    assert_eq!(plain(source.as_bytes(), QuotePreference::Double), wanted);
+}
+
+#[test]
+fn a_triple_quoted_format_string_keeps_a_quote_that_ends_one_of_its_parts() {
+    assert_eq!(
+        plain(
+            b"script = f'''\n   tell application \"{name}\"\n   '''\n",
+            QuotePreference::Double
+        ),
+        "script = f'''\n   tell application \"{name}\"\n   '''\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"script = f'''\n   tell application\n   '''\n",
+            QuotePreference::Double
+        ),
+        "script = f\"\"\"\n   tell application\n   \"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"script = f'''\n   tell \"x\" here {name}\n   '''\n",
+            QuotePreference::Double
+        ),
+        "script = f\"\"\"\n   tell \"x\" here {name}\n   \"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"script = f'''\n   tell {d[\"k\"]} here\n   '''\n",
+            QuotePreference::Double
+        ),
+        "script = f\"\"\"\n   tell {d[\"k\"]} here\n   \"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"script = '''\n   tell application \"x\"\n   '''\n",
+            QuotePreference::Double
+        ),
+        "script = \"\"\"\n   tell application \"x\"\n   \"\"\"\n"
+    );
+}
+
+#[test]
+fn a_one_element_tuple_in_a_replacement_field_takes_the_pair() {
+    assert_eq!(
+        plain(b"x = f\"{a,}\"\n", QuotePreference::Double),
+        "x = f\"{(a,)}\"\n"
+    );
+
+    assert_eq!(
+        plain(b"x = f\"{a,:>10}\"\n", QuotePreference::Double),
+        "x = f\"{(a,):>10}\"\n"
+    );
+
+    assert_eq!(
+        plain(b"x = f\"{a,!r}\"\n", QuotePreference::Double),
+        "x = f\"{(a,)!r}\"\n"
+    );
+
+    assert_eq!(
+        plain(b"x = f\"{a, b}\"\n", QuotePreference::Double),
+        "x = f\"{a, b}\"\n"
+    );
+
+    assert_eq!(
+        plain(b"x = f\"{d[a, b]}\"\n", QuotePreference::Double),
+        "x = f\"{d[a, b]}\"\n"
+    );
+
+    assert_eq!(
+        plain(b"x = f\"{a,=}\"\n", QuotePreference::Double),
+        "x = f\"{a,=}\"\n"
+    );
+}
+
+#[test]
+fn an_operator_ahead_of_a_concatenation_keeps_the_line_the_first_part_opens() {
+    let source = concat!(
+        "f(\n    g(\"Manual porting required\") + \"\\n\"\n",
+        "    \"  Your migrations contained functions that must be manually \"\n",
+        "    \"copied over.\"\n)\n"
+    );
+
+    assert_eq!(plain(source.as_bytes(), QuotePreference::Double), source);
+
+    let tailed = concat!(
+        "raise E(\n    \"  * At least one of the expected database tables is missing.\\n\"\n",
+        "    \"Hint: Look at the output of 'django-admin sqlflush'. \"\n",
+        "    \"That's the SQL this command wasn't able to run.\"\n",
+        "    % (connection.settings_dict[\"NAME\"],)\n)\n"
+    );
+
+    assert_eq!(plain(tailed.as_bytes(), QuotePreference::Double), tailed);
+}
+
+#[test]
+fn a_format_string_part_records_the_element_level_a_plain_one_records() {
+    let source = concat!(
+        "f(\n    f\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n\"\n",
+        "    f\"  See the comment at the top of the squashed migration for details.\\n\"\n",
+        "    + black_warning,\n)\n"
+    );
+
+    assert_eq!(plain(source.as_bytes(), QuotePreference::Double), source);
+
+    assert_eq!(
+        plain(b"f(\n    f\"aaa\"\n    f\"bbb\"\n    + w,\n)\n", QuotePreference::Double),
+        "f(\n    f\"aaabbb\" + w,\n)\n"
+    );
+}
+
+#[test]
+fn a_wrap_head_inside_a_bracket_measures_from_the_element_it_stands_in() {
+    let source = concat!(
+        "d = {\n    \"__hash__\": default_hash,\n",
+        "    \"__str__\": lambda self: f\"{type(self).__name__}\",\n",
+        "    \"__fspath__\": lambda self: f\"{type(self).__name__}",
+        "/{self._extract_mock_name()}/{id(self)}\",\n}\n"
+    );
+
+    let wanted = concat!(
+        "d = {\n    \"__hash__\": default_hash,\n",
+        "    \"__str__\": lambda self: f\"{type(self).__name__}\",\n",
+        "    \"__fspath__\": lambda self: (\n        f\"{type(self).__name__}",
+        "/{self._extract_mock_name()}/{id(self)}\"\n    ),\n}\n"
+    );
+
+    assert_eq!(plain(source.as_bytes(), QuotePreference::Double), wanted);
+
+    let called = concat!(
+        "item = make_objecttreeitem(\n    str(key) + \" =\",\n    value,\n",
+        "    lambda value, key=key, object_=self.object: setattr(object_, key, value),\n)\n"
+    );
+
+    assert_eq!(plain(called.as_bytes(), QuotePreference::Double), called);
+}
+
+#[test]
+fn a_lambda_body_ends_where_the_comprehension_clause_after_it_opens() {
+    let source = concat!(
+        "g = f(\n    (\n        lambda addrinfo=addrinfo: self._connect_sock(exceptions,",
+        " addrinfo, laddr_infos)\n        for addrinfo in infos\n    ),\n    delay,\n)\n"
+    );
+
+    assert_eq!(plain(source.as_bytes(), QuotePreference::Double), source);
+
+    let awaited = concat!(
+        "async def q():\n    g = (\n        self._connect_sock(\n",
+        "            exceptions, addrinfo, laddr_infos, aaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        "        )\n        async for addrinfo in infos\n    )\n"
+    );
+
+    assert_eq!(plain(awaited.as_bytes(), QuotePreference::Double), awaited);
+}
+
+#[test]
+fn a_doubled_pair_of_grouping_parentheses_collapses_to_one() {
+    assert_eq!(
+        plain(b"def f():\n    if (a) or ((b)):\n        return\n", QuotePreference::Double),
+        "def f():\n    if (a) or (b):\n        return\n"
+    );
+
+    assert_eq!(
+        plain(b"x = (((a)))\n", QuotePreference::Double),
+        "x = a\n"
+    );
+
+    assert_eq!(plain(b"f((a))\n", QuotePreference::Double), "f((a))\n");
+
+    assert_eq!(
+        plain(
+            b"def f():\n    return \"%s=%s\" % ((quote(k, safe), quote(v, safe)))\n",
+            QuotePreference::Double
+        ),
+        "def f():\n    return \"%s=%s\" % ((quote(k, safe), quote(v, safe)))\n"
+    );
+}
+
+#[test]
+fn a_concatenation_the_head_cannot_hold_parts_from_its_operator() {
+    let held = concat!(
+        "def f():\n    self.assertTrue(\n        template_name in template_names,\n",
+        "        msg_prefix + \"Template '%s' was not a template used to render\"\n",
+        "        \" the response. Actual template(s) used: %s\"\n",
+        "        % (template_name, \", \".join(template_names)),\n    )\n"
+    );
+
+    assert_eq!(plain(held.as_bytes(), QuotePreference::Double), held);
+
+    let parted = concat!(
+        "x = Label(\n    self.frame,\n",
+        "    text=\"Key bindings are specified using Tkinter keysyms as\\n\"\n",
+        "    + \"in these samples: <Control-f>, <Shift-F2>, <F12>,\\n\"\n",
+        "    \"<Control-space>, <Meta-less>, <Control-Alt-Shift-X>.\\n\",\n)\n"
+    );
+
+    assert_eq!(plain(parted.as_bytes(), QuotePreference::Double), parted);
+}
+
+#[test]
+fn a_return_annotation_drops_the_pair_the_source_wrapped_it_in() {
+    let source = concat!(
+        "def iter_attrs() -> (\n    Iterable[Tuple[str, Any, Optional[Callable[[Any], str]],",
+        " Held, Moreeee]]\n):\n    pass\n"
+    );
+
+    let wanted = concat!(
+        "def iter_attrs() -> Iterable[\n    Tuple[str, Any, Optional[Callable[[Any], str]],",
+        " Held, Moreeee]\n]:\n    pass\n"
+    );
+
+    assert_eq!(plain(source.as_bytes(), QuotePreference::Double), wanted);
+
+    assert_eq!(
+        plain(b"def f() -> (int):\n    pass\n", QuotePreference::Double),
+        "def f() -> int:\n    pass\n"
+    );
+
+    assert_eq!(
+        plain(b"def f() -> (  # r\n    int\n):\n    pass\n", QuotePreference::Double),
+        "def f() -> (  # r\n    int\n):\n    pass\n"
+    );
+
+    assert_eq!(
+        plain(b"def f(\n    a,\n    b,\n):\n    pass\n", QuotePreference::Double),
+        "def f(\n    a,\n    b,\n):\n    pass\n"
+    );
+}
+
+#[test]
+fn only_a_definition_head_owes_the_magic_comma_its_line_opens_with() {
+    let chained = concat!(
+        "async def q():\n    async for s in SimpleModel.objects.prefetch_related(\n",
+        "        Prefetch(\"relatedmodel_set\", to_attr=\"prefetched_relatedmodel\")\n",
+        "    ).aiterator(chunk_size=2000):\n        pass\n"
+    );
+
+    assert_eq!(plain(chained.as_bytes(), QuotePreference::Double), chained);
+
+    assert_eq!(
+        plain(b"async def q(\n    a,\n    b,\n):\n    pass\n", QuotePreference::Double),
+        "async def q(\n    a,\n    b,\n):\n    pass\n"
+    );
+}
+
+#[test]
+fn a_parted_list_owes_its_separator_ahead_of_an_own_line_remark() {
+    assert_eq!(
+        plain(b"f(\n    a,\n    b\n    # remark\n)\n", QuotePreference::Double),
+        "f(\n    a,\n    b,\n    # remark\n)\n"
+    );
+
+    assert_eq!(
+        plain(b"f(\n    a,\n    b\n    # one\n    # two\n)\n", QuotePreference::Double),
+        "f(\n    a,\n    b,\n    # one\n    # two\n)\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"__all__ = [\n    \"walk\",\n    # Do not include _structure().\n]\n",
+            QuotePreference::Double
+        ),
+        "__all__ = [\n    \"walk\",\n    # Do not include _structure().\n]\n"
+    );
+
+    assert_eq!(
+        plain(b"x = [\n    a\n    # remark\n]\n", QuotePreference::Double),
+        "x = [\n    a\n    # remark\n]\n"
+    );
+}
+
+#[test]
+fn an_operator_after_a_concatenation_keeps_the_remark_that_rides_it() {
+    let held = concat!(
+        "f(\n    r\"(^[ \\t]*)\"  # at beginning\n",
+        "    r\"(?![ \\t]*(?:\" +  # not followed by\n    # pattern matching\n",
+        "    r\"|\".join(k for k in kw) + r\")\\b))\",\n    other,\n)\n"
+    );
+
+    let wanted = concat!(
+        "f(\n    r\"(^[ \\t]*)\"  # at beginning\n",
+        "    r\"(?![ \\t]*(?:\" +  # not followed by\n    # pattern matching\n",
+        "    r\"|\".join(k for k in kw) + r\")\\b))\",\n    other,\n)\n"
+    );
+
+    assert_eq!(plain(held.as_bytes(), QuotePreference::Double), wanted);
+
+    let lone = concat!(
+        "x = (\n    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa +  # remark\n",
+        "    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n)\n"
+    );
+
+    let parted = concat!(
+        "x = (\n    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  # remark\n",
+        "    + bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n)\n"
+    );
+
+    assert_eq!(plain(lone.as_bytes(), QuotePreference::Double), parted);
+}
+
+#[test]
+fn a_binary_value_leading_with_a_spanning_string_omits_the_pair_alone() {
+    let paired = concat!(
+        "def f():\n    if p:\n        result = result + \"\"\"\n<tr><td>%s</td>\"\"\"",
+        " % (cls, marginalia, gap)\n"
+    );
+
+    let wanted = concat!(
+        "def f():\n    if p:\n        result = (\n            result\n",
+        "            + \"\"\"\n<tr><td>%s</td>\"\"\"\n            % (cls, marginalia, gap)\n",
+        "        )\n"
+    );
+
+    assert_eq!(plain(paired.as_bytes(), QuotePreference::Double), wanted);
+
+    let bare = concat!(
+        "def f():\n    if p:\n        result = \"\"\"\n<tr><td>%s</td>\"\"\"",
+        " % (cls, marginalia, gap)\n"
+    );
+
+    assert_eq!(plain(bare.as_bytes(), QuotePreference::Double), bare);
+
+    let nested = concat!(
+        "def f():\n    if p:\n        result = result + self.section(\n",
+        "            \"MODULE REFERENCE\",\n            docloc\n            + \"\"\"\n\n",
+        "The following documentation is generated.\n\"\"\",\n        )\n"
+    );
+
+    assert_eq!(plain(nested.as_bytes(), QuotePreference::Double), nested);
+}
+
+#[test]
+fn a_docstring_holding_an_escaped_newline_keeps_every_line_it_was_given() {
+    assert_eq!(
+        plain(
+            b"def f():\n    \"\"\"head \\\n        rest.\n        tail.\n    \"\"\"\n",
+            QuotePreference::Double
+        ),
+        "def f():\n    \"\"\"head \\\n        rest.\n        tail.\n    \"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"def f():\n    '''head.\n        mid \\\\\n        rest.   \n    '''\n",
+            QuotePreference::Double
+        ),
+        "def f():\n    \"\"\"head.\n        mid \\\\\n        rest.   \n    \"\"\"\n"
+    );
+
+    assert_eq!(
+        plain(
+            b"def f():\n    \"\"\"head.\n        mid \\t dle.\n        tail.\n    \"\"\"\n",
+            QuotePreference::Double
+        ),
+        "def f():\n    \"\"\"head.\n    mid \\t dle.\n    tail.\n    \"\"\"\n"
+    );
+}
+
+#[test]
 fn a_single_quoted_docstring_is_requoted_and_reindented_together() {
     let source = b"def f():\n    '''doc\n        more\n      '''\n";
 
@@ -915,6 +1683,19 @@ fn a_single_quoted_docstring_is_requoted_and_reindented_together() {
             QuotePreference::Double
         ),
         "def f():\n    \"\"\"say \"hi\"\n    x\"\"\"\n"
+    );
+}
+
+#[test]
+fn a_dot_after_an_integer_keeps_the_space_that_makes_it_an_attribute() {
+    let source = b"x = 3 .real\ny = a . b\nz = (3).real\nw = 3.5.real\nv = 0x1 .real\n";
+
+    let held =
+        Tuned::reserve().formatted(source, LineEnding::LineFeed, true, QuotePreference::Double);
+
+    assert_eq!(
+        held,
+        "x = 3 .real\ny = a.b\nz = (3).real\nw = 3.5.real\nv = 0x1.real\n"
     );
 }
 
@@ -1063,6 +1844,415 @@ fn formatting_keeps_every_word_it_was_given() {
         let before = held.words(&source);
         let after = held.words(&formatted);
 
-        assert_eq!(before, after, "{name} split, joined, lost, or gained a word");
+        assert_eq!(
+            before, after,
+            "{name} split, joined, lost, or gained a word"
+        );
     }
+}
+
+#[test]
+fn a_statement_drops_the_parentheses_that_only_group_its_operand() {
+    const SOURCE: &[u8] = b"while (i > 0):\n    pass\nif (a and b):\n    pass\nelif (c):\n    pass\nassert (x), (y)\nfor (i, row) in (held):\n    pass\n";
+    const WANTED: &[u8] = b"while i > 0:\n    pass\nif a and b:\n    pass\nelif c:\n    pass\nassert x, y\nfor i, row in held:\n    pass\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_pair_the_grammar_wants_is_kept() {
+    const SOURCE: &[u8] = b"u = (v := 10)\n\n\ndef f():\n    return (a, b)\n    return (a,)\n    return ()\n    return (x for x in y)\n    return (a)[0]\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn a_pair_the_line_needs_back_is_kept() {
+    const SOURCE: &[u8] = b"def f():\n    if (aaaaaaaaaaaaaaaaaaaaaaaaa and bbbbbbbbbbbbbbbbbbbbbbbbbbbb and cccccccccccccccccccccc):\n        pass\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert!(
+        out.as_bytes()
+            .split(|byte| *byte == b'\n')
+            .all(|line| line.len() <= 88),
+        "{}",
+        String::from_utf8_lossy(out.as_bytes())
+    );
+}
+
+#[test]
+fn a_format_field_leaves_the_literal_a_value_the_parentheses_may_hold() {
+    const SOURCE: &[u8] = b"def f(context, name):\n    context[\"widget\"][\"attrs\"][\"aria-describedby\"] = f\"plain_{name}_value_that_is_long12\"\n";
+    const WANTED: &[u8] = b"def f(context, name):\n    context[\"widget\"][\"attrs\"][\"aria-describedby\"] = (\n        f\"plain_{name}_value_that_is_long12\"\n    )\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_bare_tuple_takes_the_parentheses_the_reference_writes_around_it() {
+    const SOURCE: &[u8] = b"__all__ = \"BaseProactorEventLoop\",\na = 1, 2\nb = 1,\nd = \"x\", \"y\",\n\n\ndef g():\n    return 1,\n\n\ndef h():\n    return bytes([1, 2, 3, 4]),\n";
+    const WANTED: &[u8] = b"__all__ = (\"BaseProactorEventLoop\",)\na = 1, 2\nb = (1,)\nd = (\n    \"x\",\n    \"y\",\n)\n\n\ndef g():\n    return (1,)\n\n\ndef h():\n    return (bytes([1, 2, 3, 4]),)\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_value_takes_the_parentheses_the_reference_writes_where_no_bracket_parts_it() {
+    const SOURCE: &[u8] = b"def f():\n    aaaaaaaaaaaaaaaaaaa = salted_hmac(key_salt, self.password, secret=secret, alg=\"x\").hex()\n    ccccccccccccccccccc = salted_hmac(key_salt, self.password, sec=secret).hexdigest().upper()\n    ddddddddddddddddddd = alpha.beta.gamma.delta.epsilon.zeta.eta.theta.iota.kappa.lambdaa.mu\n    ggggggggggggggggggg = await cls.get_model_class().objects.filter(expire=now()).adelete_now()\n    frame_no_here = ((time - self.start_time) * self.speed) / (self.interval / 1000.0) + off\n    response_ab_c = await sync_to_async(response.render, thread_sensitive=True_value_xyz)()\n    hhhhhhhhhhhhhhhhhhh = some_dictionary_name[\"a key that is long\"][\"another key here\"][\"m\"]\n";
+    const WANTED: &[u8] = b"def f():\n    aaaaaaaaaaaaaaaaaaa = salted_hmac(\n        key_salt, self.password, secret=secret, alg=\"x\"\n    ).hex()\n    ccccccccccccccccccc = (\n        salted_hmac(key_salt, self.password, sec=secret).hexdigest().upper()\n    )\n    ddddddddddddddddddd = (\n        alpha.beta.gamma.delta.epsilon.zeta.eta.theta.iota.kappa.lambdaa.mu\n    )\n    ggggggggggggggggggg = (\n        await cls.get_model_class().objects.filter(expire=now()).adelete_now()\n    )\n    frame_no_here = ((time - self.start_time) * self.speed) / (\n        self.interval / 1000.0\n    ) + off\n    response_ab_c = await sync_to_async(\n        response.render, thread_sensitive=True_value_xyz\n    )()\n    hhhhhhhhhhhhhhhhhhh = some_dictionary_name[\"a key that is long\"][\n        \"another key here\"\n    ][\"m\"]\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_header_takes_the_parentheses_its_condition_needs_and_closes_them_on_the_colon() {
+    const SOURCE: &[u8] = b"def f():\n    if caller_frame and not caller_frame.f_trace and caller_frame is not self.botframe_x:\n        pass\n    if some_object.attribute_one.attribute_two.attribute_three.attribute_four.attr_fivex:\n        pass\n    while some_dictionary[\"a key that is long\"][\"another key here\"][\"and one more key!!\"]:\n        pass\n    return long_call_name(argument_one, argument_two, argument_three_here), False_value_x\n";
+    const WANTED: &[u8] = b"def f():\n    if (\n        caller_frame\n        and not caller_frame.f_trace\n        and caller_frame is not self.botframe_x\n    ):\n        pass\n    if some_object.attribute_one.attribute_two.attribute_three.attribute_four.attr_fivex:\n        pass\n    while some_dictionary[\"a key that is long\"][\"another key here\"][\n        \"and one more key!!\"\n    ]:\n        pass\n    return long_call_name(\n        argument_one, argument_two, argument_three_here\n    ), False_value_x\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_word_that_opens_a_statement_takes_the_pair_its_own_operand_needs() {
+    const SOURCE: &[u8] = b"async def f():\n    assert some_object.attribute_one.attribute_two.attribute_three.attribute_four.attrxyz\n    assert some_object.attribute_one.attribute_two.attribute_three.attrxy, \"a message ok!\"\n    await some_object.attribute_one.attribute_two.attribute_three.attribute_four.attribxyz\n    with some_object.attribute_one.attribute_two.attribute_three.attribute_four.attribxyz:\n        pass\n    with GzipFile(filename=filename, mode=\"wb\", compresslevel=6, fileobj=buf) as zfile_ab:\n        pass\n";
+    const WANTED: &[u8] = b"async def f():\n    assert (\n        some_object.attribute_one.attribute_two.attribute_three.attribute_four.attrxyz\n    )\n    assert some_object.attribute_one.attribute_two.attribute_three.attrxy, (\n        \"a message ok!\"\n    )\n    await (\n        some_object.attribute_one.attribute_two.attribute_three.attribute_four.attribxyz\n    )\n    with (\n        some_object.attribute_one.attribute_two.attribute_three.attribute_four.attribxyz\n    ):\n        pass\n    with GzipFile(\n        filename=filename, mode=\"wb\", compresslevel=6, fileobj=buf\n    ) as zfile_ab:\n        pass\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_docstring_a_remark_stands_above_owes_the_remark_below_it_a_cap() {
+    const SOURCE: &[u8] = b"#!/bin/sh\n\"\"\"Doc.\"\"\"\n# a remark\n\n\nimport os\n";
+    const WANTED: &[u8] = b"#!/bin/sh\n\"\"\"Doc.\"\"\"\n# a remark\n\nimport os\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_join_takes_the_quote_that_spells_its_parts_with_the_fewest_backslashes() {
+    const SOURCE: &[u8] = b"def f(self, bits):\n    a = '\"count\" in %r tag expected exactly ' \"one keyword argument.\"\n    b = \"No handlers could be found for logger\" \" \\\"%s\\\"\\n\" % self.name\n    c = \"plain part one \" \"and plain part two\"\n";
+    const WANTED: &[u8] = b"def f(self, bits):\n    a = '\"count\" in %r tag expected exactly one keyword argument.'\n    b = 'No handlers could be found for logger \"%s\"\\n' % self.name\n    c = \"plain part one and plain part two\"\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_format_field_is_written_with_the_spacing_the_expression_it_holds_takes() {
+    const SOURCE: &[u8] = b"def f(a, b, ip_str, x, width, items):\n    p = f\"{a+1}\"\n    q = f\"{f(a,b)}\"\n    r = f\"{ip_str[:45]}({len(ip_str)-90} chars elided){ip_str[-45:]}\"\n    s = f\"{-a}\"\n    t = f\"{not a}\"\n    v = f\"{f(a=1,b=2)}\"\n    w = f\"{x=}\"\n    y = f\"{x!r}\"\n    z = f\"{x:{width}}\"\n    aa = f\"{a.b.c(d)[e]}\"\n    ac = f\"{ {'k': 1} }\"\n    ad = f\"{a**2}\"\n    ah = f\"{(lambda q: q+1)}\"\n    ai = f'{a<b and c>=d}'\n";
+    const WANTED: &[u8] = b"def f(a, b, ip_str, x, width, items):\n    p = f\"{a + 1}\"\n    q = f\"{f(a, b)}\"\n    r = f\"{ip_str[:45]}({len(ip_str) - 90} chars elided){ip_str[-45:]}\"\n    s = f\"{-a}\"\n    t = f\"{not a}\"\n    v = f\"{f(a=1, b=2)}\"\n    w = f\"{x=}\"\n    y = f\"{x!r}\"\n    z = f\"{x:{width}}\"\n    aa = f\"{a.b.c(d)[e]}\"\n    ac = f\"{ {'k': 1} }\"\n    ad = f\"{a**2}\"\n    ah = f\"{(lambda q: q + 1)}\"\n    ai = f\"{a < b and c >= d}\"\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_join_is_measured_with_the_separator_the_group_holding_it_owes() {
+    const SOURCE: &[u8] = b"held = {\n    \"key\": {\n        \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n        \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n    },\n}\n";
+    const WANTED: &[u8] = b"held = {\n    \"key\": {\n        \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n    },\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_join_the_separator_takes_past_the_width_parts_where_it_stands() {
+    const SOURCE: &[u8] = b"held = {\n    \"key\": {\n        \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n        \"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\n    },\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn a_remark_under_a_module_docstring_keeps_the_one_line_it_owes() {
+    const SOURCE: &[u8] = b"\"\"\"Doc.\"\"\"\n\n# note\n\n\nimport sys\n";
+    const WANTED: &[u8] = b"\"\"\"Doc.\"\"\"\n\n# note\n\nimport sys\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_pair_holding_a_product_is_no_unpacking_and_goes() {
+    const SOURCE: &[u8] = b"def f():\n    return (a * b)\n";
+    const WANTED: &[u8] = b"def f():\n    return a * b\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_remark_past_the_statement_keeps_the_pair_it_owes() {
+    const SOURCE: &[u8] = b"def g(new_args, field):\n    new_args[field] = (\n        \"X\" * 250\n    )  # a value that runs the line it stands on well past the width it answers to.\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn a_pair_whose_head_fits_goes_and_the_bracket_it_holds_parts() {
+    const SOURCE: &[u8] = b"def h():\n    cfile = (importlib.util.cache_from_source(fullname_value, optimization=option_value))\n";
+    const WANTED: &[u8] = b"def h():\n    cfile = importlib.util.cache_from_source(fullname_value, optimization=option_value)\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_pair_whose_head_runs_past_the_width_stays() {
+    const SOURCE: &[u8] = b"def i(task_backends):\n    if True:\n        task_backends._settings = task_backends.settings = (\n            task_backends.configure_settings(None)\n        )\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn an_import_list_takes_the_parentheses_the_width_needs_and_no_others() {
+    const SOURCE: &[u8] = b"from _csv import Error, writer, reader, register_dialect, unregister_dialect, get_dialect\nfrom x import (a, b)\n";
+    const WANTED: &[u8] = b"from _csv import (\n    Error,\n    writer,\n    reader,\n    register_dialect,\n    unregister_dialect,\n    get_dialect,\n)\nfrom x import a, b\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn an_import_list_of_one_name_takes_the_separator_it_parts_with() {
+    const SOURCE: &[u8] = b"def f():\n    if True:\n        if True:\n            if True:\n                if True:\n                    if True:\n                        if True:\n                            if True:\n                                from pip._vendor.rich._win32_console import LegacyWindowsTerm\n";
+    const WANTED: &[u8] = b"def f():\n    if True:\n        if True:\n            if True:\n                if True:\n                    if True:\n                        if True:\n                            if True:\n                                from pip._vendor.rich._win32_console import (\n                                    LegacyWindowsTerm,\n                                )\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_dict_entrys_break_goes_into_the_value_the_key_leaves_room_for() {
+    const SOURCE: &[u8] = b"d = {\n    \"%s__pkXXX\" % self.content_type_field_name: ContentType.objects.db_manager(usingxxxx),\n    \"%s__inXX\" % GeoColumn.table_name_col(): [\"gis_neighborhoodxxx\", \"gis_householdxxxx\"],\n    \"_prefetch_related_val_%sXX\" % f.attnamex: \"%s.%s\" % (qn(join_table), qn(source_col)),\n    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaXX\" % bbbbbbbbbbbbbbbbbbbbbbbbb: cc,\n    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaXXX\" % bbbbbbbbbbbbbbbbbbbbbbbbb: ccccccccccccccccccccc,\n}\n";
+    const WANTED: &[u8] = b"d = {\n    \"%s__pkXXX\" % self.content_type_field_name: ContentType.objects.db_manager(\n        usingxxxx\n    ),\n    \"%s__inXX\" % GeoColumn.table_name_col(): [\n        \"gis_neighborhoodxxx\",\n        \"gis_householdxxxx\",\n    ],\n    \"_prefetch_related_val_%sXX\" % f.attnamex: \"%s.%s\"\n    % (qn(join_table), qn(source_col)),\n    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaXX\"\n    % bbbbbbbbbbbbbbbbbbbbbbbbb: cc,\n    \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaXXX\"\n    % bbbbbbbbbbbbbbbbbbbbbbbbb: ccccccccccccccccccccc,\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_trailing_remark_run_past_a_closed_block_takes_the_gap_the_source_wrote() {
+    const SOURCE: &[u8] = b"if x:\n\n    def held():\n        return 1\n\nelse:\n\n    def held():\n        return 2\n\n#\n# a run the blank below detaches\n#\n\nclass S:\n    pass\n\n\ndef other():\n    return 3\n\n# a run that leads the statement below\ny = 2\n";
+    const WANTED: &[u8] = b"if x:\n\n    def held():\n        return 1\n\nelse:\n\n    def held():\n        return 2\n\n#\n# a run the blank below detaches\n#\n\n\nclass S:\n    pass\n\n\ndef other():\n    return 3\n\n\n# a run that leads the statement below\ny = 2\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn an_element_a_remark_defers_opens_its_groups_at_an_f_string_too() {
+    const SOURCE: &[u8] =
+        b"a = [\n    (x, y),\n    # a remark\n    f\"aaa\" if PYPY else \"0-0-0\",\n]\n";
+
+    const WANTED: &[u8] =
+        b"a = [\n    (x, y),\n    # a remark\n    f\"aaa\" if PYPY else \"0-0-0\",\n]\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_target_list_takes_the_pair_the_values_own_wrap_leaves_no_room_for() {
+    const SOURCE: &[u8] = b"class C:\n    def f(self, chunk):\n        try:\n            wFormatTag, self._nchannels, self._framerate, dwAvgBytesPerSec, wBlockAlign = struct.unpack_from(\"<HHLLH\", chunk.read(14))\n        except struct.error:\n            raise EOFError from None\n        wFormatTag, self._nchannels, wBlockAlign = struct.unpack_from(\"<HHLLH\", chunk)\n";
+    const WANTED: &[u8] = b"class C:\n    def f(self, chunk):\n        try:\n            (\n                wFormatTag,\n                self._nchannels,\n                self._framerate,\n                dwAvgBytesPerSec,\n                wBlockAlign,\n            ) = struct.unpack_from(\"<HHLLH\", chunk.read(14))\n        except struct.error:\n            raise EOFError from None\n        wFormatTag, self._nchannels, wBlockAlign = struct.unpack_from(\"<HHLLH\", chunk)\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_unary_prefixs_power_operand_takes_the_parentheses() {
+    const SOURCE: &[u8] = b"a = -2**31\nb = ~a ** 2\nc = -256 ** (digits - 1)\nd = -(-1) ** self._sign\ne = 2**31\nf = a**-b\ng = -2**31 + 1\nh = not a**2\n";
+    const WANTED: &[u8] = b"a = -(2**31)\nb = ~(a**2)\nc = -(256 ** (digits - 1))\nd = -((-1) ** self._sign)\ne = 2**31\nf = a**-b\ng = -(2**31) + 1\nh = not (a**2)\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_targets_last_bracket_parts_where_the_values_own_head_runs_past_the_width() {
+    const SOURCE: &[u8] = b"obj.fields[\"groups\"].help_text = \"These groups give the users the different rights they hold\"\nobj.fieldsandmore[\"groups\"] = \"These groups give the users the different rights they hold\"\nobj.fields[\"action\"].choices = self.get_the_action_choices_for_this_given_location(request)\nobj.fields[\"action\"].choices = self.get_the_action_choices_for_this_given_location_and_more(request)\n";
+    const WANTED: &[u8] = b"obj.fields[\n    \"groups\"\n].help_text = \"These groups give the users the different rights they hold\"\nobj.fieldsandmore[\"groups\"] = (\n    \"These groups give the users the different rights they hold\"\n)\nobj.fields[\"action\"].choices = self.get_the_action_choices_for_this_given_location(\n    request\n)\nobj.fields[\n    \"action\"\n].choices = self.get_the_action_choices_for_this_given_location_and_more(request)\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_chains_pair_stands_at_the_last_target_whose_own_head_fits() {
+    const SOURCE: &[u8] = b"self.hideid = self.keypressid = self.listupdateid = self.winconfigid = self.keyreleaseid = self.doubleclickid = None\nreal_test_settings[\"USER\"] = real_settings[\"USER\"] = test_settings[\"USER\"] = (\n    self.connection.settings_dict[\"USER\"]\n) = parameters[\"user\"]\n";
+    const WANTED: &[u8] = b"self.hideid = self.keypressid = self.listupdateid = self.winconfigid = (\n    self.keyreleaseid\n) = self.doubleclickid = None\nreal_test_settings[\"USER\"] = real_settings[\"USER\"] = test_settings[\n    \"USER\"\n] = self.connection.settings_dict[\"USER\"] = parameters[\"user\"]\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(ARENA_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
 }

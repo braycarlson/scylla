@@ -130,8 +130,8 @@ pub fn classify(
         let offset = token.offset as usize;
         let end = token.end() as usize;
         let limit = operator_limit_of(tokens, position, count_of(end));
-        let mut cursor = offset;
-        let mut stop = offset;
+        let mut cursor = offset.max(out.end_previous() as usize);
+        let mut stop = cursor;
 
         for _ in 0..=(end - offset) {
             let (kind, reach) = kind_of(&source[..limit as usize], token.kind, cursor, end);

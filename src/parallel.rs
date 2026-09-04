@@ -131,7 +131,12 @@ mod tests {
         let values = striped(COUNT_SERIAL_MAX, |index| index);
 
         assert_eq!(count_of(values.len()), COUNT_SERIAL_MAX);
-        assert!(values.iter().enumerate().all(|(at, held)| count_of(at) == *held));
+        assert!(
+            values
+                .iter()
+                .enumerate()
+                .all(|(at, held)| count_of(at) == *held)
+        );
     }
 
     #[test]

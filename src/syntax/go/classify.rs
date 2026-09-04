@@ -112,8 +112,8 @@ pub fn classify(
         }
 
         let limit = operator_limit_of(tokens, position, count_of(end));
-        let mut cursor = offset;
-        let mut stop = offset;
+        let mut cursor = offset.max(out.end_previous() as usize);
+        let mut stop = cursor;
 
         for _ in 0..=(end - offset) {
             let (kind, reach) = kind_of(&source[..limit as usize], token.kind, cursor, end);
@@ -371,6 +371,43 @@ mod tests {
     fn every_operator_reaches_its_kind_through_the_match() {
         for entry in &OPERATORS {
             assert_eq!(operator_join(entry.0, 0), (entry.1, entry.0.len()));
+        }
+    }
+
+    #[test]
+    fn a_kind_never_names_more_bytes_than_its_token_was_given() {
+        use crate::language::Lexer as _;
+        use crate::lex::GO;
+
+        const SOURCES: [&[u8]; 4] = [
+            b"package i\nfunc f() {\n\tm<<-l\n}\n",
+            b"package i\nfunc f() {\n\tm<<--l\n}\n",
+            b"package i\nfunc f() {\n\tm<--l\n}\n",
+            b"package i\nfunc f() {\n\tm&^^=l\n}\n",
+        ];
+
+        for source in SOURCES {
+            let mut lexed = Tokens::reserve(1 << 12);
+            let mut out = Tokens::reserve(1 << 12);
+            let mut raw = BoundedVec::reserve(1 << 12);
+
+            GO.lex(source, &mut lexed);
+
+            assert!(classify(source, lexed.as_slice(), &mut out, &mut raw));
+
+            for (token, kind) in out.as_slice().iter().zip(raw.iter()) {
+                let Some(entry) = OPERATORS.iter().find(|entry| entry.1 == *kind) else {
+                    continue;
+                };
+
+                assert_eq!(
+                    token.text(source),
+                    entry.0,
+                    "{} classified {:?} as {kind:?}",
+                    String::from_utf8_lossy(source),
+                    String::from_utf8_lossy(token.text(source))
+                );
+            }
         }
     }
 }

@@ -399,8 +399,7 @@ fn gaps_are_blank(source: &[u8], tokens: &[Token], name: &str) {
     );
 
     assert_eq!(
-        end_previous,
-        length,
+        end_previous, length,
         "{name} leaves bytes past its last gap"
     );
 }
@@ -443,8 +442,7 @@ fn invariants_hold(machine: &Machine, name: &str) {
             let held = walk[child as usize];
 
             assert_eq!(
-                held.parent,
-                index,
+                held.parent, index,
                 "{name}: node {child} disowns its parent"
             );
 
@@ -741,6 +739,59 @@ fn the_normalized_walk_matches_the_goldens() {
 }
 
 #[test]
+fn the_statement_census_matches_the_corpus_goldens() {
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    let found = corpus();
+
+    if found.is_empty() {
+        return;
+    }
+
+    let carried = oracle::residue_of("residue-go.json", &NOT_GO);
+    let mut abstained = 0;
+    let mut machine = Machine::reserve();
+    let mut compared = 0;
+
+    for fixture in &found {
+        if carried.contains(&fixture.name) {
+            continue;
+        }
+
+        let Some(golden) = oracle::golden(&held, &fixture.name) else {
+            abstained += 1;
+
+            continue;
+        };
+
+        if golden.broken {
+            abstained += 1;
+
+            continue;
+        }
+
+        let _ = machine.parse(&fixture.source);
+
+        assert_eq!(
+            machine.census(),
+            census_of(&golden.ast),
+            "{} counts its statements differently",
+            fixture.name
+        );
+
+        compared += 1;
+    }
+
+    assert!(
+        compared >= floor::CORPUS_CENSUS_GO,
+        "the corpus lost its Go files: {compared} counted, {abstained} abstained, floor {}",
+        floor::CORPUS_CENSUS_GO
+    );
+}
+
+#[test]
 fn the_normalized_walk_matches_the_corpus_goldens() {
     let Some(held) = corpus::golden() else {
         return;
@@ -815,10 +866,61 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
 }
 
 #[test]
+fn a_long_else_if_chain_parses_without_exhausting_the_nesting_bound() {
+    let mut source = b"package p\n\nfunc run(x int) {\n\tif x == 0 {\n".to_vec();
+
+    for arm in 1..400 {
+        source.extend_from_slice(format!("\t}} else if x == {arm} {{\n").as_bytes());
+    }
+
+    source.extend_from_slice(b"\t}\n}\n");
+
+    let mut machine = Machine::reserve();
+
+    assert_eq!(machine.parse(&source), Structure::Complete);
+    assert!(machine.tree.errors().is_empty());
+}
+
+#[test]
+fn a_declaration_without_a_name_is_an_error() {
+    const SOURCES: [&[u8]; 5] = [
+        b"package p\nfunc",
+        b"package p\nfunc {}",
+        b"package p\ntype",
+        b"package p\nconst",
+        b"package p\nvar",
+    ];
+
+    let mut machine = Machine::reserve();
+
+    for source in SOURCES {
+        machine.parse(source);
+
+        assert!(
+            !machine.tree.errors().is_empty(),
+            "{:?} parsed without an error",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn an_unterminated_block_comment_is_an_error() {
+    let mut machine = Machine::reserve();
+
+    machine.parse(b"package p\n/*");
+
+    assert!(!machine.tree.errors().is_empty());
+
+    machine.parse(b"package p\n/* held */\n");
+
+    assert!(machine.tree.errors().is_empty());
+}
+
+#[test]
 fn every_residue_row_names_a_file_that_diverges() {
     let carried = oracle::residue_of("residue-go.json", &EVERY_CATEGORY);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-go");
-
     let mut machine = Machine::reserve();
     let mut named = Vec::new();
 

@@ -353,8 +353,7 @@ impl Machine {
             return None;
         }
 
-        let held =
-            scope.kind != ScopeKind::Class && self.class_owner(index) != scylla::tree::NONE;
+        let held = scope.kind != ScopeKind::Class && self.class_owner(index) != scylla::tree::NONE;
 
         Some(if held { "f" } else { "g" })
     }
@@ -881,8 +880,7 @@ fn gaps_are_blank(source: &[u8], tokens: &[Token], name: &str) {
     );
 
     assert_eq!(
-        end_previous,
-        length,
+        end_previous, length,
         "{name} leaves bytes past its last gap"
     );
 }
@@ -1183,8 +1181,7 @@ fn invariants_hold(machine: &Machine, name: &str) {
             let held = walk[child as usize];
 
             assert_eq!(
-                held.parent,
-                index,
+                held.parent, index,
                 "{name}: node {child} disowns its parent"
             );
 
@@ -1283,6 +1280,45 @@ fn report(name: &str, held: &[(String, u32, u32)], wanted: &[(String, u32, u32)]
     }
 
     lines
+}
+
+#[test]
+fn an_operator_without_the_operands_it_owes_is_an_error() {
+    const SOURCES: [&[u8]; 8] = [b"/", b"*", b"<", b"==", b"1 +", b"x /", b"/ x", b"x =="];
+
+    const WHOLE: [&[u8]; 9] = [
+        b"x = 1 + 2\n",
+        b"y = -1\n",
+        b"z = not a\n",
+        b"w = a if b else c\n",
+        b"v = a < b < c\n",
+        b"u = 3 .real\n",
+        b"t = 3.5.real\n",
+        b"s = 0x1 .real\n",
+        b"r = 3j.real\n",
+    ];
+
+    let mut machine = Machine::reserve();
+
+    for source in SOURCES {
+        machine.parse(source);
+
+        assert!(
+            !machine.tree.errors().is_empty(),
+            "{:?} parsed without an error",
+            String::from_utf8_lossy(source)
+        );
+    }
+
+    for source in WHOLE {
+        machine.parse(source);
+
+        assert!(
+            machine.tree.errors().is_empty(),
+            "{:?} reported an error",
+            String::from_utf8_lossy(source)
+        );
+    }
 }
 
 #[test]
@@ -1507,8 +1543,7 @@ fn the_scope_tables_match_the_goldens() {
         let held = machine.scopes(&fixture.source);
 
         assert_eq!(
-            held,
-            golden.scopes,
+            held, golden.scopes,
             "{} binds its scopes differently",
             fixture.name
         );

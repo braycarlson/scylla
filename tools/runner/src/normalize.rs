@@ -1,9 +1,12 @@
+pub type Trim = fn(&[u8], &[(u32, u32)], u32, u32) -> u32;
+
 pub struct Normalizer {
     pub comments: &'static [&'static str],
     pub drops_empty: bool,
     pub root: &'static str,
     pub root_starts_at_zero: bool,
     pub skipped: &'static [&'static str],
+    pub trims: Trim,
     pub unrepresented: &'static [&'static str],
 }
 
@@ -26,6 +29,7 @@ pub const CSS: Normalizer = Normalizer {
     root: "stylesheet",
     root_starts_at_zero: true,
     skipped: &SKIPPED,
+    trims: abutting,
     unrepresented: &["comment", "escape_sequence", "js_comment", "string_content"],
 };
 
@@ -35,6 +39,7 @@ pub const JAVASCRIPT: Normalizer = Normalizer {
     root: "program",
     root_starts_at_zero: false,
     skipped: &SKIPPED,
+    trims: scripted,
     unrepresented: &SCRIPT_UNREPRESENTED,
 };
 
@@ -44,6 +49,7 @@ pub const ODIN: Normalizer = Normalizer {
     root: "source_file",
     root_starts_at_zero: true,
     skipped: &SKIPPED,
+    trims: spanning,
     unrepresented: &[
         "block_comment",
         "comment",
@@ -58,6 +64,7 @@ pub const TYPESCRIPT: Normalizer = Normalizer {
     root: "program",
     root_starts_at_zero: false,
     skipped: &SKIPPED,
+    trims: scripted,
     unrepresented: &SCRIPT_UNREPRESENTED,
 };
 
@@ -120,7 +127,7 @@ impl Normalizer {
             found.push((
                 row.0.clone(),
                 row.1,
-                trimmed(source, &comments, row.1, row.2),
+                (self.trims)(source, &comments, row.1, row.2),
             ));
         }
 
@@ -130,13 +137,11 @@ impl Normalizer {
     }
 }
 
-fn trimmed(source: &[u8], comments: &[(u32, u32)], offset: u32, end: u32) -> u32 {
+fn abutting(source: &[u8], comments: &[(u32, u32)], offset: u32, end: u32) -> u32 {
     let mut held = end;
 
     for _ in 0..=comments.len() {
-        while held > offset && source[held as usize - 1].is_ascii_whitespace() {
-            held -= 1;
-        }
+        held = blank(source, offset, held);
 
         let found = comments
             .iter()
@@ -147,6 +152,62 @@ fn trimmed(source: &[u8], comments: &[(u32, u32)], offset: u32, end: u32) -> u32
         };
 
         held = comment.0;
+    }
+
+    held
+}
+
+fn spanning(source: &[u8], comments: &[(u32, u32)], offset: u32, end: u32) -> u32 {
+    let mut held = end;
+
+    for _ in 0..=comments.len() {
+        held = blank(source, offset, held);
+
+        let found = comments
+            .iter()
+            .find(|comment| comment.1 >= held && comment.0 < held && comment.0 > offset);
+
+        let Some(comment) = found else {
+            break;
+        };
+
+        held = comment.0;
+    }
+
+    held
+}
+
+fn scripted(source: &[u8], comments: &[(u32, u32)], offset: u32, end: u32) -> u32 {
+    let mut held = end;
+    let mut cut = false;
+
+    for _ in 0..=comments.len() {
+        let back = blank(source, offset, held);
+
+        let found = comments
+            .iter()
+            .find(|comment| comment.1 == back && comment.0 > offset);
+
+        let Some(comment) = found else {
+            break;
+        };
+
+        cut = true;
+        held = comment.0;
+    }
+
+    if !cut {
+        return held;
+    }
+
+    blank(source, offset, held)
+}
+
+fn blank(source: &[u8], offset: u32, end: u32) -> u32 {
+    let mut held = end;
+
+    while held > offset && source[held as usize - 1].is_ascii_whitespace() {
+        held -= 1;
     }
 
     held
@@ -247,5 +308,21 @@ mod tests {
         let held = ODIN.wanted(source, 4, &rows(&[("field", 1, 4)]));
 
         assert_eq!(held, rows(&[("field", 1, 1)]));
+    }
+
+    #[test]
+    fn a_script_span_keeps_the_blanks_it_ends_on_because_they_are_its_own_text() {
+        let source = b"<p>held </p>";
+        let held = JAVASCRIPT.wanted(source, 12, &rows(&[("jsx_text", 3, 8)]));
+
+        assert_eq!(held, rows(&[("jsx_text", 3, 8)]));
+    }
+
+    #[test]
+    fn a_span_a_comment_runs_past_is_still_pulled_back_off_that_comment() {
+        let source = b"{\n    x := 1\n    // held\n}\n";
+        let held = ODIN.wanted(source, 27, &rows(&[("block", 6, 20), ("comment", 17, 24)]));
+
+        assert_eq!(held, rows(&[("block", 6, 12)]));
     }
 }

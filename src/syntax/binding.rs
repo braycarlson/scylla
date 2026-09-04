@@ -301,6 +301,7 @@ fn javascript_binding(held: &javascript::Binding) -> Binding {
         javascript::BindingKind::Class
         | javascript::BindingKind::Enum
         | javascript::BindingKind::Interface
+        | javascript::BindingKind::MappedKey
         | javascript::BindingKind::TypeAlias
         | javascript::BindingKind::TypeParameter => BindingClass::Type,
         javascript::BindingKind::Const => BindingClass::Constant,

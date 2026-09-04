@@ -142,6 +142,14 @@ impl Frame {
     }
 }
 
+pub const fn operands_of(variant: Variant) -> u32 {
+    match variant {
+        Variant::Binary => 2,
+        Variant::Unary => 1,
+        Variant::Call | Variant::Composite | Variant::Index | Variant::Paren | Variant::Top => 0,
+    }
+}
+
 pub fn infix_of(kind: GoKind) -> Option<(u8, u8)> {
     INFIX
         .iter()

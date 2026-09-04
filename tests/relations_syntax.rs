@@ -1,12 +1,14 @@
+#[path = "common/corpus.rs"]
+mod corpus;
 #[path = "common/floor.rs"]
 mod floor;
 
 use std::path::{Path, PathBuf};
 
-const ERROR_COUNT_MAX: u32 = 1 << 10;
-const EVENT_COUNT_MAX: u32 = 1 << 19;
-const NODE_COUNT_MAX: u32 = 1 << 16;
-const TOKEN_COUNT_MAX: u32 = 1 << 16;
+const ERROR_COUNT_MAX: u32 = 1 << 12;
+const EVENT_COUNT_MAX: u32 = 1 << 21;
+const NODE_COUNT_MAX: u32 = 1 << 18;
+const TOKEN_COUNT_MAX: u32 = 1 << 18;
 
 struct Fixture {
     name: String,
@@ -35,6 +37,30 @@ fn fixtures(directory: &str, extension: &str) -> Vec<Fixture> {
                 .replace('\\', "/"),
 
             source: std::fs::read(&path).expect("a collected fixture is readable"),
+        })
+        .collect()
+}
+
+fn corpus_files(extension: &str) -> Vec<Fixture> {
+    let Some(root) = corpus::root() else {
+        return Vec::new();
+    };
+
+    let mut found = Vec::new();
+
+    collect(&root, extension, &mut found);
+    found.sort();
+
+    found
+        .into_iter()
+        .map(|path| Fixture {
+            name: path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/"),
+
+            source: std::fs::read(&path).unwrap_or_default(),
         })
         .collect()
 }
@@ -143,7 +169,7 @@ macro_rules! relations {
     ) => {
         mod $module {
             use super::{ERROR_COUNT_MAX, EVENT_COUNT_MAX, NODE_COUNT_MAX, TOKEN_COUNT_MAX};
-            use super::{fixtures, floor, windows};
+            use super::{corpus_files, fixtures, floor, windows};
 
             use scylla::bounded::BoundedVec;
             use scylla::language::Lexer as _;
@@ -191,6 +217,117 @@ macro_rules! relations {
                 }
             }
 
+            fn walk_checked(source: &[u8]) -> Option<Walk> {
+                let mut lexed = Tokens::reserve(TOKEN_COUNT_MAX);
+                let mut tokens = Tokens::reserve(TOKEN_COUNT_MAX);
+                let mut raw = BoundedVec::<$kind>::reserve(TOKEN_COUNT_MAX);
+                let mut events = Events::reserve(EVENT_COUNT_MAX);
+                let mut tree = Tree::<$kind>::reserve(NODE_COUNT_MAX, ERROR_COUNT_MAX);
+
+                if $lexer.lex(source, &mut lexed) != scylla::token::Lex::Complete {
+                    return None;
+                }
+
+                if !$classify(source, lexed.as_slice(), &mut tokens, &mut raw) {
+                    return None;
+                }
+
+                $parse(source, tokens.as_slice(), &raw, &mut events, &mut tree);
+
+                if !tree.errors().is_empty() {
+                    return None;
+                }
+
+                let held = tokens.as_slice();
+
+                Some(Walk {
+                    kinds: tree
+                        .as_slice()
+                        .iter()
+                        .map(|node| node.kind.name())
+                        .collect(),
+                    spans: tree
+                        .as_slice()
+                        .iter()
+                        .map(|node| {
+                            let span = node.span(held);
+
+                            (span.offset, span.length)
+                        })
+                        .collect(),
+                    tokens: held.len(),
+                })
+            }
+
+            #[test]
+            fn the_relations_hold_over_the_corpus() {
+                if crate::corpus::root().is_none() {
+                    return;
+                }
+
+                let width = u32::try_from($note.len()).expect("the note is short");
+                let mut compared = 0;
+
+                for fixture in &corpus_files($extension) {
+                    let Some(plain) = walk_checked(&fixture.source) else {
+                        continue;
+                    };
+
+                    compared += 1;
+
+                    let shebanged = fixture.source[scylla::scan::mark_width(&fixture.source)..]
+                        .starts_with(b"#!");
+
+                    if !shebanged {
+                        let mut noted = Vec::with_capacity(fixture.source.len() + $note.len());
+
+                        noted.extend_from_slice($note);
+                        noted.extend_from_slice(&fixture.source);
+
+                        if let Some(carried) = walk_checked(&noted) {
+                            assert_eq!(
+                                plain.kinds, carried.kinds,
+                                "{}: the note changed the node kinds",
+                                fixture.name
+                            );
+
+                            for (index, (before, after)) in plain
+                                .spans
+                                .iter()
+                                .zip(carried.spans.iter())
+                                .enumerate()
+                                .skip(1)
+                            {
+                                assert_eq!(
+                                    (before.0 + width, before.1),
+                                    *after,
+                                    "{}: node {index} did not shift behind the note",
+                                    fixture.name
+                                );
+                            }
+                        }
+                    }
+
+                    let texted = plain.kinds.iter().any(|held| held.starts_with("jsx"));
+
+                    if !fixture.source.contains(&b'\r') && !texted {
+                        if let Some(carried) = walk_checked(&windows(&fixture.source)) {
+                            assert_eq!(
+                                plain.kinds, carried.kinds,
+                                "{}: the line endings changed the node kinds",
+                                fixture.name
+                            );
+                        }
+                    }
+                }
+
+                assert!(
+                    compared >= floor::$floor.corpus,
+                    "{compared} corpus files walked, floor {}",
+                    floor::$floor.corpus
+                );
+            }
+
             #[test]
             fn a_comment_at_the_head_shifts_the_spans_and_adds_no_node() {
                 let width = u32::try_from($note.len()).expect("the note is short");
@@ -206,8 +343,7 @@ macro_rules! relations {
                     let carried = walk(&noted);
 
                     assert_eq!(
-                        plain.kinds,
-                        carried.kinds,
+                        plain.kinds, carried.kinds,
                         "{}: the note changed the node kinds",
                         fixture.name
                     );
@@ -348,8 +484,7 @@ macro_rules! relations {
                     let carried = walk(&windows(&fixture.source));
 
                     assert_eq!(
-                        plain.kinds,
-                        carried.kinds,
+                        plain.kinds, carried.kinds,
                         "{}: the carriage returns changed the node kinds",
                         fixture.name
                     );

@@ -15,9 +15,9 @@
     "reason": "The file nests `@container (max-width: 224px) { ... }` inside a rule's block. tree-sitter-css 0.23 predates container queries and cannot read a bare `feature_query` as an `at_rule`'s only query in block position, so it reports an ERROR over `(max-width: 224px)` and the oracle has no walk to compare against."
   },
   {
-    "fixture": "zod/packages/docs/app/global.css",
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/view.summarized.css",
     "category": "grammar",
-    "reason": "The file writes `@source '../node_modules/fumadocs-ui/dist/**/*.js';`, a Tailwind 4 at-rule whose only argument is a string. tree-sitter-css 0.23 accepts neither a string as an `at_rule` query nor a `postcss_statement` in top-level position, so it reports an ERROR that runs from the terminating semicolon into the next rule and the oracle has no walk to compare against."
+    "reason": "The file is one of Copilot's summarized prompt fixtures, which write `{…}` for an elided body. The horizontal ellipsis is a valid CSS identifier code point, so the block holds a lone name and no colon; the CSS Syntax specification recovers from that by dropping the declaration, which is what scylla does, while tree-sitter-css reports an ERROR over the ellipsis and the oracle has no walk to compare against. postcss refuses the file outright on `Unknown word …`, so the runner's arbiter cannot clear the row either."
   },
   {
     "fixture": "vscode/src/vs/platform/files/test/node/fixtures/service/some_utf16le.css",
@@ -43,5 +43,10 @@
     "fixture": "vscode/src/vs/workbench/services/textfile/test/node/encoding/fixtures/some_utf16le.css",
     "category": "not-css",
     "reason": "The file is a UTF-16 encoding fixture for the editor file service: every other byte is a NUL from the two-byte code units, so the bytes are not a UTF-8 CSS source at all. The lexer reports an error token on the first NUL, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "zod/packages/docs/app/global.css",
+    "category": "grammar",
+    "reason": "The file writes `@source '../node_modules/fumadocs-ui/dist/**/*.js';`, a Tailwind 4 at-rule whose only argument is a string. tree-sitter-css 0.23 accepts neither a string as an `at_rule` query nor a `postcss_statement` in top-level position, so it reports an ERROR that runs from the terminating semicolon into the next rule and the oracle has no walk to compare against."
   }
 ]

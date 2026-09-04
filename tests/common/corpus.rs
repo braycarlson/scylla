@@ -7,6 +7,10 @@ use std::path::PathBuf;
 
 const REQUIRED: &str = "SCYLLA_CORPUS_REQUIRED";
 
+pub(crate) fn css() -> Option<PathBuf> {
+    named("SCYLLA_CORPUS_CSS")
+}
+
 pub(crate) fn golden() -> Option<PathBuf> {
     named("SCYLLA_CORPUS_GOLDEN")
 }
@@ -27,8 +31,36 @@ pub(crate) fn root() -> Option<PathBuf> {
     named("SCYLLA_CORPUS")
 }
 
+pub(crate) fn stride() -> usize {
+    std::env::var("SCYLLA_CORPUS_STRIDE")
+        .ok()
+        .and_then(|held| held.parse().ok())
+        .filter(|held| *held > 0)
+        .unwrap_or(1)
+}
+
 pub(crate) fn ruff() -> Option<PathBuf> {
     named("SCYLLA_CORPUS_RUFF")
+}
+
+pub(crate) fn tsscope() -> Option<PathBuf> {
+    named("SCYLLA_CORPUS_TSSCOPE")
+}
+
+pub(crate) fn markup() -> Option<PathBuf> {
+    named("SCYLLA_CORPUS_MARKUP")
+}
+
+pub(crate) fn ols() -> Option<PathBuf> {
+    named("SCYLLA_CORPUS_OLS")
+}
+
+pub(crate) fn scip() -> Option<PathBuf> {
+    named("SCYLLA_CORPUS_SCIP")
+}
+
+pub(crate) fn zls() -> Option<PathBuf> {
+    named("SCYLLA_CORPUS_ZLS")
 }
 
 fn named(variable: &str) -> Option<PathBuf> {

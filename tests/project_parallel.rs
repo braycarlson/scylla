@@ -127,17 +127,13 @@ const READ_TYPESCRIPT_VIEW: fn(&Store, FileID, u32) -> Option<typescript::ast::V
     Store::typescript_view;
 
 const READ_WALK: fn(&Store, FileID) -> usize = read_walk;
-
 const READ_WALK_FROM: fn(&Store, FileID, u32) -> usize = read_walk_from;
-
 const READ_ZIG_SEMANTIC: fn(&Store, FileID) -> Option<&ZigSemantic> = Store::zig_semantic;
 const READ_ZIG_VIEW: fn(&Store, FileID, u32) -> Option<zig::ast::View<'_>> = Store::zig_view;
 const GRAPH_COUNT: fn(&Graph) -> u32 = Graph::count;
 const GRAPH_CURRENT: fn(&Graph, &Store) -> bool = Graph::current;
 const GRAPH_CYCLES: fn(&Graph) -> usize = graph_cycles;
-
 const GRAPH_DEPENDENTS: fn(&Graph, FileID) -> usize = graph_dependents;
-
 const GRAPH_EDGES: fn(&Graph, FileID) -> &[Edge] = Graph::edges_of;
 const GRAPH_GENERATION: fn(&Graph, FileID) -> u32 = Graph::generation_of;
 const GRAPH_ORDER: fn(&Graph) -> &[FileID] = Graph::order;
@@ -466,7 +462,10 @@ fn slot_reads(store: &Store, held: FileID) {
     assert_eq!(READ_REBUILDS(store, held), 1);
     assert!(READ_SEQUENCE(store, held) > 0);
     assert!(READ_SLOT_BYTES(store, held.index()) as usize >= READ_SOURCE(store, held).len());
-    assert_eq!(READ_SLOT_LANGUAGE(store, held.index()), READ_LANGUAGE(store, held));
+    assert_eq!(
+        READ_SLOT_LANGUAGE(store, held.index()),
+        READ_LANGUAGE(store, held)
+    );
     assert_eq!(READ_FACTS(store, held).len(), store.facts_of(held).len());
     assert_eq!(READ_DECLARATION(store, held, b"missing_name"), NONE);
     assert!(READ_MARKUP_ERRORS(store, held).is_empty());

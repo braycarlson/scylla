@@ -1,5 +1,9 @@
 #[path = "common/golden.rs"]
 mod common;
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 
 use scylla::bounded::Random;
 use scylla::markup::{self, MarkupKind, Tokens};
@@ -36,8 +40,7 @@ fn every_fixture_lexes_to_the_token_stream_the_oracle_recorded() {
             );
 
             assert_eq!(
-                token.offset,
-                row.1,
+                token.offset, row.1,
                 "{}: token {index} differs in offset",
                 fixture.name
             );
@@ -60,6 +63,35 @@ fn the_token_spans_reproduce_every_fixture_byte_for_byte() {
         markup::lex(&fixture.source, &mut tokens);
         lossless(&fixture.source, &tokens, &fixture.name);
     }
+}
+
+#[test]
+fn every_corpus_template_is_tiled_by_its_tokens() {
+    let Some(root) = corpus::root() else {
+        return;
+    };
+
+    let found = common::corpus_templates(&root);
+
+    if found.is_empty() {
+        return;
+    }
+
+    let mut tokens = Tokens::reserve(TOKEN_COUNT_MAX);
+    let mut compared = 0;
+
+    for (name, source) in &found {
+        markup::lex(source, &mut tokens);
+        lossless(source, &tokens, name);
+
+        compared += 1;
+    }
+
+    assert!(
+        compared >= floor::CORPUS_MARKUP_LEX,
+        "{compared} corpus templates lexed, floor {}",
+        floor::CORPUS_MARKUP_LEX
+    );
 }
 
 #[test]
@@ -167,8 +199,7 @@ fn lossless(source: &[u8], tokens: &Tokens, name: &str) {
 
     for (index, token) in tokens.as_slice().iter().enumerate() {
         assert_eq!(
-            token.offset,
-            end_previous,
+            token.offset, end_previous,
             "{name}: token {index} leaves a gap or overlaps"
         );
 

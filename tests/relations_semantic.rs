@@ -1,16 +1,21 @@
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
+
 use scylla::bounded::{BoundedVec, Span};
 use scylla::language::Lexer as _;
 use scylla::lex::{GO, JAVASCRIPT, ODIN, PYTHON, RUST, TYPESCRIPT, ZIG};
 use scylla::syntax::Structure;
 use scylla::syntax::typescript::dialect::Dialect;
-use scylla::token::Tokens;
+use scylla::token::{Lex, Tokens};
 use scylla::tree::{Events, NONE, Tree};
 
 const ERROR_COUNT_MAX: u32 = 1 << 12;
-const EVENT_COUNT_MAX: u32 = 1 << 18;
-const NODE_COUNT_MAX: u32 = 1 << 16;
-const TABLE_COUNT_MAX: u32 = 1 << 12;
-const TOKEN_COUNT_MAX: u32 = 1 << 16;
+const EVENT_COUNT_MAX: u32 = 1 << 20;
+const NODE_COUNT_MAX: u32 = 1 << 18;
+const TABLE_COUNT_MAX: u32 = 1 << 16;
+const TOKEN_COUNT_MAX: u32 = 1 << 18;
 
 const EVERY_LANGUAGE: [Language; 7] = [
     Language {
@@ -191,9 +196,75 @@ fn fixtures(directory: &str, extension: &str) -> Vec<(String, Vec<u8>)> {
     found
 }
 
+fn corpus(extension: &str) -> Vec<(String, Vec<u8>)> {
+    let Some(root) = corpus::root() else {
+        return Vec::new();
+    };
+
+    let mut found = Vec::new();
+
+    walk(&root, &root, extension, &mut found);
+    found.sort();
+
+    found
+}
+
+fn walk(
+    root: &std::path::Path,
+    base: &std::path::Path,
+    extension: &str,
+    found: &mut Vec<(String, Vec<u8>)>,
+) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+
+    let mut stack: Vec<std::path::PathBuf> = entries
+        .filter_map(|entry| Some(entry.ok()?.path()))
+        .collect();
+
+    stack.sort();
+
+    for path in stack {
+        let Ok(entry) = std::fs::metadata(&path) else {
+            continue;
+        };
+
+        if entry.is_dir() {
+            walk(&path, base, extension, found);
+
+            continue;
+        }
+
+        if path.extension().and_then(|named| named.to_str()) != Some(extension) {
+            continue;
+        }
+
+        let Ok(source) = std::fs::read(&path) else {
+            continue;
+        };
+
+        found.push((
+            path.strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .into_owned(),
+            source,
+        ));
+    }
+}
+
 fn renaming(source: &[u8], held: &Summary) -> Option<(String, String)> {
     for row in &held.bindings {
-        let name = row.split(' ').nth(1)?;
+        let mut words = row.split(' ');
+        let kind = words.next().unwrap_or_default();
+        let Some(name) = words.next() else {
+            continue;
+        };
+
+        if kind.contains("Import") || kind.contains("Use") {
+            continue;
+        }
 
         if name.len() < 3 || !name.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
             continue;
@@ -203,10 +274,31 @@ fn renaming(source: &[u8], held: &Summary) -> Option<(String, String)> {
             continue;
         }
 
-        let mut replacement = String::from("zq");
+        if UNIVERSE.contains(&name.as_bytes()) {
+            continue;
+        }
+
+        if held
+            .references
+            .iter()
+            .any(|shown| shown.split(' ').next() == Some(name) && shown.ends_with(" Builtin"))
+        {
+            continue;
+        }
+
+        let shouted = name.bytes().all(|byte| !byte.is_ascii_lowercase());
+        let capitalised = name.starts_with(|byte: char| byte.is_ascii_uppercase());
+
+        let mut replacement = String::from(if shouted {
+            "ZQ"
+        } else if capitalised {
+            "Zq"
+        } else {
+            "zq"
+        });
 
         while replacement.len() < name.len() {
-            replacement.push('x');
+            replacement.push(if shouted { 'X' } else { 'x' });
         }
 
         if find(source, replacement.as_bytes()).is_some() {
@@ -269,9 +361,16 @@ fn walks_to(held: &Summary, reference: u32, binding: u32) -> bool {
     false
 }
 
-fn swapped(row: &str, name: &str, replacement: &str) -> String {
+fn swapped(row: &str, name: &str, replacement: &str, from: usize) -> String {
     row.split(' ')
-        .map(|word| if word == name { replacement } else { word })
+        .enumerate()
+        .map(|(index, word)| {
+            if index >= from && word == name {
+                replacement
+            } else {
+                word
+            }
+        })
         .collect::<Vec<&str>>()
         .join(" ")
 }
@@ -281,7 +380,7 @@ fn substituted(held: &Summary, name: &str, replacement: &str) -> Summary {
         bindings: held
             .bindings
             .iter()
-            .map(|row| swapped(row, name, replacement))
+            .map(|row| swapped(row, name, replacement, 1))
             .collect(),
         chain: held.chain.clone(),
         offsets: held.offsets.clone(),
@@ -289,7 +388,7 @@ fn substituted(held: &Summary, name: &str, replacement: &str) -> Summary {
         references: held
             .references
             .iter()
-            .map(|row| swapped(row, name, replacement))
+            .map(|row| swapped(row, name, replacement, 0))
             .collect(),
         scopes: held.scopes.clone(),
     }
@@ -379,8 +478,7 @@ fn prepending_a_comment_shifts_every_span_and_changes_nothing_else() {
             assert_eq!(found.bindings, held.bindings, "{}: {name}", language.name);
 
             assert_eq!(
-                found.references,
-                held.references,
+                found.references, held.references,
                 "{}: {name}",
                 language.name
             );
@@ -427,8 +525,7 @@ fn wrapping_a_body_in_one_block_adds_one_scope_and_moves_no_resolution() {
         );
 
         assert_eq!(
-            found.references,
-            plain.references,
+            found.references, plain.references,
             "{}: wrapping a body moves a resolution",
             language.name
         );
@@ -457,13 +554,19 @@ fn python(source: &[u8]) -> Option<Summary> {
     let mut semantic = Semantic::reserve(counts, counts, counts);
     let mut scratch = AnnotationScratch::reserve(1 << 8, 1 << 8);
 
-    PYTHON.lex(source, &mut lexed);
+    if PYTHON.lex(source, &mut lexed) != Lex::Complete {
+        return None;
+    }
 
     if !classify(source, lexed.as_slice(), &mut tokens, &mut raw) {
         return None;
     }
 
     parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
+
+    if !tree.errors().is_empty() {
+        return None;
+    }
 
     if bind::bind(source, tokens.as_slice(), &raw, &tree, &mut tables) != BindOutcome::Complete {
         return None;
@@ -555,13 +658,19 @@ fn javascript(source: &[u8]) -> Option<Summary> {
         TABLE_COUNT_MAX,
     );
 
-    JAVASCRIPT.lex(source, &mut lexed);
+    if JAVASCRIPT.lex(source, &mut lexed) != Lex::Complete {
+        return None;
+    }
 
     if !classify(source, lexed.as_slice(), &mut tokens, &mut raw) {
         return None;
     }
 
     parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
+
+    if !tree.errors().is_empty() {
+        return None;
+    }
 
     if semantic.build(source, tokens.as_slice(), &raw, &tree, None, &UNIVERSE)
         != Structure::Complete
@@ -632,7 +741,9 @@ fn typescript(source: &[u8]) -> Option<Summary> {
         TABLE_COUNT_MAX,
     );
 
-    TYPESCRIPT.lex(source, &mut lexed);
+    if TYPESCRIPT.lex(source, &mut lexed) != Lex::Complete {
+        return None;
+    }
 
     if !classify(source, lexed.as_slice(), &mut tokens, &mut raw, Dialect::Ts) {
         return None;
@@ -646,6 +757,10 @@ fn typescript(source: &[u8]) -> Option<Summary> {
         &mut tree,
         Dialect::Ts,
     );
+
+    if !tree.errors().is_empty() {
+        return None;
+    }
 
     if semantic.build(source, tokens.as_slice(), &raw, &tree, None, &UNIVERSE)
         != Structure::Complete
@@ -716,13 +831,19 @@ fn go(source: &[u8]) -> Option<Summary> {
         TABLE_COUNT_MAX,
     );
 
-    GO.lex(source, &mut lexed);
+    if GO.lex(source, &mut lexed) != Lex::Complete {
+        return None;
+    }
 
     if !classify(source, lexed.as_slice(), &mut tokens, &mut raw) {
         return None;
     }
 
     parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
+
+    if !tree.errors().is_empty() {
+        return None;
+    }
 
     if semantic.build(source, tokens.as_slice(), &raw, &tree, &UNIVERSE) != Structure::Complete {
         return None;
@@ -791,13 +912,19 @@ fn rust(source: &[u8]) -> Option<Summary> {
         TABLE_COUNT_MAX,
     );
 
-    RUST.lex(source, &mut lexed);
+    if RUST.lex(source, &mut lexed) != Lex::Complete {
+        return None;
+    }
 
     if !classify(source, lexed.as_slice(), &mut tokens, &mut raw) {
         return None;
     }
 
     parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
+
+    if !tree.errors().is_empty() {
+        return None;
+    }
 
     if semantic.build(source, tokens.as_slice(), &raw, &tree, &UNIVERSE) != Structure::Complete {
         return None;
@@ -867,13 +994,19 @@ fn zig(source: &[u8]) -> Option<Summary> {
         TABLE_COUNT_MAX,
     );
 
-    ZIG.lex(source, &mut lexed);
+    if ZIG.lex(source, &mut lexed) != Lex::Complete {
+        return None;
+    }
 
     if !classify(source, lexed.as_slice(), &mut tokens, &mut raw) {
         return None;
     }
 
     parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
+
+    if !tree.errors().is_empty() {
+        return None;
+    }
 
     if semantic.build(source, tokens.as_slice(), &raw, &tree, &UNIVERSE) != Structure::Complete {
         return None;
@@ -941,13 +1074,19 @@ fn odin(source: &[u8]) -> Option<Summary> {
         TABLE_COUNT_MAX,
     );
 
-    ODIN.lex(source, &mut lexed);
+    if ODIN.lex(source, &mut lexed) != Lex::Complete {
+        return None;
+    }
 
     if !classify(source, lexed.as_slice(), &mut tokens, &mut raw) {
         return None;
     }
 
     parse::build(source, tokens.as_slice(), &raw, &mut events, &mut tree);
+
+    if !tree.errors().is_empty() {
+        return None;
+    }
 
     if semantic.build(source, tokens.as_slice(), &raw, &tree, &UNIVERSE) != Structure::Complete {
         return None;
@@ -995,4 +1134,110 @@ fn odin(source: &[u8]) -> Option<Summary> {
     }
 
     Some(summary)
+}
+
+fn shifts(language: &Language, name: &str, source: &[u8], held: &Summary) {
+    let mut written = Vec::with_capacity(language.comment.len() + source.len());
+
+    written.extend_from_slice(language.comment);
+    written.extend_from_slice(source);
+
+    let shebanged = source[scylla::scan::mark_width(source)..].starts_with(b"#!");
+
+    let Some(found) = (language.summary)(&written).filter(|_| !shebanged) else {
+        return;
+    };
+
+    let delta = scylla::bounded::count_of(language.comment.len());
+
+    assert_eq!(found.bindings, held.bindings, "{}: {name}", language.name);
+    assert_eq!(
+        found.references, held.references,
+        "{}: {name}",
+        language.name
+    );
+    assert_eq!(found.scopes, held.scopes, "{}: {name}", language.name);
+    assert_eq!(found.parents, held.parents, "{}: {name}", language.name);
+
+    assert_eq!(
+        found.offsets,
+        held.offsets
+            .iter()
+            .map(|offset| offset + delta)
+            .collect::<Vec<u32>>(),
+        "{}: {name} does not shift its spans",
+        language.name
+    );
+}
+
+#[test]
+fn the_three_relations_hold_over_the_corpus() {
+    if corpus::root().is_none() {
+        return;
+    }
+
+    for language in &EVERY_LANGUAGE {
+        let mut built = 0;
+        let mut renamed_count = 0;
+
+        for (name, source) in corpus(language.extension) {
+            let Some(held) = (language.summary)(&source) else {
+                continue;
+            };
+
+            built += 1;
+
+            for (reference, binding) in &held.chain {
+                assert!(
+                    walks_to(&held, *reference, *binding),
+                    "{}: {name} resolves a reference outside its own scope chain",
+                    language.name
+                );
+            }
+
+            shifts(language, &name, &source, &held);
+
+            let Some((from, to)) = renaming(&source, &held) else {
+                continue;
+            };
+
+            let swapped_source = renamed(&source, &from, &to);
+
+            assert_eq!(
+                swapped_source.len(),
+                source.len(),
+                "{}: {name}",
+                language.name
+            );
+
+            let Some(found) = (language.summary)(&swapped_source) else {
+                continue;
+            };
+
+            assert_eq!(
+                found,
+                substituted(&held, &from, &to),
+                "{}: {name} reads {from} as {to} differently",
+                language.name
+            );
+
+            renamed_count += 1;
+        }
+
+        let floor = floor::corpus_relations_of(language.name);
+
+        assert!(
+            built >= floor.built,
+            "{}: {built} files built, floor {}",
+            language.name,
+            floor.built
+        );
+
+        assert!(
+            renamed_count >= floor.renamed,
+            "{}: {renamed_count} files renamed, floor {}",
+            language.name,
+            floor.renamed
+        );
+    }
 }

@@ -183,6 +183,10 @@ impl Semantic {
     }
 
     fn push_definition(&mut self, definition: Definition) -> bool {
+        if definition.name.length == 0 {
+            return true;
+        }
+
         let index = self.definitions.count();
         let bucket = self.bucket_of(definition.name_hash);
         let mut held = definition;

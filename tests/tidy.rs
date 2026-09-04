@@ -9,6 +9,7 @@ const FILE_COUNT_MAX: u32 = 512;
 const LINE_COUNT_MAX: u32 = 8_192;
 const ROOTS: [&str; 2] = ["src", "tests"];
 const SKIPPED: [&str; 1] = ["tests/fixtures"];
+const DECLARATION_WORDS: [&str; 4] = ["const", "let", "static", "type"];
 
 fn sources() -> Vec<PathBuf> {
     let mut pending: Vec<(PathBuf, u32)> =
@@ -107,6 +108,41 @@ fn use_item_count(line: &str) -> usize {
     trimmed.split(',').count()
 }
 
+fn declaration_of(line: &str) -> Option<(usize, &'static str)> {
+    if !line.trim_end().ends_with(';') {
+        return None;
+    }
+
+    let indent = line.len() - line.trim_start().len();
+    let mut rest = line.trim_start();
+
+    if let Some(held) = rest.strip_prefix("pub") {
+        let scoped = held.strip_prefix('(').map_or(held, |found| {
+            found.split_once(')').map_or(found, |(_, tail)| tail)
+        });
+
+        rest = scoped.trim_start();
+    }
+
+    for word in DECLARATION_WORDS {
+        if let Some(tail) = rest.strip_prefix(word)
+            && tail.starts_with(' ')
+        {
+            return Some((indent, word));
+        }
+    }
+
+    None
+}
+
+fn discards_a_value(line: &str) -> bool {
+    let trimmed = line.trim_start();
+
+    trimmed
+        .strip_prefix("let")
+        .is_some_and(|rest| rest.trim_start().starts_with("_ ="))
+}
+
 fn line_is_tidy(path: &Path, lines: &[&str], index: usize) {
     let number = index + 1;
     let line = lines[index];
@@ -151,6 +187,20 @@ fn line_is_tidy(path: &Path, lines: &[&str], index: usize) {
         !next.trim_start().starts_with('}'),
         "{}",
         violation(path, number, "the blank line closes a block")
+    );
+
+    let (Some(above), Some(below)) = (declaration_of(previous), declaration_of(next)) else {
+        return;
+    };
+
+    if discards_a_value(previous) || discards_a_value(next) {
+        return;
+    }
+
+    assert!(
+        above != below,
+        "{}",
+        violation(path, number, "the blank line parts two declarations")
     );
 }
 

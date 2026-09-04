@@ -1,10 +1,5 @@
 use crate::language::Lexer;
-use crate::scan::{
-    identifier_scan,
-    is_identifier_start_at,
-    punctuation_of,
-    string_scan_continued,
-};
+use crate::scan::{identifier_scan, is_identifier_start_at, punctuation_of, string_scan_continued};
 use crate::structure::DEPTH_MAX;
 use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
@@ -1772,8 +1767,7 @@ mod tests {
             .count();
 
         assert_eq!(
-            opened,
-            2,
+            opened, 2,
             "the tab should land on column 8 and the next line on 12, opening twice"
         );
     }

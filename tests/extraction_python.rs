@@ -79,8 +79,7 @@ fn every_registration_the_oracle_recorded_comes_back_field_for_field() {
             .enumerate()
         {
             assert_eq!(
-                came,
-                recorded,
+                came, recorded,
                 "{}: registration {index} differs",
                 case.name
             );

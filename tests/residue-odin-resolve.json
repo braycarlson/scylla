@@ -1,0 +1,237 @@
+[
+  {
+    "fixture": "odin/base/runtime/core_builtin_soa.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/base/runtime/print.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/c/libc/stdlib.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/crypto/aegis/aegis_impl_hw.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/debug/trace/trace_linux.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/encoding/cbor/tags.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/fmt/fmt.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/image/bmp/bmp.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/image/jpeg/jpeg.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/image/netpbm/netpbm.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/image/png/helpers.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/image/tga/tga.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/mem/allocators.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/nbio/impl_posix.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/os/path_openbsd.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/reflect/types.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/simd/arm/neon.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/simd/arm/pmull.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/slice/ptr.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/sys/info/cpu_windows.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/sys/info/platform_windows.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/sys/orca/orca.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/core/sys/windows/comctl32.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/examples/demo/demo.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/tests/benchmark/crypto/benchmark_ecc.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/tests/core/container/test_core_small_array.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/tests/core/nbio/fs.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/tests/internal/test_fixed_capacity_dynamic_array.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/vendor/cgltf/cgltf.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/vendor/libc-shim/stdlib.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/vendor/microui/microui.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/vendor/miniaudio/common.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/vendor/raylib/raylib.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "odin/vendor/wgpu/glfwglue/glue_linux.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/common/util.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/odin/format/format.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/builtins.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/check.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/completion.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/documents.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/generics.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/log.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/position_context.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/src/server/requests.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/tests/builtin/builtin.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/random/.snapshots/demo.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "ols/tools/odinfmt/tests/random/demo.odin",
+    "category": "ols-shadowing",
+    "reason": "The file declares the same name twice, once in an enclosing scope and once inside it -- a local over a parameter, an inner block's `pixels` over the outer one's -- and ols lands on the outer declaration where scylla takes the inner. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  }
+]

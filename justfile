@@ -16,6 +16,10 @@ test:
     cargo test --release
     cargo test --release --manifest-path {{tool_dir}}/runner/Cargo.toml
 
+lane:
+    cargo test --release --no-fail-fast \
+        --test format_javascript --test format_rust --test format_typescript --test tidy
+
 bench:
     cargo bench
 
@@ -40,6 +44,11 @@ oracle:
         (cd {{tool_dir}}/oracle-zig && zig build -Doptimize=ReleaseFast)
     else
         echo "zig is not installed; the zig oracle is skipped"
+    fi
+    if command -v odin > /dev/null; then
+        {{tool_dir}}/oracle-ols/build.sh
+    else
+        echo "odin is not installed; the ols oracle is skipped"
     fi
 
 coverage:

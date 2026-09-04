@@ -8,6 +8,10 @@ mutants.out*/
 
 __pycache__/
 
+node_modules/
+package-lock.json
+package.json
+
 .zig-cache/
 zig-out/
 
@@ -18,3 +22,8 @@ zig-out/
 
 /corpus/sources/
 /corpus/goldens/
+/tools/arbiter-odin/base
+/tools/arbiter-odin/core
+/tools/arbiter-odin/odin
+/tools/arbiter-odin/vendor
+/tools/oracle-ols/ols

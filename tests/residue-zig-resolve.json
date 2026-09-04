@@ -1,0 +1,22 @@
+[
+  {
+    "fixture": "tigerbeetle/src/cdc/runner.zig",
+    "category": "zls-shadowing",
+    "reason": "The file writes `const zone = for (...) |zone| { ... }`, where the capture carries the same name as the declaration it initialises. Inside the loop the name is the capture, which is what scylla answers, and zls answers with the declaration. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "tigerbeetle/src/stdx/stdx.zig",
+    "category": "zls-shadowing",
+    "reason": "The file writes `const zone = for (...) |zone| { ... }`, where the capture carries the same name as the declaration it initialises. Inside the loop the name is the capture, which is what scylla answers, and zls answers with the declaration. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "tigerbeetle/src/tigerbeetle/benchmark_driver.zig",
+    "category": "zls-shadowing",
+    "reason": "The file writes `const zone = for (...) |zone| { ... }`, where the capture carries the same name as the declaration it initialises. Inside the loop the name is the capture, which is what scylla answers, and zls answers with the declaration. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  },
+  {
+    "fixture": "tigerbeetle/src/vsr/replica_format.zig",
+    "category": "zls-shadowing",
+    "reason": "The file writes `const zone = for (...) |zone| { ... }`, where the capture carries the same name as the declaration it initialises. Inside the loop the name is the capture, which is what scylla answers, and zls answers with the declaration. Which declaration a use reaches under shadowing is the one thing the two models have not been reconciled on; every other name in the file agrees."
+  }
+]

@@ -347,8 +347,7 @@ fn gaps_are_blank(source: &[u8], tokens: &[Token], name: &str) {
     );
 
     assert_eq!(
-        end_previous,
-        length,
+        end_previous, length,
         "{name} leaves bytes past its last gap"
     );
 }
@@ -391,8 +390,7 @@ fn invariants_hold(machine: &Machine, name: &str) {
             let held = walk[child as usize];
 
             assert_eq!(
-                held.parent,
-                index,
+                held.parent, index,
                 "{name}: node {child} disowns its parent"
             );
 
@@ -615,6 +613,56 @@ fn the_tree_holds_its_invariants_over_the_corpus() {
 }
 
 #[test]
+fn a_pseudo_element_without_a_name_is_an_error() {
+    const SOURCES: [&[u8]; 2] = [b"::;", b"::;z:;"];
+
+    const NAMED: [&[u8]; 3] = [
+        b"a::before {\n    color: red;\n}\n",
+        b"p::first-line {\n    color: red;\n}\n",
+        b"a::-moz-selection {\n    color: red;\n}\n",
+    ];
+
+    let mut machine = Machine::reserve();
+
+    for source in SOURCES {
+        machine.parse(source);
+
+        assert!(
+            !machine.tree.errors().is_empty(),
+            "{:?} parsed without an error",
+            String::from_utf8_lossy(source)
+        );
+    }
+
+    for source in NAMED {
+        assert_eq!(machine.parse(source), Structure::Complete);
+
+        assert!(
+            machine.tree.errors().is_empty(),
+            "{:?} reported an error",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
+fn a_plain_value_ends_at_a_multi_byte_space() {
+    const SOURCES: [&[u8]; 2] = ["a:i:\u{feff}:".as_bytes(), b"a:i: :"];
+
+    let mut machine = Machine::reserve();
+
+    for source in SOURCES {
+        machine.parse(source);
+
+        assert!(
+            !machine.tree.errors().is_empty(),
+            "{:?} parsed without an error",
+            String::from_utf8_lossy(source)
+        );
+    }
+}
+
+#[test]
 fn the_statement_census_matches_the_goldens() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-css");
     let found = fixtures();
@@ -685,6 +733,59 @@ fn the_normalized_walk_matches_the_goldens() {
         compared >= floor::FIXTURE_WALK_CSS,
         "the CSS fixtures lost a walk: {compared} compared, floor {}",
         floor::FIXTURE_WALK_CSS
+    );
+}
+
+#[test]
+fn the_statement_census_matches_the_corpus_goldens() {
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    let found = corpus();
+
+    if found.is_empty() {
+        return;
+    }
+
+    let carried = oracle::residue_of("residue-css.json", &NOT_CSS);
+    let mut abstained = 0;
+    let mut machine = Machine::reserve();
+    let mut compared = 0;
+
+    for fixture in &found {
+        if carried.contains(&fixture.name) {
+            continue;
+        }
+
+        let Some(golden) = oracle::golden(&held, &fixture.name) else {
+            abstained += 1;
+
+            continue;
+        };
+
+        if golden.broken {
+            abstained += 1;
+
+            continue;
+        }
+
+        let _ = machine.parse(&fixture.source);
+
+        assert_eq!(
+            machine.census(),
+            census_of(&golden.ast),
+            "{} counts its statements differently",
+            fixture.name
+        );
+
+        compared += 1;
+    }
+
+    assert!(
+        compared >= floor::CORPUS_CENSUS_CSS,
+        "the corpus lost its CSS files: {compared} counted, {abstained} abstained, floor {}",
+        floor::CORPUS_CENSUS_CSS
     );
 }
 
@@ -766,7 +867,6 @@ fn the_normalized_walk_matches_the_corpus_goldens() {
 fn every_residue_row_names_a_file_that_diverges() {
     let carried = oracle::residue_of("residue-css.json", &EVERY_CATEGORY);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-css");
-
     let mut machine = Machine::reserve();
     let mut named = Vec::new();
 

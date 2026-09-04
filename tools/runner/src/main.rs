@@ -1,4 +1,5 @@
 mod analyzer;
+mod arbiter;
 mod binder;
 mod blob;
 mod descriptor;
@@ -44,10 +45,20 @@ struct Arguments {
 
 struct Tally {
     agreeing: u32,
+    arbiter: String,
+    carried: u32,
     compared: u32,
     language: String,
     panicked: u32,
+    reference: String,
     signatures: Vec<String>,
+    ungraded: u32,
+}
+
+enum Outcome {
+    Agreed,
+    Diverged(ladder::Divergence),
+    Ungraded,
 }
 
 thread_local! {
@@ -100,7 +111,7 @@ fn run() -> i32 {
     let mut unavailable = Vec::new();
 
     for name in &arguments.languages {
-        let descriptor = match descriptor_of(name, &tools) {
+        let descriptor = match descriptor_of(name, &tools, &corpus) {
             Ok(held) => held,
             Err(error) => {
                 unavailable.push(format!("{name}: {error}"));
@@ -133,12 +144,23 @@ fn sweep(
     mut descriptor: Descriptor,
     records: &mut Vec<Record>,
 ) -> Tally {
+    let carried = carried_of(descriptor.name);
     let mut tally = Tally {
         agreeing: 0,
+        arbiter: descriptor
+            .arbiter
+            .as_deref()
+            .map_or_else(String::new, |held| held.identifier().to_owned()),
+        carried: 0,
         compared: 0,
         language: descriptor.name.to_owned(),
         panicked: 0,
+        reference: descriptor
+            .reference
+            .as_deref()
+            .map_or_else(String::new, |held| held.identifier().to_owned()),
         signatures: Vec::new(),
+        ungraded: 0,
     };
 
     for path in sources(corpus, descriptor.extensions) {
@@ -148,7 +170,11 @@ fn sweep(
 
         let name = relative_of(corpus, &path);
 
-        tally.compared += 1;
+        if carried.contains(&name) {
+            tally.carried += 1;
+
+            continue;
+        }
 
         let held = panic::catch_unwind(AssertUnwindSafe(|| {
             divergence_of(arguments.level, &mut descriptor, &source)
@@ -159,15 +185,26 @@ fn sweep(
             Err(_) => {
                 tally.panicked += 1;
 
-                Some(panic_divergence(descriptor.name, &panicked()))
+                Outcome::Diverged(panic_divergence(descriptor.name, &panicked()))
             }
         };
 
-        let Some(divergence) = found else {
-            tally.agreeing += 1;
+        let divergence = match found {
+            Outcome::Agreed => {
+                tally.agreeing += 1;
+                tally.compared += 1;
 
-            continue;
+                continue;
+            }
+            Outcome::Ungraded => {
+                tally.ungraded += 1;
+
+                continue;
+            }
+            Outcome::Diverged(held) => held,
         };
+
+        tally.compared += 1;
 
         let fresh = !tally.signatures.contains(&divergence.signature);
 
@@ -182,7 +219,8 @@ fn sweep(
                 }));
 
                 match held {
-                    Ok(found) => found.map(|divergence| divergence.signature),
+                    Ok(Outcome::Diverged(divergence)) => Some(divergence.signature),
+                    Ok(_) => None,
                     Err(_) => Some(panic_divergence(descriptor.name, &panicked()).signature),
                 }
             };
@@ -208,13 +246,26 @@ fn sweep(
     tally
 }
 
-fn divergence_of(
-    ceiling: Level,
-    descriptor: &mut Descriptor,
-    source: &[u8],
-) -> Option<ladder::Divergence> {
+fn divergence_of(ceiling: Level, descriptor: &mut Descriptor, source: &[u8]) -> Outcome {
     let held = descriptor.analyzer.read(source);
-    let theirs = descriptor.oracle.read(source)?;
+    let Some(theirs) = descriptor.oracle.read(source) else {
+        return Outcome::Ungraded;
+    };
+
+    if held.accepted != theirs.accepted {
+        if let Some(arbiter) = descriptor.arbiter.as_deref_mut() {
+            if arbiter.accepts(source) == Some(held.accepted) {
+                return Outcome::Ungraded;
+            }
+        }
+    }
+
+    let subject = ladder::Subject {
+        continuation: descriptor.continuation,
+        language: descriptor.name,
+        normalizer: descriptor.normalizer,
+        oracle: descriptor.oracle.identifier(),
+    };
 
     for level in EVERY_LEVEL {
         if level > ceiling {
@@ -222,10 +273,10 @@ fn divergence_of(
         }
 
         if level == Level::Bind {
-            let found = ladder::bound(descriptor.name, descriptor.analyzer.as_mut(), source);
-
-            if found.is_some() {
-                return found;
+            if let Some(found) =
+                ladder::bound(descriptor.name, descriptor.analyzer.as_mut(), source)
+            {
+                return Outcome::Diverged(found);
             }
 
             continue;
@@ -237,14 +288,15 @@ fn divergence_of(
                 descriptor.analyzer.as_mut(),
                 descriptor.reference.as_deref_mut(),
                 descriptor.regroups,
+                descriptor.rewrites,
                 source,
             );
 
-            if found.is_some() {
-                return found;
+            match found {
+                ladder::Formatted::Ungraded => return Outcome::Ungraded,
+                ladder::Formatted::Diverged(held) => return Outcome::Diverged(held),
+                ladder::Formatted::Agreed => continue,
             }
-
-            continue;
         }
 
         if level == Level::Tokens && !descriptor.oracle.reads_tokens() {
@@ -259,22 +311,45 @@ fn divergence_of(
             break;
         }
 
-        let found = ladder::compare(
-            level,
-            descriptor.name,
-            descriptor.oracle.identifier(),
-            descriptor.normalizer,
-            source,
-            &held,
-            &theirs,
-        );
-
-        if found.is_some() {
-            return found;
+        if let Some(found) = ladder::compare(&subject, level, source, &held, &theirs) {
+            return Outcome::Diverged(found);
         }
     }
 
-    None
+    Outcome::Agreed
+}
+
+fn carried_of(language: &str) -> Vec<String> {
+    let named = if language == "tsx" {
+        "typescript"
+    } else {
+        language
+    };
+    let Some(root) = tools_of().parent().map(Path::to_path_buf) else {
+        return Vec::new();
+    };
+
+    let Ok(text) = std::fs::read(root.join(format!("tests/residue-{named}.json"))) else {
+        return Vec::new();
+    };
+
+    let key = b"\"fixture\":";
+    let mut found = Vec::new();
+    let mut offset = 0;
+
+    while let Some(start) = text[offset..]
+        .windows(key.len())
+        .position(|window| window == key)
+    {
+        let Some((name, next)) = oracle::quoted(&text, offset + start + key.len()) else {
+            break;
+        };
+
+        found.push(name);
+        offset = next;
+    }
+
+    found
 }
 
 fn panic_divergence(language: &str, site: &str) -> ladder::Divergence {
@@ -344,6 +419,14 @@ fn relative_of(corpus: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
+fn named(held: &str) -> &str {
+    if held.is_empty() {
+        return "none";
+    }
+
+    held
+}
+
 fn report(tallies: &[Tally], unavailable: &[String], records: &[Record], out: &Path) {
     let mut open: Vec<&str> = records
         .iter()
@@ -354,8 +437,16 @@ fn report(tallies: &[Tally], unavailable: &[String], records: &[Record], out: &P
     open.dedup();
 
     println!(
-        "{:<12} {:>9} {:>9} {:>7} {:>11} {:>9}",
-        "language", "compared", "agreeing", "rate", "signatures", "panics"
+        "{:<12} {:>9} {:>9} {:>7} {:>9} {:>8} {:>11} {:>7}  {:<14} arbiter",
+        "language",
+        "compared",
+        "agreeing",
+        "rate",
+        "ungraded",
+        "carried",
+        "signatures",
+        "panics",
+        "reference"
     );
 
     for tally in tallies {
@@ -366,13 +457,17 @@ fn report(tallies: &[Tally], unavailable: &[String], records: &[Record], out: &P
         };
 
         println!(
-            "{:<12} {:>9} {:>9} {:>6.2}% {:>11} {:>9}",
+            "{:<12} {:>9} {:>9} {:>6.2}% {:>9} {:>8} {:>11} {:>7}  {:<14} {}",
             tally.language,
             tally.compared,
             tally.agreeing,
             rate,
+            tally.ungraded,
+            tally.carried,
             tally.signatures.len(),
-            tally.panicked
+            tally.panicked,
+            named(&tally.reference),
+            named(&tally.arbiter)
         );
     }
 

@@ -141,6 +141,12 @@ impl Parser<'_> {
             return;
         };
 
+        if matches!(kind, OdinKind::Character | OdinKind::Text)
+            && !self.string_closes(self.position)
+        {
+            self.record(SyntaxErrorKind::UnexpectedToken);
+        }
+
         if is_layout(kind) {
             self.events.layout(self.position);
         } else {
@@ -152,6 +158,20 @@ impl Parser<'_> {
         if self.position > self.significant_next {
             self.significant_next = self.scan_significant(self.position);
         }
+    }
+
+    fn string_closes(&self, position: u32) -> bool {
+        let Some(token) = self.tokens.get(position as usize) else {
+            return true;
+        };
+
+        let text = token.text(self.source);
+
+        let Some(&quote) = text.first() else {
+            return true;
+        };
+
+        text.len() > 1 && text[text.len() - 1] == quote
     }
 
     fn skip_trivia(&mut self) {
@@ -2784,6 +2804,8 @@ impl Parser<'_> {
     ) -> Step {
         if self.current().is_some_and(opens_a_type) {
             self.element_type();
+        } else {
+            self.record(SyntaxErrorKind::ExpectedType);
         }
 
         if self.at(OdinKind::BraceOpen) && self.curly_allowed(base) {

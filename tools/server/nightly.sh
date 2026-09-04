@@ -47,6 +47,30 @@ if [ -d "$root/corpus/goldens/ruff" ]; then
     export SCYLLA_CORPUS_RUFF="$root/corpus/goldens/ruff"
 fi
 
+if [ -d "$root/corpus/goldens/tsscope" ]; then
+    export SCYLLA_CORPUS_TSSCOPE="$root/corpus/goldens/tsscope"
+fi
+
+if [ -d "$root/corpus/goldens/css" ]; then
+    export SCYLLA_CORPUS_CSS="$root/corpus/goldens/css"
+fi
+
+if [ -d "$root/corpus/goldens/zls" ]; then
+    export SCYLLA_CORPUS_ZLS="$root/corpus/goldens/zls"
+fi
+
+if [ -d "$root/corpus/goldens/scip" ]; then
+    export SCYLLA_CORPUS_SCIP="$root/corpus/goldens/scip"
+fi
+
+if [ -d "$root/corpus/goldens/ols" ]; then
+    export SCYLLA_CORPUS_OLS="$root/corpus/goldens/ols"
+fi
+
+if [ -d "$root/corpus/goldens/markup" ]; then
+    export SCYLLA_CORPUS_MARKUP="$root/corpus/goldens/markup"
+fi
+
 sanitize() {
     local name="$1" flag="$2"
     shift 2

@@ -942,7 +942,6 @@ impl Semantic {
         let name = &source[reference.name.range()];
         let hash = name_hash(name);
         let start = self.redirect_of(source, reference, name, hash);
-
         let redirected = start != reference.scope;
         let mut scope = start;
         let mut steps = 0;
@@ -2627,7 +2626,11 @@ impl<'run> Builder<'run> {
                 break;
             }
 
-            if self.view(parent).child_first_of(PythonKind::Block).is_some() {
+            if self
+                .view(parent)
+                .child_first_of(PythonKind::Block)
+                .is_some()
+            {
                 break;
             }
 

@@ -1,5 +1,7 @@
 use crate::bounded::{BoundedVec, Span, count_of};
 
+pub const CHOICE_DEPTH_MAX: u32 = 32;
+pub const CHOICE_VARIANT_MAX: u32 = 8;
 pub const GROUP_DEPTH_MAX: u32 = 256;
 pub const INDENT_DEPTH_MAX: u32 = 256;
 
@@ -13,22 +15,33 @@ pub enum Source {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Element {
     BlankLine(u32),
+    Choice(u32),
+    ChoiceClose,
     Dedent,
+    DedentBroken,
+    Filled,
     GroupClose,
     GroupOpen,
     HardLine,
+    Hugged,
     IfBroken(Span),
     Indent,
+    IndentBroken,
+    Joined(Span),
     Line,
+    Pragma,
     SoftLine,
     Space,
     Text(Source, Span),
+    Variant,
     Verbatim(Span),
     VerbatimArena(Span),
+    Wide,
 }
 
 #[derive(Debug)]
 pub struct Document {
+    choice_depth: u32,
     elements: BoundedVec<Element>,
     group_depth: u32,
     indent_depth: u32,
@@ -43,6 +56,7 @@ impl Document {
         assert!(!crate::allocation::is_frozen());
 
         Self {
+            choice_depth: 0,
             elements: BoundedVec::reserve(element_count_max),
             group_depth: 0,
             indent_depth: 0,
@@ -51,6 +65,7 @@ impl Document {
     }
 
     pub fn clear(&mut self) {
+        self.choice_depth = 0;
         self.elements.clear();
         self.group_depth = 0;
         self.indent_depth = 0;
@@ -59,6 +74,7 @@ impl Document {
     }
 
     pub fn close(&self) {
+        assert_eq!(self.choice_depth, 0);
         assert_eq!(self.group_depth, 0);
         assert_eq!(self.indent_depth, 0);
     }
@@ -95,9 +111,30 @@ impl Document {
         }
     }
 
+    fn admits(&self, element: Element) -> bool {
+        match element {
+            Element::Choice(count) => {
+                assert!(count > 1);
+                assert!(count <= CHOICE_VARIANT_MAX);
+
+                return self.choice_depth < CHOICE_DEPTH_MAX;
+            }
+            Element::ChoiceClose => assert!(self.choice_depth > 0),
+            Element::Variant => assert!(self.choice_depth > 0),
+            _ => (),
+        }
+
+        true
+    }
+
     #[must_use]
     pub fn push(&mut self, element: Element) -> bool {
+        if !self.admits(element) {
+            return false;
+        }
+
         match element {
+            Element::Choice(_) | Element::ChoiceClose | Element::Variant => (),
             Element::Dedent => assert!(self.indent_depth > 0),
             Element::GroupClose => assert!(self.group_depth > 0),
             Element::GroupOpen => {
@@ -116,13 +153,20 @@ impl Document {
             }
             Element::BlankLine(_)
             | Element::HardLine
+            | Element::Hugged
             | Element::IfBroken(_)
+            | Element::Joined(_)
             | Element::Line
+            | Element::Pragma
             | Element::SoftLine
             | Element::Space
             | Element::Text(Source::Arena | Source::Document, _)
+            | Element::DedentBroken
+            | Element::Filled
+            | Element::IndentBroken
             | Element::Verbatim(_)
-            | Element::VerbatimArena(_) => (),
+            | Element::VerbatimArena(_)
+            | Element::Wide => (),
         }
 
         if !self.elements.push(element) {
@@ -130,19 +174,29 @@ impl Document {
         }
 
         match element {
+            Element::Choice(_) => self.choice_depth += 1,
+            Element::ChoiceClose => self.choice_depth -= 1,
             Element::Dedent => self.indent_depth -= 1,
             Element::GroupClose => self.group_depth -= 1,
             Element::GroupOpen => self.group_depth += 1,
             Element::Indent => self.indent_depth += 1,
             Element::BlankLine(_)
             | Element::HardLine
+            | Element::Hugged
             | Element::IfBroken(_)
+            | Element::Joined(_)
             | Element::Line
+            | Element::Pragma
             | Element::SoftLine
             | Element::Space
             | Element::Text(_, _)
+            | Element::Variant
+            | Element::DedentBroken
+            | Element::Filled
+            | Element::IndentBroken
             | Element::Verbatim(_)
-            | Element::VerbatimArena(_) => (),
+            | Element::VerbatimArena(_)
+            | Element::Wide => (),
         }
 
         assert!(self.group_depth <= GROUP_DEPTH_MAX);

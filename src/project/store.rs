@@ -1013,7 +1013,6 @@ impl PendingBuilds<'_> {
         assert!(index < self.slot_count);
 
         let mut held = unsafe { self.slots.add(index as usize) };
-
         let flag = unsafe { &held.as_ref().pending };
         let claimed = flag.swap(false, Ordering::AcqRel);
 

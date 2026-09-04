@@ -1483,7 +1483,7 @@ fn the_rust_formatter_runs_on_a_frozen_thread() {
 
     let mut built = SyntaxTree::<RustKind>::reserve(1 << 16, 1 << 10);
     let mut events = Events::<RustKind>::reserve(1 << 18);
-    let mut formatter = RustFormatter::reserve(1 << 18);
+    let mut formatter = RustFormatter::reserve(1 << 18, 1 << 20);
     let mut lexed = Tokens::reserve(1 << 16);
     let mut out = Buffer::reserve(1 << 20);
     let mut raw = BoundedVec::reserve(1 << 16);
@@ -1527,7 +1527,7 @@ fn the_zig_formatter_runs_on_a_frozen_thread() {
 
     let mut built = SyntaxTree::<ZigKind>::reserve(1 << 16, 1 << 10);
     let mut events = Events::<ZigKind>::reserve(1 << 18);
-    let mut formatter = ZigFormatter::reserve(1 << 18);
+    let mut formatter = ZigFormatter::reserve(1 << 18, 1 << 20);
     let mut lexed = Tokens::reserve(1 << 16);
     let mut out = Buffer::reserve(1 << 20);
     let mut raw = BoundedVec::reserve(1 << 16);
@@ -1571,7 +1571,7 @@ fn the_css_formatter_runs_on_a_frozen_thread() {
 
     let mut built = SyntaxTree::<CSSKind>::reserve(1 << 16, 1 << 10);
     let mut events = Events::<CSSKind>::reserve(1 << 18);
-    let mut formatter = CSSFormatter::reserve(1 << 18);
+    let mut formatter = CSSFormatter::reserve(1 << 18, 1 << 20);
     let mut lexed = Tokens::reserve(1 << 16);
     let mut out = Buffer::reserve(1 << 20);
     let mut raw = BoundedVec::reserve(1 << 16);
@@ -1616,7 +1616,7 @@ fn the_javascript_formatter_runs_on_a_frozen_thread() {
 
     let mut built = SyntaxTree::<JavaScriptKind>::reserve(1 << 16, 1 << 10);
     let mut events = Events::<JavaScriptKind>::reserve(1 << 18);
-    let mut formatter = JavaScriptFormatter::reserve(1 << 18);
+    let mut formatter = JavaScriptFormatter::reserve(1 << 18, 1 << 20);
     let mut lexed = Tokens::reserve(1 << 16);
     let mut out = Buffer::reserve(1 << 20);
     let mut raw = BoundedVec::reserve(1 << 16);
@@ -1664,7 +1664,7 @@ fn the_odin_formatter_runs_on_a_frozen_thread() {
 
     let mut built = SyntaxTree::<OdinKind>::reserve(1 << 16, 1 << 10);
     let mut events = Events::<OdinKind>::reserve(1 << 18);
-    let mut formatter = OdinFormatter::reserve(1 << 18);
+    let mut formatter = OdinFormatter::reserve(1 << 18, 1 << 20);
     let mut lexed = Tokens::reserve(1 << 16);
     let mut out = Buffer::reserve(1 << 20);
     let mut raw = BoundedVec::reserve(1 << 16);

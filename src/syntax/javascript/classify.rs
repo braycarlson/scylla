@@ -233,7 +233,14 @@ fn resume(
             continue;
         }
 
-        let held = split(source, token, u32::try_from(reach).ok()?, out, raw, previous)?;
+        let held = split(
+            source,
+            token,
+            u32::try_from(reach).ok()?,
+            out,
+            raw,
+            previous,
+        )?;
 
         coarse = kind;
         cursor = held.max(reach);
@@ -262,8 +269,8 @@ fn split(
 ) -> Option<usize> {
     let offset = token.offset as usize;
     let end = token.end() as usize;
-    let mut cursor = offset;
-    let mut stop = offset;
+    let mut cursor = offset.max(out.end_previous() as usize);
+    let mut stop = cursor;
 
     for _ in 0..=(end - offset) {
         let (kind, reach) = kind_of(&source[..limit as usize], token.kind, cursor, end);
@@ -340,10 +347,34 @@ pub(crate) fn kind_of(
     }
 }
 
+fn escaped_start(bytes: &[u8]) -> bool {
+    if bytes.get(1) != Some(&b'u') {
+        return false;
+    }
+
+    if bytes.get(2) == Some(&b'{') {
+        let mut offset = 3;
+
+        while bytes.get(offset).is_some_and(u8::is_ascii_hexdigit) {
+            offset += 1;
+        }
+
+        return offset > 3 && bytes.get(offset) == Some(&b'}');
+    }
+
+    bytes.len() >= 6 && bytes[2..6].iter().all(u8::is_ascii_hexdigit)
+}
+
 fn is_word(bytes: &[u8]) -> bool {
-    bytes.first().is_some_and(|byte| {
-        byte.is_ascii_alphabetic() || matches!(*byte, b'#' | b'$' | b'\\' | b'_') || *byte >= 0x80
-    })
+    let Some(byte) = bytes.first() else {
+        return false;
+    };
+
+    if *byte == b'\\' {
+        return escaped_start(bytes);
+    }
+
+    byte.is_ascii_alphabetic() || matches!(*byte, b'#' | b'$' | b'_') || *byte >= 0x80
 }
 
 fn operator_join(source: &[u8], offset: usize) -> (JavaScriptKind, usize) {
@@ -517,5 +548,21 @@ mod tests {
         for entry in &OPERATORS {
             assert_eq!(operator_join(entry.0, 0), (entry.1, entry.0.len()));
         }
+    }
+
+    #[test]
+    fn a_backslash_opens_a_word_only_where_a_unicode_escape_follows_it() {
+        assert!(is_word(b"\\u0041bc"));
+        assert!(is_word(b"\\u{41}"));
+        assert!(!is_word(b"\\"));
+        assert!(!is_word(b"\\x41"));
+        assert!(!is_word(b"\\u{"));
+        assert!(!is_word(b"\\u{}"));
+        assert!(!is_word(b"\\u{zz"));
+        assert!(!is_word(b"\\u00"));
+
+        let bare = kind_of(b"\\", TokenKind::Punctuation(Punctuation::Other), 0, 1);
+
+        assert_eq!(bare.0, JavaScriptKind::ErrorToken);
     }
 }

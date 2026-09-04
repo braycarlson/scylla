@@ -1,1 +1,12 @@
-[]
+[
+  {
+    "fixture": "declarations.css",
+    "category": "biome-value-syntax",
+    "reason": "The fixture writes `filter: progid:DXImageTransform.Microsoft.gradient(startColorstr='#ffffff')`, Internet Explorer's filter syntax rather than a CSS value. biome's parser reports an error over it and refuses the file outright, so the golden beside it holds the source rather than an oracle printing and there is nothing to compare against. scylla reads the value as the CSS Syntax specification does and prints it, which is what makes the row residue rather than a defect."
+  },
+  {
+    "fixture": "selectors.css",
+    "category": "biome-value-syntax",
+    "reason": "The fixture writes `> .child { ... }` at the top level, the relative selector CSS Nesting allows inside a rule. biome's parser reports an error over the leading combinator and refuses the file outright, so the golden beside it holds the source rather than an oracle printing. scylla reads the selector the way the grammar's nesting production does and lays the rest of the file out, which is what makes the row residue rather than a defect."
+  }
+]

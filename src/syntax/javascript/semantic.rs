@@ -26,6 +26,7 @@ pub enum Role {
     ClassStaticBlock,
     Comma,
     Comment,
+    ConditionalType,
     ConstKeyword,
     Constant,
     DefaultKeyword,
@@ -58,6 +59,7 @@ pub enum Role {
     LabeledStatement,
     LetKeyword,
     LexicalDeclaration,
+    MappedTypeClause,
     MemberExpression,
     MethodDefinition,
     MethodSignature,
@@ -90,6 +92,7 @@ pub enum Role {
     TypeParameters,
     TypePredicate,
     TypeQuery,
+    UndefinedName,
     UpdateExpression,
     VarKeyword,
     VariableDeclaration,
@@ -318,7 +321,7 @@ static JAVASCRIPT_ROLES: [Role; crate::syntax::javascript::kind::KIND_COUNT as u
     Role::Other,
     Role::Other,
     Role::Other,
-    Role::Other,
+    Role::UndefinedName,
     Role::UpdateExpression,
     Role::VariableDeclaration,
     Role::VariableDeclarator,
@@ -477,7 +480,7 @@ static TYPESCRIPT_ROLES: [Role; crate::syntax::typescript::kind::KIND_COUNT as u
     Role::Other,
     Role::ClassStaticBlock,
     Role::Other,
-    Role::Other,
+    Role::ConditionalType,
     Role::Other,
     Role::CallSignature,
     Role::FunctionType,
@@ -542,7 +545,7 @@ static TYPESCRIPT_ROLES: [Role; crate::syntax::typescript::kind::KIND_COUNT as u
     Role::LexicalDeclaration,
     Role::Other,
     Role::Other,
-    Role::Other,
+    Role::MappedTypeClause,
     Role::MemberExpression,
     Role::Other,
     Role::MethodDefinition,
@@ -619,7 +622,7 @@ static TYPESCRIPT_ROLES: [Role; crate::syntax::typescript::kind::KIND_COUNT as u
     Role::Other,
     Role::TypeQuery,
     Role::Other,
-    Role::Other,
+    Role::UndefinedName,
     Role::Other,
     Role::UpdateExpression,
     Role::VariableDeclaration,
@@ -653,6 +656,7 @@ pub enum BindingKind {
     ImportType,
     Interface,
     Let,
+    MappedKey,
     Namespace,
     Parameter,
     ParameterProperty,
@@ -772,9 +776,11 @@ where
 impl BindingKind {
     pub const fn namespace(self) -> Namespace {
         match self {
-            Self::ImportType | Self::Interface | Self::TypeAlias | Self::TypeParameter => {
-                Namespace::Type
-            }
+            Self::ImportType
+            | Self::Interface
+            | Self::MappedKey
+            | Self::TypeAlias
+            | Self::TypeParameter => Namespace::Type,
             Self::CatchParameter
             | Self::Class
             | Self::Const
@@ -801,7 +807,11 @@ impl BindingKind {
             | Self::ImportDefault
             | Self::ImportNamespace
             | Self::Namespace => true,
-            Self::ImportType | Self::Interface | Self::TypeAlias | Self::TypeParameter => {
+            Self::ImportType
+            | Self::Interface
+            | Self::MappedKey
+            | Self::TypeAlias
+            | Self::TypeParameter => {
                 matches!(namespace, Namespace::Any | Namespace::Type)
             }
             Self::CatchParameter
@@ -834,7 +844,10 @@ impl BindingKind {
 
 impl ScopeKind {
     pub const fn holds_a_function(self) -> bool {
-        matches!(self, Self::Ambient | Self::Function | Self::Global | Self::Module)
+        matches!(
+            self,
+            Self::Ambient | Self::Function | Self::Global | Self::Module
+        )
     }
 
     pub const fn is_root(self) -> bool {
@@ -1185,6 +1198,10 @@ impl Semantic {
     }
 }
 
+const fn names_a_member(role: Role) -> bool {
+    matches!(role, Role::PropertyIdentifier | Role::StringNode)
+}
+
 const fn signs(role: Role) -> bool {
     matches!(
         role,
@@ -1386,9 +1403,11 @@ where
             Some(Role::CatchClause) => Some(ScopeKind::Catch),
             Some(Role::Class | Role::ClassDeclaration) => Some(ScopeKind::Class),
             Some(
-                Role::EnumDeclaration
+                Role::ConditionalType
+                | Role::EnumDeclaration
                 | Role::ForInStatement
                 | Role::ForStatement
+                | Role::IndexSignature
                 | Role::InterfaceDeclaration
                 | Role::StatementBlock
                 | Role::SwitchBody
@@ -1408,6 +1427,10 @@ where
         }
 
         if role == Role::StatementBlock && parent == Role::Ambient {
+            return Some(ScopeKind::Ambient);
+        }
+
+        if role == Role::StatementBlock && parent == Role::Namespace {
             return None;
         }
 
@@ -1418,6 +1441,10 @@ where
         let role = self.role_of(node);
 
         self.before(node, role);
+
+        if self.declines_the_conditional(node) {
+            self.escape();
+        }
 
         if let Some(kind) = self.scope_kind_at(node, role) {
             self.open(node, kind, role == Role::ArrowFunction);
@@ -1434,12 +1461,27 @@ where
             self.export(node);
         }
 
-        if Self::scope_kind_of(role).is_none() {
+        if self.scope_kind_at(node, role).is_none() {
             return;
         }
 
         if self.depth > 1 {
             self.depth -= 1;
+        }
+    }
+
+    fn declines_the_conditional(&self, node: u32) -> bool {
+        let parent = self.tree.at(node).parent;
+
+        self.role_of(parent) == Role::ConditionalType && self.child_at(parent, 3) == node
+    }
+
+    fn escape(&mut self) {
+        let held = self.scope();
+        let parent = self.semantic.scopes[held as usize].parent;
+
+        if parent != NONE {
+            self.stack[self.depth as usize - 1] = parent;
         }
     }
 
@@ -1482,7 +1524,10 @@ where
             self.iteration(node);
         }
 
-        if matches!(role, Role::Class | Role::FunctionExpression) {
+        if matches!(
+            role,
+            Role::Class | Role::ClassDeclaration | Role::FunctionExpression
+        ) {
             self.own_name(node, role);
         }
 
@@ -1510,7 +1555,7 @@ where
             return;
         };
 
-        let kind = if role == Role::Class {
+        let kind = if matches!(role, Role::Class | Role::ClassDeclaration) {
             BindingKind::Class
         } else {
             BindingKind::Function
@@ -1581,6 +1626,7 @@ where
             Some(Role::InferType) => self.infer(node),
             Some(Role::InterfaceDeclaration) => self.declaration(node, BindingKind::Interface),
             Some(Role::LexicalDeclaration) => self.lexical(node),
+            Some(Role::MappedTypeClause) => self.mapped(node),
             Some(Role::Namespace) => self.declaration(node, BindingKind::Namespace),
             Some(Role::TypeAliasDeclaration) => self.declaration(node, BindingKind::TypeAlias),
             Some(Role::VariableDeclaration) => self.variable(node),
@@ -1743,6 +1789,16 @@ where
         self.record_in(scope, BindingKind::TypeParameter, name, node, NONE);
     }
 
+    fn mapped(&mut self, node: u32) {
+        let Some(name) = self.name_token_of(node) else {
+            return;
+        };
+
+        let scope = self.scope();
+
+        self.record_in(scope, BindingKind::MappedKey, name, node, NONE);
+    }
+
     fn conditional_scope(&self) -> u32 {
         let mut scope = self.scope();
         let mut steps = 0;
@@ -1787,11 +1843,11 @@ where
         }
 
         for member in self.children(body) {
-            let named = if self.role_of(member) == Role::PropertyIdentifier {
+            let named = if names_a_member(self.role_of(member)) {
                 member
             } else {
                 match self.children(member).next() {
-                    Some(first) if self.role_of(first) == Role::PropertyIdentifier => first,
+                    Some(first) if names_a_member(self.role_of(first)) => first,
                     Some(_) | None => continue,
                 }
             };
@@ -2332,7 +2388,11 @@ where
     fn name(&mut self, node: u32, role: Role) {
         if !matches!(
             role,
-            Role::IdentifierNode | Role::ShorthandProperty | Role::TypeIdentifier
+            Role::IdentifierNode
+                | Role::ShorthandPatternName
+                | Role::ShorthandProperty
+                | Role::TypeIdentifier
+                | Role::UndefinedName
         ) {
             return;
         }
@@ -2346,6 +2406,10 @@ where
         let name = self.span_of(node);
         let namespace = self.namespace_at(node, role);
         let scope = self.scope();
+
+        if role == Role::UndefinedName && namespace == Namespace::Type {
+            return;
+        }
 
         let context = if standing == Standing::Store {
             Context::Store
@@ -2376,7 +2440,10 @@ where
             return Namespace::Any;
         }
 
-        if self.queried(node) {
+        if matches!(
+            self.past_members(node),
+            Role::ExportStatement | Role::TypeQuery
+        ) {
             return Namespace::Any;
         }
 
@@ -2409,26 +2476,22 @@ where
         false
     }
 
-    fn queried(&self, node: u32) -> bool {
+    fn past_members(&self, node: u32) -> Role {
         let mut held = self.tree.at(node).parent;
         let mut steps = 0;
 
         while held != NONE && steps <= SCOPE_DEPTH_MAX {
             let role = self.role_of(held);
 
-            if role == Role::TypeQuery {
-                return true;
-            }
-
             if !matches!(role, Role::MemberExpression | Role::NestedType) {
-                return false;
+                return role;
             }
 
             held = self.tree.at(held).parent;
             steps += 1;
         }
 
-        false
+        Role::Other
     }
 
     fn positional_at(&self, node: u32) -> bool {
@@ -2534,6 +2597,7 @@ where
                 | Role::FunctionSignature
                 | Role::InferType
                 | Role::InterfaceDeclaration
+                | Role::MappedTypeClause
                 | Role::Namespace
                 | Role::TypeAliasDeclaration
                 | Role::TypeParameter
@@ -2601,13 +2665,14 @@ where
                     Some(Standing::Skip)
                 }
             }
-            Some(Role::IndexSignature | Role::TypePredicate) => {
+            Some(Role::IndexSignature) => {
                 if position == 0 {
                     Some(Standing::Skip)
                 } else {
                     Some(Standing::Load)
                 }
             }
+            Some(Role::TypePredicate) => Some(Standing::Load),
             Some(Role::NestedType) => {
                 if position == 0 {
                     None
@@ -2673,7 +2738,7 @@ where
         node: u32,
         dead_zone_end: u32,
     ) {
-        let previous = self.previous_of(scope, self.text_of(name), kind);
+        let previous = self.previous_of(scope, self.text_of(name));
 
         let recorded = self.semantic.push_binding(Binding {
             dead_zone_end,
@@ -2694,7 +2759,7 @@ where
         }
     }
 
-    fn previous_of(&self, scope: u32, name: &[u8], kind: BindingKind) -> u32 {
+    fn previous_of(&self, scope: u32, name: &[u8]) -> u32 {
         let hash = name_hash(name);
         let mut index = self.semantic.heads[self.semantic.bucket_of(scope, hash)];
         let mut found = NONE;
@@ -2719,12 +2784,6 @@ where
         }
 
         if found == NONE {
-            return NONE;
-        }
-
-        let held = self.semantic.bindings[found as usize];
-
-        if kind == BindingKind::Var && held.kind == BindingKind::Var {
             return NONE;
         }
 
@@ -2972,13 +3031,13 @@ mod tests {
     #[test]
     fn a_var_climbs_past_a_block_and_merges_with_the_var_before_it() {
         let fixture = Fixture::read("var.js");
-        let (_, first) = fixture.binding_at("held", 0);
+        let (index, first) = fixture.binding_at("held", 0);
         let (_, second) = fixture.binding_at("held", 1);
 
         assert_eq!(first.scope, second.scope);
         assert!(first.hoisted);
         assert!(second.hoisted);
-        assert_eq!(second.previous, NONE);
+        assert_eq!(second.previous, index);
 
         assert_eq!(
             fixture.semantic.scopes()[first.scope as usize].kind,
@@ -3008,7 +3067,7 @@ mod tests {
         assert!(matches!(held.resolution, Resolution::Bound(_)));
 
         let (shape, _) = fixture.binding_at("Shape", 0);
-        let (_, redeclared) = fixture.binding_at("Shape", 1);
+        let (_, redeclared) = fixture.binding_at("Shape", 2);
 
         assert_eq!(redeclared.previous, shape);
         assert_ne!(redeclared.dead_zone_end, NONE);
@@ -3234,9 +3293,13 @@ mod tests {
         assert_eq!(second.previous, first);
 
         let (widget, class) = fixture.binding_at("Widget", 0);
-        let (_, interface) = fixture.binding_at("Widget", 1);
+        let (_, own) = fixture.binding_at("Widget", 1);
+        let (_, interface) = fixture.binding_at("Widget", 2);
 
         assert_eq!(class.kind, BindingKind::Class);
+        assert_eq!(own.kind, BindingKind::Class);
+        assert_ne!(own.scope, class.scope);
+        assert_eq!(own.previous, NONE);
         assert_eq!(interface.kind, BindingKind::Interface);
         assert_eq!(interface.previous, widget);
 
@@ -3495,14 +3558,17 @@ mod tests {
     }
 
     #[test]
-    fn a_type_predicate_and_an_index_signature_name_nothing_in_scope() {
+    fn a_type_predicate_reads_its_parameter_and_an_index_signature_names_nothing() {
         let mut source = Vec::from(b"type P = (k: unknown) => k is string;\n".as_slice());
 
         source.extend_from_slice(b"interface I { [key: string]: unknown }\n");
 
         let fixture = Fixture::typescript(&source);
 
-        assert_eq!(fixture.references(), Vec::new());
+        assert_eq!(
+            fixture.references(),
+            vec![("k".to_owned(), Resolution::Unresolved)]
+        );
     }
 
     #[test]
@@ -3542,8 +3608,8 @@ mod tests {
         let scopes = fixture.scopes();
         let parent = scopes[binding.scope as usize].1;
 
-        assert_eq!(scopes[binding.scope as usize].0, ScopeKind::Block);
-        assert_eq!(scopes[parent as usize].0, ScopeKind::Ambient);
+        assert_eq!(scopes[binding.scope as usize].0, ScopeKind::Ambient);
+        assert_eq!(scopes[parent as usize].0, ScopeKind::Global);
     }
 
     #[test]
@@ -3553,7 +3619,7 @@ mod tests {
         let scopes = fixture.scopes();
         let parent = scopes[binding.scope as usize].1;
 
-        assert_eq!(scopes[binding.scope as usize].0, ScopeKind::Block);
-        assert_eq!(scopes[parent as usize].0, ScopeKind::Function);
+        assert_eq!(scopes[binding.scope as usize].0, ScopeKind::Function);
+        assert_eq!(scopes[parent as usize].0, ScopeKind::Global);
     }
 }

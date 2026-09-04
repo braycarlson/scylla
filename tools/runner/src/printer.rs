@@ -20,7 +20,7 @@ use scylla::syntax::rust::kind::RustKind;
 use scylla::syntax::typescript::kind::TypeScriptKind;
 use scylla::syntax::zig::kind::ZigKind;
 
-use crate::format::{options_of, Print, Printer};
+use crate::format::{options_of, width_of, Print, Printer};
 
 const ELEMENT_COUNT_MAX: u32 = 1 << 18;
 const LINE_COUNT_MAX: u32 = 1 << 18;
@@ -66,7 +66,7 @@ printer!(
     css_format,
     CSSKind,
     Options::DEFAULT,
-    css_format::Formatter::reserve(ELEMENT_COUNT_MAX)
+    css_format::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX)
 );
 
 printer!(
@@ -82,7 +82,7 @@ printer!(
     javascript_format,
     JavaScriptKind,
     Options::DEFAULT,
-    javascript_format::Formatter::reserve(ELEMENT_COUNT_MAX)
+    javascript_format::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX)
 );
 
 printer!(
@@ -90,15 +90,15 @@ printer!(
     odin_format,
     OdinKind,
     options_of(true, 4),
-    odin_format::Formatter::reserve(ELEMENT_COUNT_MAX)
+    odin_format::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX)
 );
 
 printer!(
     Rust,
     rust_format,
     RustKind,
-    Options::DEFAULT,
-    rust_format::Formatter::reserve(ELEMENT_COUNT_MAX)
+    width_of(100),
+    rust_format::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX)
 );
 
 printer!(
@@ -106,7 +106,7 @@ printer!(
     typescript_format,
     TypeScriptKind,
     Options::DEFAULT,
-    typescript_format::Formatter::reserve(ELEMENT_COUNT_MAX)
+    typescript_format::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX)
 );
 
 printer!(
@@ -114,7 +114,7 @@ printer!(
     zig_format,
     ZigKind,
     Options::DEFAULT,
-    zig_format::Formatter::reserve(ELEMENT_COUNT_MAX)
+    zig_format::Formatter::reserve(ELEMENT_COUNT_MAX, OUT_BYTES_MAX)
 );
 
 pub struct Python {

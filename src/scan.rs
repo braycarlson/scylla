@@ -214,8 +214,8 @@ pub fn escape_end(source: &[u8], start: usize) -> usize {
         offset += 1;
     }
 
-    if source.get(offset).is_some_and(|byte| *byte == b' ') {
-        offset += 1;
+    if offset < source.len() && line_break_width(source, offset) == 0 {
+        offset += whitespace_width(source, offset);
     }
 
     offset
@@ -226,11 +226,16 @@ pub fn line_scan_trimmed(source: &[u8], start: usize) -> usize {
 
     assert!(end >= start);
 
-    if end > start && source[end - 1] == b'\r' {
-        return end - 1;
+    let mut held = end;
+
+    while held > start && source[held - 1] == b'\r' {
+        held -= 1;
     }
 
-    end
+    assert!(held >= start);
+    assert!(held <= end);
+
+    held
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -436,7 +441,7 @@ fn string_scan_bounded(source: &[u8], start: usize, quote: u8, lines: Lines) -> 
     source.len().min(offset)
 }
 
-pub fn string_is_terminated(text: &[u8]) -> bool {
+pub fn string_is_terminated(text: &[u8], raw: bool) -> bool {
     let mut prefix = 0;
 
     while prefix < text.len() && text[prefix].is_ascii_alphabetic() {
@@ -451,8 +456,22 @@ pub fn string_is_terminated(text: &[u8]) -> bool {
         return false;
     }
 
+    let tripled =
+        text.len() >= prefix + 3 && text[prefix + 1] == quote && text[prefix + 2] == quote;
+
+    if tripled {
+        return text.len() >= prefix + 6
+            && text[text.len() - 3] == quote
+            && text[text.len() - 2] == quote
+            && text[text.len() - 1] == quote;
+    }
+
     if text.len() < prefix + 2 || text[text.len() - 1] != quote {
         return false;
+    }
+
+    if raw && (quote == b'`' || text[..prefix].contains(&b'r')) {
+        return true;
     }
 
     let mut escapes = 0;
@@ -917,19 +936,21 @@ mod tests {
 
     #[test]
     fn a_string_token_reports_whether_it_closed() {
-        assert!(string_is_terminated(b"\"abc\""));
-        assert!(string_is_terminated(b"'abc'"));
-        assert!(string_is_terminated(b"`abc`"));
-        assert!(string_is_terminated(b"r\"abc\""));
-        assert!(string_is_terminated(b"\"a\\\\\""));
-        assert!(string_is_terminated(b"\"\""));
+        assert!(string_is_terminated(b"\"abc\"", false));
+        assert!(string_is_terminated(b"'abc'", false));
+        assert!(string_is_terminated(b"`abc`", false));
+        assert!(string_is_terminated(b"r\"abc\"", false));
+        assert!(string_is_terminated(b"\"a\\\\\"", false));
+        assert!(string_is_terminated(b"\"\"", false));
 
-        assert!(!string_is_terminated(b"\"abc"));
-        assert!(!string_is_terminated(b"'abc"));
-        assert!(!string_is_terminated(b"\"a\\\""));
-        assert!(!string_is_terminated(b"\""));
-        assert!(!string_is_terminated(b""));
-        assert!(!string_is_terminated(b"abc"));
+        assert!(!string_is_terminated(b"\"abc", false));
+        assert!(!string_is_terminated(b"'abc", false));
+        assert!(!string_is_terminated(b"\"a\\\"", false));
+        assert!(string_is_terminated(b"`a\\`", true));
+        assert!(string_is_terminated(b"r\"a\\\"", true));
+        assert!(!string_is_terminated(b"\"", false));
+        assert!(!string_is_terminated(b"", false));
+        assert!(!string_is_terminated(b"abc", false));
     }
 
     #[test]
@@ -1036,7 +1057,10 @@ mod tests {
     #[test]
     fn a_one_sided_dot_is_a_number_only_where_the_language_says_so() {
         assert_eq!(number_scan_bounded(b"1.", 0, Numbers::ONE_SIDED), 2);
-        assert_eq!(number_scan_bounded(b"1..toString", 0, Numbers::ONE_SIDED), 2);
+        assert_eq!(
+            number_scan_bounded(b"1..toString", 0, Numbers::ONE_SIDED),
+            2
+        );
         assert_eq!(number_scan_bounded(b".5", 0, Numbers::ONE_SIDED), 2);
         assert_eq!(number_scan_bounded(b"1..<5", 0, Numbers::RANGED), 1);
         assert_eq!(number_scan_bounded(b"1.", 0, Numbers::RANGED), 2);
@@ -1045,8 +1069,14 @@ mod tests {
 
     #[test]
     fn a_literal_carries_one_dot_and_the_next_one_opens_a_member() {
-        assert_eq!(number_scan_bounded(b"1.0.toString", 0, Numbers::ONE_SIDED), 3);
-        assert_eq!(number_scan_bounded(b".5.toString", 0, Numbers::ONE_SIDED), 2);
+        assert_eq!(
+            number_scan_bounded(b"1.0.toString", 0, Numbers::ONE_SIDED),
+            3
+        );
+        assert_eq!(
+            number_scan_bounded(b".5.toString", 0, Numbers::ONE_SIDED),
+            2
+        );
         assert_eq!(number_scan(b"1.5.hypot", 0), 3);
     }
 

@@ -397,8 +397,7 @@ fn gaps_are_blank(source: &[u8], tokens: &[Token], name: &str) {
     );
 
     assert_eq!(
-        end_previous,
-        length,
+        end_previous, length,
         "{name} leaves bytes past its last gap"
     );
 }
@@ -441,8 +440,7 @@ fn invariants_hold(machine: &Machine, name: &str) {
             let held = walk[child as usize];
 
             assert_eq!(
-                held.parent,
-                index,
+                held.parent, index,
                 "{name}: node {child} disowns its parent"
             );
 
@@ -532,7 +530,10 @@ fn report(name: &str, held: &[(String, u32, u32)], expected: &[(String, u32, u32
 fn classify_is_total_over_the_fixtures() {
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/typescript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/typescript holds no source"
+    );
 
     let mut machine = Machine::reserve();
 
@@ -558,7 +559,10 @@ fn classify_is_total_over_the_fixtures() {
 fn the_gaps_over_the_fixtures_hold_only_blank_bytes() {
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/typescript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/typescript holds no source"
+    );
 
     let mut machine = Machine::reserve();
 
@@ -676,7 +680,10 @@ fn the_tree_holds_its_invariants_over_the_corpus() {
 fn the_statement_census_matches_the_goldens() {
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/typescript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/typescript holds no source"
+    );
 
     let mut machine = Machine::reserve();
     let mut compared = 0;
@@ -746,7 +753,10 @@ fn the_normalized_walk_matches_the_goldens() {
     let carried = oracle::residue_of("residue-typescript.json", &EVERY_CATEGORY);
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/typescript holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/typescript holds no source"
+    );
 
     let mut machine = Machine::reserve();
     let mut compared = 0;
@@ -778,6 +788,59 @@ fn the_normalized_walk_matches_the_goldens() {
         compared >= floor::FIXTURE_WALK_TYPESCRIPT,
         "the TypeScript fixtures lost a walk: {compared} compared, floor {}",
         floor::FIXTURE_WALK_TYPESCRIPT
+    );
+}
+
+#[test]
+fn the_statement_census_matches_the_corpus_goldens() {
+    let Some(held) = corpus::golden() else {
+        return;
+    };
+
+    let found = corpus();
+
+    if found.is_empty() {
+        return;
+    }
+
+    let carried = oracle::residue_of("residue-typescript.json", &NOT_TYPESCRIPT);
+    let mut abstained = 0;
+    let mut machine = Machine::reserve();
+    let mut compared = 0;
+
+    for fixture in &found {
+        if carried.contains(&fixture.name) {
+            continue;
+        }
+
+        let Some(golden) = oracle::golden(&held, &fixture.name) else {
+            abstained += 1;
+
+            continue;
+        };
+
+        if golden.broken {
+            abstained += 1;
+
+            continue;
+        }
+
+        let _ = machine.parse(&fixture.source, fixture.dialect);
+
+        assert_eq!(
+            machine.census(),
+            census_of(&golden.ast),
+            "{} counts its statements differently",
+            fixture.name
+        );
+
+        compared += 1;
+    }
+
+    assert!(
+        compared >= floor::CORPUS_CENSUS_TYPESCRIPT,
+        "the corpus lost its TypeScript files: {compared} counted, {abstained} abstained, floor {}",
+        floor::CORPUS_CENSUS_TYPESCRIPT
     );
 }
 

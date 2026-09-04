@@ -440,8 +440,7 @@ fn overflowed<K>(
     }
 
     assert_eq!(
-        covered,
-        consumed,
+        covered, consumed,
         "{label}: the tokens and the gaps do not tile the consumed prefix"
     );
 
@@ -465,8 +464,7 @@ fn overflowed<K>(
         .map_or(0, |token| token.end());
 
     assert_eq!(
-        repeated,
-        consumed,
+        repeated, consumed,
         "{label}: a second run overflows at another byte"
     );
 
@@ -595,8 +593,7 @@ fn tiles(source: &[u8], tokens: &[markup::Token], outcome: Lex, label: &str) {
 
     for (index, token) in tokens.iter().enumerate() {
         assert_eq!(
-            token.offset,
-            end_previous,
+            token.offset, end_previous,
             "{label}: token {index} leaves a gap or overlaps"
         );
 

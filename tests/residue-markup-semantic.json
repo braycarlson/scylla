@@ -1,0 +1,12 @@
+[
+  {
+    "fixture": "go/internal/trace/traceviewer/static/trace_viewer_full.html",
+    "category": "tree-construction",
+    "reason": "The file writes a second `<body>` after content has already opened one. HTML5 tree construction merges that start tag's attributes into the body already open and creates no node, which parse5 does and scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. The rest of the file's 3,000 elements agree."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/platform/parser/test/node/fixtures/dllmain.cpp.getStructure.html",
+    "category": "tokenizer",
+    "reason": "The file renders C++ source into HTML, so `#include <vulkan/vulkan_core.h>` reads as a tag. HTML5 ends a tag name at `/` and then reconsumes in the before-attribute-name state, which makes `vulkan_core.h` the attribute; scylla keeps the `/` on the front of the attribute name, since a bare `/` inside a tag carries no token of its own in a lossless tiling. Every other name in the file agrees."
+  }
+]

@@ -1,0 +1,1 @@
+{"ast":[[10,"Type","Shape",10],[49,"Type","Shape",49],[84,"Class","Widget",84],[105,"Class","Widget",105],[145,"Function","overload",145],[154,"Parameter","one",154],[188,"Read","one",154],[206,"Function","overload",206],[234,"Variable","version",234],[256,"Variable","held",256],[262,"Read","Shape",10]],"path":"merges.ts"}

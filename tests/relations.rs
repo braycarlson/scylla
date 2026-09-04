@@ -37,8 +37,7 @@ fn a_mark_prepended_shifts_every_token_and_changes_no_kind() {
             .enumerate()
         {
             assert_eq!(
-                before.kind,
-                after.kind,
+                before.kind, after.kind,
                 "{}: token {index} from the end changed kind behind the mark",
                 fixture.name
             );
@@ -84,8 +83,7 @@ fn windows_line_endings_change_no_token_kind() {
         let carried: Vec<MarkupKind> = tokens.as_slice().iter().map(|token| token.kind).collect();
 
         assert_eq!(
-            plain,
-            carried,
+            plain, carried,
             "{}: the carriage returns changed the token kinds",
             fixture.name
         );
@@ -139,8 +137,7 @@ fn a_comment_inserted_at_a_tag_boundary_adds_only_its_own_tokens() {
         for (index, (before, after)) in plain[..head].iter().zip(carried[..head].iter()).enumerate()
         {
             assert_eq!(
-                before,
-                after,
+                before, after,
                 "{}: token {index} before the comment moved",
                 fixture.name
             );
@@ -152,8 +149,7 @@ fn a_comment_inserted_at_a_tag_boundary_adds_only_its_own_tokens() {
             .enumerate()
         {
             assert_eq!(
-                before.kind,
-                after.kind,
+                before.kind, after.kind,
                 "{}: token {index} after the comment changed kind",
                 fixture.name
             );

@@ -1,5 +1,6 @@
 use crate::language::Lexer;
 use crate::scan::{
+    BYTE_ORDER_MARK,
     CLASS_IDENTIFIER_PART,
     CLASSES,
     Numbers,
@@ -376,8 +377,22 @@ fn word_before(source: &[u8], end: usize) -> bool {
 fn space_skip_back(source: &[u8], start: usize) -> usize {
     let mut cursor = start;
 
-    while cursor > 0 && matches!(source[cursor - 1], b' ' | b'\t') {
-        cursor -= 1;
+    while cursor > 0 {
+        if matches!(source[cursor - 1], b' ' | b'\t') {
+            cursor -= 1;
+
+            continue;
+        }
+
+        if cursor >= BYTE_ORDER_MARK.len()
+            && &source[cursor - BYTE_ORDER_MARK.len()..cursor] == BYTE_ORDER_MARK
+        {
+            cursor -= BYTE_ORDER_MARK.len();
+
+            continue;
+        }
+
+        break;
     }
 
     cursor
@@ -392,7 +407,7 @@ fn regex_scan(source: &[u8], start: usize) -> Option<usize> {
     while offset < source.len() {
         let byte = source[offset];
 
-        if byte == b'\n' {
+        if matches!(byte, b'\n' | b'\r') {
             return None;
         }
 
@@ -626,12 +641,13 @@ fn names_an_assertion(text: &[u8], prefix: &[u8]) -> bool {
 }
 
 fn opens_a_line(source: &[u8], start: usize) -> bool {
+    let mark = crate::scan::mark_width(source);
     let mut cursor = start;
 
-    while cursor > 0 {
+    while cursor > mark {
         let byte = source[cursor - 1];
 
-        if byte == b'\n' {
+        if matches!(byte, b'\n' | b'\r') {
             return true;
         }
 
@@ -1709,6 +1725,35 @@ mod tests {
             first_of("--> a comment\nconst value = 1;\n", TokenKind::Comment),
             "--> a comment"
         );
+    }
+
+    #[test]
+    fn a_byte_order_mark_is_whitespace_to_the_scans_that_walk_back_over_it() {
+        assert_eq!(
+            first_of(
+                "\u{feff}--> a comment\nconst value = 1;\n",
+                TokenKind::Comment
+            ),
+            "--> a comment"
+        );
+
+        assert!(
+            !kinds(b"--\xef\xbb\xbf/a/").contains(&TokenKind::String),
+            "a mark between the decrement and the slash opened a regex"
+        );
+
+        assert!(
+            !kinds(b"--/a/").contains(&TokenKind::String),
+            "the decrement before the slash opened a regex"
+        );
+    }
+
+    #[test]
+    fn a_line_comment_carries_no_carriage_return_of_the_break_that_ends_it() {
+        assert_eq!(first_of("// note\r\r\n", TokenKind::Comment), "// note");
+        assert_eq!(first_of("<!--\r\r\n", TokenKind::Comment), "<!--");
+        assert_eq!(first_of("// note\r\n", TokenKind::Comment), "// note");
+        assert_eq!(first_of("// note\n", TokenKind::Comment), "// note");
     }
 
     #[test]

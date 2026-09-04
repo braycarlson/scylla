@@ -25,6 +25,7 @@ pub enum Context {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Namespace {
+    Field,
     Label,
     Value,
 }
@@ -118,13 +119,11 @@ impl Iterator for Children<'_> {
 impl BindingKind {
     pub const fn namespace(self) -> Namespace {
         match self {
+            Self::Field => Namespace::Field,
             Self::Label => Namespace::Label,
-            Self::Capture
-            | Self::Const
-            | Self::Field
-            | Self::Function
-            | Self::Parameter
-            | Self::Var => Namespace::Value,
+            Self::Capture | Self::Const | Self::Function | Self::Parameter | Self::Var => {
+                Namespace::Value
+            }
         }
     }
 }
@@ -726,7 +725,6 @@ impl<'run> Builder<'run> {
     fn captures(&mut self, node: u32) {
         let mut position = self.tree.at(node).token_start;
         let mut open = NONE;
-        let mut close = NONE;
 
         for _ in 0..STEP_MAX {
             position = self.own_next(node, position);
@@ -736,24 +734,19 @@ impl<'run> Builder<'run> {
             }
 
             if self.at(position) == ZigKind::Pipe {
-                if open != NONE && close == NONE {
-                    close = position;
-
-                    break;
-                }
-
                 if open == NONE {
                     open = position;
+                } else {
+                    self.captured(node, open, position);
+                    open = NONE;
                 }
             }
 
             position += 1;
         }
+    }
 
-        if open == NONE || close == NONE {
-            return;
-        }
-
+    fn captured(&mut self, node: u32, open: u32, close: u32) {
         let from = self.span_at(close).offset + 1;
         let mut held = open + 1;
 

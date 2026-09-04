@@ -1,6 +1,6 @@
 use crate::bounded::{BoundedVec, Span};
 use crate::syntax::rust::kind::RustKind;
-use crate::syntax::{Fact, FactKind, Facts, name_hash};
+use crate::syntax::{Category, Fact, FactKind, Facts, name_hash};
 use crate::token::Token;
 use crate::tree::{NONE, Step, Structure, Tree, walk};
 
@@ -81,6 +81,7 @@ pub struct Binding {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Reference {
     pub context: Context,
+    pub generic: bool,
     pub name: Span,
     pub namespace: Namespace,
     pub node: u32,
@@ -344,21 +345,18 @@ impl Semantic {
         universe: &[&[u8]],
     ) -> Resolution {
         let name = &source[reference.name.range()];
-        let mut scope = reference.scope;
-        let mut steps = 0;
-        let mut glob = false;
+        let (bounded, glob) = self.placed(source, reference, reference.namespace);
 
-        while scope != NONE && steps <= SCOPE_DEPTH_MAX {
-            let held = self.scopes[scope as usize];
-            let bounded = self.binding_in(source, scope, name, reference);
+        if bounded != NONE {
+            return Resolution::Bound(bounded);
+        }
 
-            if bounded != NONE {
-                return Resolution::Bound(bounded);
+        if reference.generic {
+            let (held, _) = self.placed(source, reference, Namespace::Value);
+
+            if held != NONE {
+                return Resolution::Bound(held);
             }
-
-            glob = glob || held.dynamic;
-            scope = held.parent;
-            steps += 1;
         }
 
         if universe.contains(&name) {
@@ -374,6 +372,28 @@ impl Semantic {
         }
 
         Resolution::Unresolved
+    }
+
+    fn placed(&self, source: &[u8], reference: &Reference, wanted: Namespace) -> (u32, bool) {
+        let name = &source[reference.name.range()];
+        let mut scope = reference.scope;
+        let mut steps = 0;
+        let mut glob = false;
+
+        while scope != NONE && steps <= SCOPE_DEPTH_MAX {
+            let held = self.scopes[scope as usize];
+            let bounded = self.binding_in(source, scope, name, wanted, reference);
+
+            if bounded != NONE {
+                return (bounded, glob);
+            }
+
+            glob = glob || held.dynamic;
+            scope = held.parent;
+            steps += 1;
+        }
+
+        (NONE, glob)
     }
 
     fn bucket_of(&self, scope: u32, hash: u32) -> usize {
@@ -398,7 +418,14 @@ impl Semantic {
         true
     }
 
-    fn binding_in(&self, source: &[u8], scope: u32, name: &[u8], reference: &Reference) -> u32 {
+    fn binding_in(
+        &self,
+        source: &[u8],
+        scope: u32,
+        name: &[u8],
+        wanted: Namespace,
+        reference: &Reference,
+    ) -> u32 {
         let hash = name_hash(name);
         let mut index = self.heads[self.bucket_of(scope, hash)];
 
@@ -410,7 +437,7 @@ impl Semantic {
             let held = self.bindings[index as usize];
 
             if held.scope == scope
-                && held.kind.opens(reference.namespace)
+                && held.kind.opens(wanted)
                 && held.from <= reference.name.offset
                 && held.name_hash == hash
                 && &source[held.name.range()] == name
@@ -538,6 +565,7 @@ impl<'run> Builder<'run> {
                 RustKind::Arm
                 | RustKind::Block
                 | RustKind::ExprForLoop
+                | RustKind::ExprIf
                 | RustKind::ExprLoop
                 | RustKind::ExprWhile,
             ) => Some(ScopeKind::Block),
@@ -753,7 +781,12 @@ impl<'run> Builder<'run> {
         }
 
         let name = self.span_of(held);
-        let from = self.end_of(node);
+
+        let from = if self.holds(node, RustKind::MacroKeyword) {
+            0
+        } else {
+            self.end_of(node)
+        };
 
         let _ = self.record_from(from, BindingKind::Macro, name, held);
     }
@@ -972,7 +1005,7 @@ impl<'run> Builder<'run> {
         let name = self.span_of(held);
 
         if self.constant(name) && self.children(node).count() == 1 {
-            self.reference(Context::Load, name, Namespace::Value, held, false);
+            self.reference(Context::Load, name, Namespace::Value, held, false, false);
 
             return;
         }
@@ -994,7 +1027,13 @@ impl<'run> Builder<'run> {
             return;
         }
 
-        if matches!(kind, RustKind::ExprForLoop | RustKind::ExprLet) {
+        if kind == RustKind::ExprLet {
+            let _ = self.record_from(self.end_of(binder), BindingKind::Local, name, held);
+
+            return;
+        }
+
+        if kind == RustKind::ExprForLoop {
             assert!(self.depth > 0);
 
             let scope = self.pending[self.depth as usize - 1];
@@ -1082,7 +1121,7 @@ impl<'run> Builder<'run> {
 
         let name = self.span_of(node);
 
-        self.reference(Context::Load, name, namespace, node, false);
+        self.reference(Context::Load, name, namespace, node, false, false);
     }
 
     fn name(&mut self, node: u32) {
@@ -1131,7 +1170,43 @@ impl<'run> Builder<'run> {
 
         let name = self.span_of(node);
 
-        self.reference(context, name, namespace, node, qualified);
+        self.reference(
+            context,
+            name,
+            namespace,
+            node,
+            qualified,
+            self.generic(path),
+        );
+    }
+
+    fn generic(&self, path: u32) -> bool {
+        let mut held = self.parent_of(path);
+
+        for _ in 0..STEP_MAX {
+            if held == NONE {
+                return false;
+            }
+
+            let kind = self.kind_of(held);
+
+            if kind == RustKind::TypePath
+                && matches!(
+                    self.kind_of(self.parent_of(held)),
+                    RustKind::PathSegment | RustKind::TypePath
+                )
+            {
+                return true;
+            }
+
+            match kind.category() {
+                Category::Name | Category::Type => held = self.parent_of(held),
+                Category::Call => return true,
+                _ => return false,
+            }
+        }
+
+        false
     }
 
     fn rooted(&mut self, node: u32, parent: u32) {
@@ -1145,7 +1220,7 @@ impl<'run> Builder<'run> {
 
         let name = self.span_of(node);
 
-        self.reference(Context::Load, name, Namespace::Type, node, true);
+        self.reference(Context::Load, name, Namespace::Type, node, true, false);
     }
 
     const fn namespace_of(kind: RustKind) -> Namespace {
@@ -1235,6 +1310,7 @@ impl<'run> Builder<'run> {
         namespace: Namespace,
         node: u32,
         qualified: bool,
+        generic: bool,
     ) {
         if self.text_of(name) == b"_" {
             return;
@@ -1244,6 +1320,7 @@ impl<'run> Builder<'run> {
 
         let recorded = self.semantic.references.push(Reference {
             context,
+            generic,
             name,
             namespace,
             node,
@@ -1543,15 +1620,15 @@ mod tests {
         "held Value Bound(2) scope 5",
         "limit Value Bound(1) scope 5",
         "limit Value Bound(1) scope 7",
-        "item Value Bound(5) scope 8",
-        "'outer Label Bound(3) scope 9",
-        "item Value Bound(5) scope 8",
-        "'inner Label Bound(4) scope 10",
+        "item Value Bound(5) scope 9",
+        "'outer Label Bound(3) scope 10",
+        "item Value Bound(5) scope 11",
+        "'inner Label Bound(4) scope 12",
         "held Value Bound(2) scope 6",
         "held Value Bound(2) scope 2",
     ];
 
-    const LABELS_SCOPES: [&str; 11] = [
+    const LABELS_SCOPES: [&str; 13] = [
         "Module none",
         "Function under 0",
         "Block under 1",
@@ -1562,7 +1639,9 @@ mod tests {
         "Block under 6",
         "Block under 7",
         "Block under 8",
+        "Block under 9",
         "Block under 8",
+        "Block under 11",
     ];
 
     const LOCALS_BINDINGS: [&str; 24] = [
@@ -1580,16 +1659,16 @@ mod tests {
         "Function guarded scope 0 from 0",
         "Parameter value scope 6 from 0",
         "Local found scope 7 from 368",
-        "Local inner scope 9 from 386",
-        "Local one scope 10 from 475",
+        "Local inner scope 9 from 400",
+        "Local one scope 11 from 475",
         "Function walked scope 0 from 0",
-        "Parameter items scope 12 from 0",
-        "Local total scope 13 from 572",
-        "Local item scope 15 from 582",
+        "Parameter items scope 13 from 0",
+        "Local total scope 14 from 572",
+        "Local item scope 16 from 582",
         "Function closed scope 0 from 0",
-        "Parameter one scope 16 from 0",
-        "Local held scope 17 from 717",
-        "Parameter two scope 18 from 0",
+        "Parameter one scope 17 from 0",
+        "Local held scope 18 from 717",
+        "Parameter two scope 19 from 0",
     ];
 
     const LOCALS_FACTS: [&str; 0] = [];
@@ -1613,29 +1692,29 @@ mod tests {
         "usize Type Builtin scope 6",
         "Some Value Builtin scope 7",
         "value Value Bound(12) scope 7",
-        "Some Value Builtin scope 7",
+        "Some Value Builtin scope 9",
+        "value Value Bound(12) scope 9",
+        "inner Value Bound(14) scope 10",
+        "found Value Bound(13) scope 10",
         "value Value Bound(12) scope 7",
-        "inner Value Bound(14) scope 9",
-        "found Value Bound(13) scope 9",
-        "value Value Bound(12) scope 7",
-        "Some Value Builtin scope 10",
-        "one Value Bound(15) scope 10",
-        "None Value Builtin scope 11",
-        "usize Type Builtin scope 12",
-        "usize Type Builtin scope 12",
-        "items Value Bound(17) scope 14",
-        "total Value Bound(18) scope 15",
-        "item Value Bound(19) scope 15",
-        "total Value Bound(18) scope 13",
-        "usize Type Builtin scope 16",
-        "usize Type Builtin scope 16",
-        "usize Type Builtin scope 18",
-        "one Value Bound(21) scope 18",
-        "two Value Bound(23) scope 18",
-        "held Value Bound(22) scope 17",
+        "Some Value Builtin scope 11",
+        "one Value Bound(15) scope 11",
+        "None Value Builtin scope 12",
+        "usize Type Builtin scope 13",
+        "usize Type Builtin scope 13",
+        "items Value Bound(17) scope 15",
+        "total Value Bound(18) scope 16",
+        "item Value Bound(19) scope 16",
+        "total Value Bound(18) scope 14",
+        "usize Type Builtin scope 17",
+        "usize Type Builtin scope 17",
+        "usize Type Builtin scope 19",
+        "one Value Bound(21) scope 19",
+        "two Value Bound(23) scope 19",
+        "held Value Bound(22) scope 18",
     ];
 
-    const LOCALS_SCOPES: [&str; 19] = [
+    const LOCALS_SCOPES: [&str; 20] = [
         "Module none",
         "Function under 0",
         "Block under 1",
@@ -1646,15 +1725,16 @@ mod tests {
         "Block under 6",
         "Block under 7",
         "Block under 7",
+        "Block under 9",
         "Block under 7",
         "Block under 7",
         "Function under 0",
-        "Block under 12",
         "Block under 13",
         "Block under 14",
+        "Block under 15",
         "Function under 0",
-        "Block under 16",
-        "Function under 17",
+        "Block under 17",
+        "Function under 18",
     ];
 
     const MACROS_BINDINGS: [&str; 4] = [

@@ -83,8 +83,7 @@ fn every_x_data_object_the_oracle_recorded_comes_back_member_for_member() {
     }
 
     assert_eq!(
-        skipped,
-        1,
+        skipped, 1,
         "the residue names a fixture the corpus does not carry"
     );
 

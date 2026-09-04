@@ -1,0 +1,17 @@
+[
+    {
+        "fixture": "vscode/extensions/copilot/src/extension/typescriptContext/serverPlugin/fixtures/nes/p1/source/test.ts",
+        "category": "function-body-scope",
+        "reason": "The file writes `const minimalIconWidth = minimalIconWidth + 2` inside a function whose parameter is also `minimalIconWidth`. The scope manager holds a function's parameters and the declarations written straight into its body in one scope, so the two merge and the read reaches the parameter; scylla opens a block scope for the body, so the `const` heads a chain of its own. Folding the body into the function scope closes this row and opens one in `semantic_javascript`, where the merged parameter then reads as a redeclaration oxlint does not report."
+    },
+    {
+        "fixture": "zod/packages/zod/src/v3/tests/function.test.ts",
+        "category": "type-query-value",
+        "reason": "The file writes `type func1 = z.TypeOf<typeof func1>` inside a test, over a `const func1` declared at the top of the module. `typeof` names a value, so the scope manager reads the const; scylla resolves a type query in either namespace and reaches the local type alias first. Reading a type query in the value namespace alone closes this row and opens sixty others, because scylla binds `import type` and an interface in the type space where TypeScript would let a query reach them."
+    },
+    {
+        "fixture": "zod/packages/zod/src/v4/classic/tests/function.test.ts",
+        "category": "type-query-value",
+        "reason": "The file writes `type func1 = z.TypeOf<typeof func1>` inside a test, over a `const func1` declared at the top of the module. `typeof` names a value, so the scope manager reads the const; scylla resolves a type query in either namespace and reaches the local type alias first. Reading a type query in the value namespace alone closes this row and opens sixty others, because scylla binds `import type` and an interface in the type space where TypeScript would let a query reach them."
+    }
+]

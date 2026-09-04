@@ -485,7 +485,10 @@ fn a_name_neither_side_can_place_is_absent_from_the_rows_both_are_compared_throu
 fn the_model_is_total_over_the_fixtures() {
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/go-semantic holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/go-semantic holds no source"
+    );
 
     let mut machine = Machine::reserve();
 
@@ -522,7 +525,10 @@ fn a_range_over_a_written_out_composite_literal_binds_inside_the_loop_body() {
 fn every_scope_a_reference_resolves_into_is_on_its_own_chain() {
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/go-semantic holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/go-semantic holds no source"
+    );
 
     let mut machine = Machine::reserve();
 
@@ -565,7 +571,10 @@ fn every_fixture_names_what_go_types_names() {
     let carried = oracle::residue_of("residue-go-semantic.json", &EVERY_CATEGORY);
     let found = fixtures();
 
-    assert!(!found.is_empty(), "tests/fixtures/go-semantic holds no source");
+    assert!(
+        !found.is_empty(),
+        "tests/fixtures/go-semantic holds no source"
+    );
 
     let mut machine = Machine::reserve();
     let mut compared = 0;

@@ -299,7 +299,6 @@ mod tests {
         let mut scratch = Scratch::reserve(node_count.max(1));
         let topology = Listed { edges };
         let mut recorder = Recorder { seen: Vec::new() };
-
         let held = components(node_count, &mut scratch, &topology, &mut recorder);
 
         assert!(held);
@@ -338,7 +337,6 @@ mod tests {
         let mut scratch = Scratch::reserve(2);
         let topology = Unresolved { edge_count: 1 };
         let mut whole = Whole { seen: 0 };
-
         let held = components(2, &mut scratch, &topology, &mut whole);
 
         assert!(held);
@@ -350,7 +348,6 @@ mod tests {
         let mut scratch = Scratch::reserve(4);
         let topology = Unresolved { edge_count: 0 };
         let mut stopping = Stopping { seen: 0 };
-
         let held = components(4, &mut scratch, &topology, &mut stopping);
 
         assert!(!held);

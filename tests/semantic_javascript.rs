@@ -249,6 +249,10 @@ impl Machine {
                 continue;
             }
 
+            if self.role_above(held.node, 1) == Some(Role::TypePredicate) {
+                continue;
+            }
+
             if typeof_at(source, held.name.offset)
                 && !self.queried(held.node)
                 && self.role_above(held.node, 1) != Some(Role::MemberExpression)
@@ -418,6 +422,11 @@ impl Machine {
         })
     }
 
+    fn predicate_subject(&self, reference: &Reference) -> bool {
+        reference.namespace == Namespace::Value
+            && self.role_above(reference.node, 1) == Some(Role::TypePredicate)
+    }
+
     fn group_of(&self, source: &[u8], index: u32) -> (u32, bool, bool) {
         let held = self.semantic.bindings()[index as usize];
         let name = &source[held.name.range()];
@@ -460,6 +469,7 @@ impl Machine {
             let reference = self.semantic.references()[found as usize];
 
             reference.context == Context::Load
+                && !self.predicate_subject(&reference)
                 && !self.discarded(&reference, held.scope)
                 && !self.recursive(&reference, held)
                 && !self.thrown_away(source, &reference, held)
@@ -612,7 +622,6 @@ impl Machine {
 
         for index in 0..self.semantic.count() {
             let held = self.semantic.bindings()[index as usize];
-
             let held_property = held.kind == BindingKind::ParameterProperty;
 
             if !(held.kind == BindingKind::Parameter || held_property)
@@ -786,15 +795,13 @@ impl Machine {
                 continue;
             }
 
-            let scope = self.namespaced(held.scope);
+            let scope = held.scope;
             let mut earlier = false;
 
             for before in 0..index {
                 let seen = self.semantic.bindings()[before as usize];
 
-                if self.namespaced(seen.scope) != scope
-                    || &source[seen.name.range()] != name
-                {
+                if seen.scope != scope || &source[seen.name.range()] != name {
                     continue;
                 }
 
@@ -807,22 +814,6 @@ impl Machine {
 
             found.push(("no-redeclare".to_owned(), held.name.offset));
         }
-    }
-
-    fn namespaced(&self, scope: u32) -> u32 {
-        let held = self.semantic.scopes()[scope as usize];
-
-        if held.kind != ScopeKind::Block || held.parent == NONE {
-            return scope;
-        }
-
-        let above = self.semantic.scopes()[held.parent as usize];
-
-        if above.node == NONE || self.role_of(above.node) != Role::Namespace {
-            return scope;
-        }
-
-        held.parent
     }
 
     fn role_of(&self, node: u32) -> Role {
@@ -884,7 +875,10 @@ fn directive(source: &[u8], line: (usize, usize), word: &[u8], code: &str) -> bo
 
         let rest = &text[at..];
 
-        if rest.first().is_some_and(|byte| is_name_byte(*byte) || *byte == b'-') {
+        if rest
+            .first()
+            .is_some_and(|byte| is_name_byte(*byte) || *byte == b'-')
+        {
             continue;
         }
 
@@ -949,7 +943,10 @@ fn trim(text: &[u8]) -> &[u8] {
 
 fn line_of(source: &[u8], offset: u32) -> (usize, usize) {
     let held = (offset as usize).min(source.len());
-    let start = source[..held].iter().rposition(|byte| *byte == b'\n').map_or(0, |at| at + 1);
+    let start = source[..held]
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map_or(0, |at| at + 1);
     let end = source[held..]
         .iter()
         .position(|byte| *byte == b'\n')
@@ -989,7 +986,10 @@ const fn merges(kind: BindingKind) -> bool {
 }
 
 const fn declares(kind: BindingKind) -> bool {
-    !matches!(kind, BindingKind::Signature | BindingKind::TypeParameter)
+    !matches!(
+        kind,
+        BindingKind::MappedKey | BindingKind::Signature | BindingKind::TypeParameter
+    )
 }
 
 fn spread_at(source: &[u8], offset: u32) -> bool {

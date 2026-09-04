@@ -1715,7 +1715,6 @@ fn go_parameter_next<'run>(
                 *remaining -= 1;
 
                 let name = held.next()?;
-
                 let type_of = field.as_field().and_then(go::Field::type_of).map(View::Go);
 
                 return Some(Parameter {
@@ -1921,7 +1920,6 @@ fn odin_default(parameter: odin::View<'_>) -> Option<View<'_>> {
 
 fn python_parameter(held: python::View<'_>) -> Parameter<'_> {
     let argument = held.as_argument();
-
     let type_of = argument.and_then(python::Arg::annotation).map(View::Python);
 
     Parameter {

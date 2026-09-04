@@ -1,32 +1,217 @@
+use core::slice;
+
 use crate::bounded::{Buffer, Span};
 use crate::format::brace::{self, Policy};
+use crate::format::mask::Terminators;
 use crate::format::print::Options;
 use crate::syntax::typescript::kind::TypeScriptKind as Kind;
 use crate::token::Token;
 use crate::tree::{Structure, Tree};
 
 pub const POLICY: Policy = Policy {
+    angle_calls: true,
+    angle_objects: true,
+    arm_empties: false,
+    arm_flattens: false,
+    arm_guards: false,
     arrow_after: &[],
+    arrow_parens: true,
+    assign_groups: true,
+    assign_joins: false,
+    assign_values: true,
+    assign_wraps: false,
+    chain_soles: false,
+    chain_hugs: false,
+    chain_joins: false,
+    chain_groups: true,
+    chain_width: 0,
+    call_budgets: false,
+    call_nests: false,
+    call_width: 0,
+    attribute_ends: false,
+    attribute_joins: false,
+    attribute_spans: false,
+    attribute_width: 0,
+    attribute_words: &[],
+    bar_levels: false,
+    binary_parts: true,
+    binding_bases: &[],
+    binding_codes: false,
+    binding_leads: false,
+    binding_words: &[],
+    blank_edges: true,
     blank_max: 1,
+    block_chains: false,
+    block_joins: false,
+    block_leads: &[],
     block_words: &[],
+    body_parts: true,
+    body_words: &[b"=>", b"do", b"else", b"finally", b"try"],
+    brace_continues: true,
+    brace_counts: false,
+    brace_dedents: false,
     brace_hugs: false,
+    brace_leads: false,
+    brace_levels: true,
+    brace_pairs: false,
+    brace_parts: false,
+    brace_remarks: false,
     brace_spaces: true,
+    brace_spans: false,
     brace_words: &[],
+    branch_joins: false,
+    branch_width: 0,
+    branch_words: &[],
     bracket_types: false,
+    build_blocks: false,
+    carriage_breaks: true,
+    callee_marks: &[b"?", b"?."],
+    callee_words: &[b"super", b"this"],
     cast_words: &[],
+    clause_bases: false,
+    clause_ends: false,
+    clause_words: &[b"case", b"default"],
+    close_hugs: false,
+    colon_continues: false,
+    comma_continues: true,
+    comma_adds: true,
+    comma_drops: true,
+    construct_words: &[b"new"],
+    continue_words: &[b"|", b"&"],
+    convention_strings: false,
+    define_joins: false,
+    define_widths: false,
+    define_words: &[],
+    declaration_words: &[b"class", b"enum", b"interface", b"module", b"namespace"],
+    declare_words: &[],
     dedent_words: &[],
+    document_blocks: false,
+    else_width: 0,
+    empty_words: &[b"else", b"finally", b"for", b"if", b"switch", b"try"],
+    end_words: &[],
+    field_width: 0,
+    follow_heads: &[],
+    follow_words: &[b"catch", b"else", b"finally", b"while"],
+    generic_levels: false,
+    generic_nests: false,
+    generic_parts: false,
+    group_words: &[b"as", b"asserts", b"out", b"unique"],
+    head_blocks: false,
+    head_stops: &[],
+    header_braces: false,
+    header_extends: false,
+    header_joins: false,
+    header_levels: false,
+    header_parens: true,
+    header_words: &[b"for", b"if", b"while"],
+    heritage_parts: true,
+    hug_braces: false,
+    hug_lambdas: false,
+    hug_lasts: true,
+    hug_soles: true,
     hug_words: &[],
+    item_words: &[],
+    key_quotes: true,
+    key_words: &[b"new"],
+    keyword_gaps: false,
+    label_lines: true,
+    label_words: &[],
+    lambda_flattens: false,
+    lead_words: &[b"/*"],
+    level_words: &[],
+    lifetime_tight: false,
+    link_levels: false,
+    link_nests: false,
+    link_spans: false,
+    list_blanks: false,
+    list_fills: false,
+    list_groups: true,
+    list_hugs: false,
+    list_leads: &[b",", b"export", b"import", b"type"],
+    list_mixes: 0,
+    list_tight: &[],
+    list_remarks: false,
+    list_sorts: false,
+    list_spreads: true,
+    list_width: 0,
+    list_words: &[b"export", b"import"],
+    literal_joins: false,
+    literal_width: 0,
+    macro_bodies: false,
+    macro_defines: false,
+    macro_gaps: false,
+    macro_indents: false,
+    macro_spans: false,
+    member_words: &[b"?."],
+    nested_levels: false,
+    number_forms: true,
+    operand_joins: false,
     operand_words: &[b"import", b"super", b"this"],
+    operator_words: &[b"&&", b"??", b"||"],
+    order_words: &[],
+    parameter_words: &[
+        b"override",
+        b"private",
+        b"protected",
+        b"public",
+        b"readonly",
+    ],
+    pattern_frames: false,
+    pattern_words: &[],
     postfix_words: &[],
     prefix_words: &[b"...", b"@"],
+    raise_hugged: false,
+    remark_carries: false,
+    remark_dedents: false,
+    sentinel_colons: false,
+    remark_gaps: false,
+    remark_levels: false,
+    return_parens: true,
+    rest_binds: true,
+    remark_leads: false,
+    root_joins: false,
+    row_parts: false,
     signature_words: &[],
+    skip_words: &[],
+    slice_colons: false,
+    sole_hugs: false,
+    sole_joins: false,
     source_gaps: false,
+    source_values: &[],
     source_words: &[],
-    tight_from_source: &[b"!", b"*", b"+", b"++", b"-", b"--", b"<", b">", b"?"],
+    spaced_words: &[],
+    span_levels: false,
+    tight_from_source: &[
+        b"!",
+        b"*",
+        b"+",
+        b"++",
+        b"-",
+        b"--",
+        b"<",
+        b"<<",
+        b">",
+        b"?",
+    ],
+    spec_depths: false,
+    special_macros: &[],
+    string_quotes: true,
+    template_spans: true,
+    template_units: true,
     ternary_colon: true,
+    ternary_levels: true,
     tight_words: &[],
+    type_leads: &[b"abstract", b"declare", b"export"],
+    type_words: &[b"interface", b"type"],
     unary_words: &[b"!", b"-", b"+", b"~", b"..."],
+    union_parts: true,
+    value_cap: 0,
+    value_columns: false,
+    value_words: &[b"enum"],
+    variant_width: 0,
+    verbatim_words: &[],
     units: false,
+    width_lists: true,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -48,6 +233,7 @@ pub struct Input<'held> {
 #[derive(Debug)]
 pub struct Formatter {
     inner: brace::Formatter,
+    stream: Terminators,
 }
 
 fn broken(input: &Input<'_>) -> bool {
@@ -60,14 +246,6 @@ fn broken(input: &Input<'_>) -> bool {
     }
 
     if input
-        .raw
-        .iter()
-        .any(|kind| kind.name().starts_with("Jsx") || kind.name().starts_with("Template"))
-    {
-        return true;
-    }
-
-    if input
         .tree
         .as_slice()
         .iter()
@@ -76,17 +254,141 @@ fn broken(input: &Input<'_>) -> bool {
         return true;
     }
 
-    if !brace::closed(input.source, input.tokens) {
+    let unclosed = input
+        .tokens
+        .iter()
+        .zip(input.raw.iter())
+        .any(|(token, kind)| {
+            !content(*kind) && !brace::closed(input.source, slice::from_ref(token), false, false)
+        });
+
+    if unclosed {
         return true;
     }
 
-    !brace::balanced(input.tokens)
+    !brace::balanced(input.source, input.tokens)
+}
+
+fn content(kind: Kind) -> bool {
+    matches!(kind, Kind::JsxChars | Kind::JsxEntity | Kind::TemplateChars)
+}
+
+const DROPS_PARENS: bool = true;
+
+fn braced(parent: Kind) -> bool {
+    parent == Kind::ArrowFunction
+}
+
+fn drops(inner: Kind, parent: Kind) -> bool {
+    if !DROPS_PARENS {
+        return false;
+    }
+
+    if matches!(
+        inner,
+        Kind::AssignmentExpression | Kind::AugmentedAssignmentExpression | Kind::SequenceExpression
+    ) {
+        return false;
+    }
+
+    if inner == Kind::TernaryExpression && parent == Kind::ArrowFunction {
+        return false;
+    }
+
+    if inner == Kind::TernaryExpression && parent == Kind::TernaryExpression {
+        return false;
+    }
+
+    matches!(
+        parent,
+        Kind::Arguments
+            | Kind::Array
+            | Kind::ArrowFunction
+            | Kind::AssignmentExpression
+            | Kind::AugmentedAssignmentExpression
+            | Kind::ExportStatement
+            | Kind::ForInStatement
+            | Kind::Pair
+            | Kind::ParenthesizedExpression
+            | Kind::ReturnStatement
+            | Kind::SwitchCase
+            | Kind::TemplateSubstitution
+            | Kind::TernaryExpression
+            | Kind::ThrowStatement
+            | Kind::VariableDeclarator
+    )
+}
+
+fn parens(kind: Kind) -> bool {
+    kind == Kind::ParenthesizedExpression
+}
+
+fn opens(kind: Kind) -> bool {
+    matches!(kind, Kind::JsxElement | Kind::JsxSelfClosingElement)
+}
+
+fn denies(kind: Kind, parent: Kind) -> bool {
+    if kind == Kind::StatementBlock {
+        return parent == Kind::AmbientDeclaration;
+    }
+
+    if matches!(
+        kind,
+        Kind::Class | Kind::FunctionExpression | Kind::GeneratorFunction
+    ) {
+        return parent == Kind::ExportStatement;
+    }
+
+    matches!(
+        kind,
+        Kind::AbstractClassDeclaration
+            | Kind::ClassDeclaration
+            | Kind::EnumDeclaration
+            | Kind::FunctionDeclaration
+            | Kind::GeneratorFunctionDeclaration
+            | Kind::InterfaceDeclaration
+            | Kind::InternalModule
+            | Kind::Module
+    )
+}
+
+fn owes(kind: Kind, parent: Kind) -> bool {
+    if matches!(
+        kind,
+        Kind::AbstractMethodSignature
+            | Kind::CallSignature
+            | Kind::ConstructSignature
+            | Kind::IndexSignature
+            | Kind::MethodSignature
+            | Kind::PropertySignature
+            | Kind::PublicFieldDefinition
+    ) {
+        return matches!(parent, Kind::ClassBody | Kind::InterfaceBody);
+    }
+
+    matches!(
+        kind,
+        Kind::BreakStatement
+            | Kind::ContinueStatement
+            | Kind::DebuggerStatement
+            | Kind::DoStatement
+            | Kind::ExportStatement
+            | Kind::ExpressionStatement
+            | Kind::FunctionSignature
+            | Kind::ImportStatement
+            | Kind::LexicalDeclaration
+            | Kind::ReturnStatement
+            | Kind::ThrowStatement
+            | Kind::TypeAliasDeclaration
+            | Kind::VariableDeclaration
+    )
 }
 
 impl Formatter {
-    pub fn reserve(element_count_max: u32) -> Self {
+    pub fn reserve(element_count_max: u32, scratch_bytes_max: u32) -> Self {
         Self {
-            inner: brace::Formatter::reserve(element_count_max),
+            inner: brace::Formatter::reserve(element_count_max, scratch_bytes_max),
+            stream: Terminators::reserve(element_count_max, scratch_bytes_max),
         }
     }
 
@@ -98,11 +400,31 @@ impl Formatter {
             return Outcome::Refusal;
         }
 
+        let rules = brace::Rules {
+            braced,
+            denies,
+            drops,
+            opens,
+            owes,
+            parens,
+        };
+
+        if !brace::terminated(
+            input.tree,
+            input.source,
+            input.tokens,
+            rules,
+            &mut self.stream,
+        ) {
+            return Outcome::Overflow;
+        }
+
         let held = brace::Input {
+            roles: self.stream.roles(),
             options: input.options,
             policy: POLICY,
-            source: input.source,
-            tokens: input.tokens,
+            source: self.stream.source(),
+            tokens: self.stream.tokens(),
         };
 
         if !self.inner.format(&held, out) {

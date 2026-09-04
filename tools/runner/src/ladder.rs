@@ -1,3 +1,5 @@
+use scylla::trivia::CONTINUATION_NONE;
+
 use crate::analyzer::{self, Analyzer};
 use crate::format::{parting, words, Reference};
 use crate::normalize::Normalizer;
@@ -47,20 +49,25 @@ impl Level {
     }
 }
 
+pub struct Subject<'a> {
+    pub continuation: u8,
+    pub language: &'a str,
+    pub normalizer: Option<&'a Normalizer>,
+    pub oracle: &'a str,
+}
+
 pub fn compare(
+    subject: &Subject<'_>,
     level: Level,
-    language: &str,
-    oracle_name: &str,
-    normalizer: Option<&Normalizer>,
     source: &[u8],
     held: &analyzer::Read,
     theirs: &oracle::Read,
 ) -> Option<Divergence> {
     match level {
-        Level::Verdict => verdict(language, oracle_name, held, theirs),
-        Level::Tokens => tokens(language, oracle_name, source, held, theirs),
-        Level::Census => census(language, oracle_name, normalizer?, source, held, theirs),
-        Level::Tree => tree(language, oracle_name, normalizer?, source, held, theirs),
+        Level::Verdict => verdict(subject, held, theirs),
+        Level::Tokens => tokens(subject, source, held, theirs),
+        Level::Census => census(subject, source, held, theirs),
+        Level::Tree => tree(subject, source, held, theirs),
         Level::Bind | Level::Format => None,
     }
 }
@@ -84,21 +91,31 @@ pub fn bound(
     })
 }
 
+pub enum Formatted {
+    Agreed,
+    Diverged(Divergence),
+    Ungraded,
+}
+
 pub fn formatted(
     language: &str,
     analyzer: &mut (dyn Analyzer + '_),
     reference: Option<&mut (dyn Reference + '_)>,
     regroups: bool,
+    rewrites: crate::format::Rewrites,
     source: &[u8],
-) -> Option<Divergence> {
-    let printed = analyzer.print(source)?;
+) -> Formatted {
+    let Some(printed) = analyzer.print(source) else {
+        return ungraded("the printer refused the file");
+    };
+
     let lexer = analyzer.lexer();
 
     if let Some(again) = analyzer.print(&printed) {
         if again != printed {
             let (offset, ours, theirs) = parting(&printed, &again);
 
-            return Some(Divergence {
+            return Formatted::Diverged(Divergence {
                 level: Level::Format,
                 offset,
                 signature: signature_of(&[
@@ -113,20 +130,29 @@ pub fn formatted(
         }
     }
 
-    let before = words(lexer, source, regroups);
-    let after = words(lexer, &printed, regroups);
+    let braces = rewrites.commas;
+    let before = words(
+        lexer,
+        source,
+        regroups,
+        braces,
+        rewrites.keys,
+        rewrites.numbers,
+    );
+    let after = words(
+        lexer,
+        &printed,
+        regroups,
+        braces,
+        rewrites.keys,
+        rewrites.numbers,
+    );
 
-    if before != after {
-        let offset = before
-            .iter()
-            .zip(after.iter())
-            .position(|(left, right)| left != right)
-            .unwrap_or(before.len().min(after.len()));
-
+    if let Some(offset) = crate::format::preserved(&before, &after, rewrites) {
         let ours = after.get(offset).map_or("", String::as_str).to_owned();
         let theirs = before.get(offset).map_or("", String::as_str).to_owned();
 
-        return Some(Divergence {
+        return Formatted::Diverged(Divergence {
             level: Level::Format,
             offset: u32::try_from(offset).unwrap_or(u32::MAX),
             signature: signature_of(&[
@@ -142,17 +168,23 @@ pub fn formatted(
         });
     }
 
-    let reference = reference?;
+    let Some(reference) = reference else {
+        return ungraded("no reference is configured");
+    };
+
     let identifier = reference.identifier();
-    let wanted = reference.print(source)?;
+
+    let Some(wanted) = reference.print(source) else {
+        return ungraded("the reference refused the file");
+    };
 
     if printed == wanted {
-        return None;
+        return Formatted::Agreed;
     }
 
     let (offset, ours, theirs) = parting(&printed, &wanted);
 
-    Some(Divergence {
+    Formatted::Diverged(Divergence {
         level: Level::Format,
         offset,
         signature: signature_of(&[Level::Format.name(), language, identifier, &ours, &theirs]),
@@ -160,12 +192,22 @@ pub fn formatted(
     })
 }
 
+fn ungraded(reason: &str) -> Formatted {
+    if std::env::var_os("SCYLLA_UNGRADED").is_some() {
+        eprintln!("ungraded: {reason}");
+    }
+
+    Formatted::Ungraded
+}
+
 fn verdict(
-    language: &str,
-    oracle_name: &str,
+    subject: &Subject<'_>,
     held: &analyzer::Read,
     theirs: &oracle::Read,
 ) -> Option<Divergence> {
+    let language = subject.language;
+    let oracle_name = subject.oracle;
+
     if held.accepted == theirs.accepted {
         return None;
     }
@@ -201,15 +243,15 @@ fn verdict(
 }
 
 fn tokens(
-    language: &str,
-    oracle_name: &str,
+    subject: &Subject<'_>,
     source: &[u8],
     held: &analyzer::Read,
     theirs: &oracle::Read,
 ) -> Option<Divergence> {
-    let mine = claimed(source, &held.tokens);
-    let ours = claimed(source, &theirs.tokens);
-
+    let language = subject.language;
+    let oracle_name = subject.oracle;
+    let mine = claimed(subject.continuation, source, &held.tokens);
+    let ours = claimed(subject.continuation, source, &theirs.tokens);
     let offset = (0..source.len()).find(|offset| mine[*offset] != ours[*offset])?;
     let offset = offset as u32;
 
@@ -234,13 +276,14 @@ fn tokens(
 }
 
 fn census(
-    language: &str,
-    oracle_name: &str,
-    normalizer: &Normalizer,
+    subject: &Subject<'_>,
     source: &[u8],
     held: &analyzer::Read,
     theirs: &oracle::Read,
 ) -> Option<Divergence> {
+    let language = subject.language;
+    let normalizer = subject.normalizer?;
+    let oracle_name = subject.oracle;
     let length = source.len() as u32;
     let mine = counted(&normalizer.held(length, &held.nodes));
     let ours = counted(&normalizer.wanted(source, length, &theirs.nodes));
@@ -286,13 +329,14 @@ fn census(
 }
 
 fn tree(
-    language: &str,
-    oracle_name: &str,
-    normalizer: &Normalizer,
+    subject: &Subject<'_>,
     source: &[u8],
     held: &analyzer::Read,
     theirs: &oracle::Read,
 ) -> Option<Divergence> {
+    let language = subject.language;
+    let normalizer = subject.normalizer?;
+    let oracle_name = subject.oracle;
     let length = source.len() as u32;
     let mine = normalizer.held(length, &held.nodes);
     let ours = normalizer.wanted(source, length, &theirs.nodes);
@@ -326,7 +370,7 @@ fn accepted_of(accepted: bool) -> &'static str {
     }
 }
 
-fn claimed(source: &[u8], spans: &[(u32, u32)]) -> Vec<bool> {
+fn claimed(continuation: u8, source: &[u8], spans: &[(u32, u32)]) -> Vec<bool> {
     let mut found = vec![false; source.len()];
 
     for span in spans {
@@ -339,7 +383,9 @@ fn claimed(source: &[u8], spans: &[(u32, u32)]) -> Vec<bool> {
     }
 
     for (held, byte) in found.iter_mut().zip(source.iter()) {
-        if byte.is_ascii_whitespace() {
+        if byte.is_ascii_whitespace()
+            || (continuation != CONTINUATION_NONE && *byte == continuation)
+        {
             *held = true;
         }
     }

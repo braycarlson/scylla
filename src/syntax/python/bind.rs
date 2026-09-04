@@ -1227,7 +1227,13 @@ impl Binder<'_> {
                         Mode::Load
                     };
 
-                    self.stage(clause, scope, mode, BindingKind::Assignment, job.comprehension);
+                    self.stage(
+                        clause,
+                        scope,
+                        mode,
+                        BindingKind::Assignment,
+                        job.comprehension,
+                    );
                     index += 1;
                     clause = self.tree.at(clause).sibling_next;
                 }

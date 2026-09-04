@@ -742,7 +742,6 @@ impl Machine {
             }
 
             let position = u32::try_from(index).expect("a bounded index fits in u32");
-
             let alone = held.kind == BindingKind::ExceptVariable;
 
             if held.flags.shadowed && !alone {

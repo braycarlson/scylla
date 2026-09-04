@@ -1,5 +1,9 @@
 #[path = "common/golden.rs"]
 mod common;
+#[path = "common/corpus.rs"]
+mod corpus;
+#[path = "common/floor.rs"]
+mod floor;
 
 #[path = "common/residue.rs"]
 mod residue;
@@ -52,11 +56,9 @@ fn every_fixture_builds_the_node_walk_the_oracle_recorded() {
             );
 
             assert_eq!(
-                span.offset,
-                row.1,
+                span.offset, row.1,
                 "{}: node {index} ({}) differs in start",
-                fixture.name,
-                row.0,
+                fixture.name, row.0,
             );
 
             assert_eq!(
@@ -109,8 +111,7 @@ fn every_fixture_records_the_errors_the_oracle_recorded() {
             );
 
             assert_eq!(
-                error.span.offset,
-                row.1,
+                error.span.offset, row.1,
                 "{}: error {index} differs in offset",
                 fixture.name
             );
@@ -196,6 +197,38 @@ fn a_parent_covers_its_children_and_siblings_never_overlap() {
 
         invariants_hold(&built, tokens.as_slice(), &fixture.name);
     }
+}
+
+#[test]
+fn every_corpus_template_builds_a_tree_that_holds_its_invariants() {
+    let Some(root) = corpus::root() else {
+        return;
+    };
+
+    let found = common::corpus_templates(&root);
+
+    if found.is_empty() {
+        return;
+    }
+
+    let mut tokens = Tokens::reserve(TOKEN_COUNT_MAX);
+    let mut built = Tree::reserve(NODE_COUNT_MAX, ERROR_COUNT_MAX);
+    let mut compared = 0;
+
+    for (name, source) in &found {
+        markup::lex(source, &mut tokens);
+        tree::build(source, tokens.as_slice(), &mut built);
+
+        invariants_hold(&built, tokens.as_slice(), name);
+
+        compared += 1;
+    }
+
+    assert!(
+        compared >= floor::CORPUS_MARKUP_TREE,
+        "{compared} corpus templates built, floor {}",
+        floor::CORPUS_MARKUP_TREE
+    );
 }
 
 #[test]
@@ -297,8 +330,7 @@ fn children_are_disjoint(walk: &[Node], node: &Node, tokens: &[Token], name: &st
         let span = found.span(tokens);
 
         assert_eq!(
-            found.parent,
-            index,
+            found.parent, index,
             "{name}: node {child} is not its parent's child"
         );
 
