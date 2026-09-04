@@ -829,6 +829,16 @@ struct Suppression {
 
 const ANNOTATION_COUNT_MAX: u32 = 32;
 
+fn leading(source: &[u8], index: &lines::Index, line: u32, offset: u32) -> bool {
+    let start = index.line_span(line, source).offset;
+
+    assert!(start <= offset);
+
+    source[start as usize..offset as usize]
+        .trim_ascii()
+        .is_empty()
+}
+
 fn annotation_skipped(source: &[u8], index: &lines::Index, prefix: &[u8], from: u32) -> u32 {
     if prefix.is_empty() {
         return from;
@@ -897,7 +907,7 @@ impl Regions {
     pub fn scan(
         &mut self,
         source: &[u8],
-        tokens: &[Token],
+        comments: impl Iterator<Item = Span>,
         index: &lines::Index,
         markers: &Markers,
         code_of: &impl Fn(&[u8]) -> Option<u32>,
@@ -906,21 +916,13 @@ impl Regions {
         self.entries.clear();
         self.file = 0;
 
-        let mut line_previous = u32::MAX;
+        for comment in comments {
+            assert!(comment.end() as usize <= source.len());
 
-        for token in tokens {
-            let line = index.line_of(token.offset);
+            let line = index.line_of(comment.offset);
+            let own_line = leading(source, index, line, comment.offset);
 
-            if token.kind != TokenKind::Comment {
-                line_previous = line;
-
-                continue;
-            }
-
-            let text = token.text(source);
-            let own_line = line_previous != line;
-
-            let Some(parsed) = directive_of(text, markers, code_of) else {
+            let Some(parsed) = directive_of(&source[comment.range()], markers, code_of) else {
                 continue;
             };
 
@@ -938,8 +940,11 @@ impl Regions {
                 codes: parsed.codes,
                 kind: parsed.kind,
                 line: target,
-                payload: Span::new(token.offset + parsed.payload.offset, parsed.payload.length),
-                span: token.span(),
+                payload: Span::new(
+                    comment.offset + parsed.payload.offset,
+                    parsed.payload.length,
+                ),
+                span: comment,
                 trailing: !own_line,
                 unknown: parsed.unknown,
                 used: if parsed.kind == Region::File {
@@ -2029,5 +2034,103 @@ mod tests {
 
         assert_eq!(&target[..length], b"TS002, TS012");
         assert!(codes_written(0, b"TS", 3, &mut target).is_none());
+    }
+
+    fn regions_of(source: &[u8], spans: &[Span]) -> Regions {
+        let index = indexed(source);
+        let mut regions = Regions::reserve(8);
+
+        regions.scan(
+            source,
+            spans.iter().copied(),
+            &index,
+            &TIGERSTYLE,
+            &tigerstyle_code,
+        );
+
+        regions
+    }
+
+    fn fenced_of(source: &[u8], open: &[u8], close: &[u8]) -> Vec<Span> {
+        let mut spans = Vec::new();
+        let mut cursor = 0_usize;
+
+        while let Some(start) = crate::scan::find(&source[cursor..], open) {
+            let offset = cursor + start;
+
+            let Some(end) = crate::scan::find(&source[offset..], close) else {
+                break;
+            };
+
+            spans.push(Span::new(count_of(offset), count_of(end + close.len())));
+
+            cursor = offset + end + close.len();
+        }
+
+        spans
+    }
+
+    #[test]
+    fn a_directive_on_its_own_line_claims_the_line_below_it() {
+        const SOURCE: &[u8] = b"// tigerstyle-ignore: TS002\nlet x = 1;\nlet y = 2;\n";
+
+        let mut regions = regions_of(SOURCE, &[Span::new(0, 27)]);
+
+        assert_eq!(regions.count(), 1);
+        assert!(regions.claim(1, 2));
+        assert!(!regions.claim(2, 2));
+        assert!(!regions.claim(1, 3));
+        assert!(regions.unused_at(0, u128::MAX).is_none());
+    }
+
+    #[test]
+    fn a_trailing_directive_claims_the_line_it_sits_on() {
+        const SOURCE: &[u8] = b"let x = 1; // tigerstyle-ignore: TS002\nlet y = 2;\n";
+
+        let mut regions = regions_of(SOURCE, &[Span::new(11, 27)]);
+
+        assert_eq!(regions.count(), 1);
+        assert!(regions.claim(0, 2));
+        assert!(!regions.claim(1, 2));
+    }
+
+    #[test]
+    fn a_template_comment_the_lexer_never_tokenised_suppresses() {
+        const SOURCE: &[u8] =
+            b"{# tigerstyle-ignore: TS002 #}\n{% extends 'base.html' %}\n<p>{# tigerstyle-ignore: TS003 #}</p>\n";
+
+        let spans = fenced_of(SOURCE, b"{#", b"#}");
+        let mut regions = regions_of(SOURCE, &spans);
+
+        assert_eq!(spans.len(), 2);
+        assert_eq!(regions.count(), 2);
+
+        assert!(regions.claim(1, 2));
+        assert!(regions.claim(2, 3));
+        assert!(!regions.claim(3, 3));
+    }
+
+    #[test]
+    fn a_file_directive_scanned_from_a_span_claims_every_line() {
+        const SOURCE: &[u8] = b"// tigerstyle-file-ignore: TS002\nlet x = 1;\nlet y = 2;\n";
+
+        let mut regions = regions_of(SOURCE, &[Span::new(0, 32)]);
+
+        assert!(regions.claim(0, 2));
+        assert!(regions.claim(2, 2));
+        assert!(!regions.claim(2, 3));
+    }
+
+    #[test]
+    fn an_unused_directive_scanned_from_a_span_reads_dead() {
+        const SOURCE: &[u8] = b"// tigerstyle-ignore: TS002\nlet x = 1;\n";
+
+        let regions = regions_of(SOURCE, &[Span::new(0, 27)]);
+        let found = regions.unused_at(0, u128::MAX).expect("nothing claimed it");
+
+        assert!(matches!(found.reason, Reason::Dead));
+        assert_eq!(found.span, Span::new(0, 27));
+        assert!(!found.trailing);
+        assert_eq!(&SOURCE[found.payload.range()], b"TS002");
     }
 }

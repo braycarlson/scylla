@@ -77,7 +77,7 @@ impl Project {
         &self.budget
     }
 
-    pub fn build(&mut self, resolve: fn(&[u8], FileID, &Store) -> u32) -> bool {
+    pub fn build(&mut self, resolve: &impl Fn(&[u8], FileID, &Store) -> u32) -> bool {
         self.graph.build(&self.store, resolve)
     }
 
@@ -371,7 +371,7 @@ mod tests {
 
             let file = FileID::of(held);
 
-            assert!(project.build(|_, _, _| NONE));
+            assert!(project.build(&|_, _, _| NONE));
             assert!(project.record(file, row("A001", 1)));
             assert_eq!(report_of(&project).len(), 1);
             assert!(project.current());
@@ -402,7 +402,7 @@ mod tests {
             .insert(hash_of(b"alpha"), Language::Python, ALPHA);
 
         assert!(held != NONE);
-        assert!(project.build(|_, _, _| NONE));
+        assert!(project.build(&|_, _, _| NONE));
 
         let file = FileID::of(held);
 

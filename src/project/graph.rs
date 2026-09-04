@@ -71,7 +71,11 @@ impl Graph {
         graph
     }
 
-    pub fn build(&mut self, store: &Store, resolve: fn(&[u8], FileID, &Store) -> u32) -> bool {
+    pub fn build(
+        &mut self,
+        store: &Store,
+        resolve: &impl Fn(&[u8], FileID, &Store) -> u32,
+    ) -> bool {
         self.clear();
 
         self.moves = store.moves();
@@ -202,7 +206,7 @@ impl Graph {
         &mut self,
         store: &Store,
         file: FileID,
-        resolve: fn(&[u8], FileID, &Store) -> u32,
+        resolve: &impl Fn(&[u8], FileID, &Store) -> u32,
     ) -> bool {
         let index = file.index() as usize;
         let start = self.edges.count();
@@ -378,7 +382,7 @@ mod tests {
 
         let mut graph = Graph::reserve(16, 3);
 
-        assert!(graph.build(&store, resolve));
+        assert!(graph.build(&store, &resolve));
         assert_eq!(graph.count(), 2);
 
         assert_eq!(
@@ -404,7 +408,7 @@ mod tests {
 
         let mut graph = Graph::reserve(16, 4);
 
-        assert!(graph.build(&store, resolve));
+        assert!(graph.build(&store, &resolve));
         assert_eq!(graph.count(), 4);
 
         let order = graph.order();
@@ -423,7 +427,7 @@ mod tests {
         let store = store_of(&[(b"a", b"import b\n"), (b"b", b"import a\n")]);
         let mut graph = Graph::reserve(16, 2);
 
-        assert!(graph.build(&store, resolve));
+        assert!(graph.build(&store, &resolve));
 
         let found: Vec<Vec<FileID>> = graph.cycles().map(<[FileID]>::to_vec).collect();
 
@@ -437,7 +441,7 @@ mod tests {
         let store = store_of(&[(b"a", b"import a\n"), (b"b", b"x = 1\n")]);
         let mut graph = Graph::reserve(16, 2);
 
-        assert!(graph.build(&store, resolve));
+        assert!(graph.build(&store, &resolve));
 
         let found: Vec<Vec<FileID>> = graph.cycles().map(<[FileID]>::to_vec).collect();
 
@@ -450,7 +454,7 @@ mod tests {
         let store = store_of(&[(b"a", b"import missing\n")]);
         let mut graph = Graph::reserve(16, 1);
 
-        assert!(graph.build(&store, resolve));
+        assert!(graph.build(&store, &resolve));
 
         let edges = graph.edges_of(FileID::of(0));
 
@@ -471,7 +475,7 @@ mod tests {
 
         let mut graph = Graph::reserve(16, 3);
 
-        assert!(graph.build(&store, resolve));
+        assert!(graph.build(&store, &resolve));
         assert_eq!(graph.order().len(), 3);
         assert_eq!(graph.edges_of(FileID::of(2)).len(), 0);
         assert_eq!(graph.dependents_of(FileID::of(2)).count(), 0);
@@ -487,10 +491,43 @@ mod tests {
 
         let mut graph = Graph::reserve(1, 3);
 
-        assert!(!graph.build(&store, resolve));
+        assert!(!graph.build(&store, &resolve));
         assert_eq!(graph.count(), 0);
         assert_eq!(graph.order().len(), 0);
         assert_eq!(graph.cycles().count(), 0);
         assert_eq!(graph.edges_of(FileID::of(0)).len(), 0);
+    }
+
+    #[test]
+    fn a_resolver_that_captures_a_name_table_outside_the_store_resolves() {
+        let store = store_of(&[
+            (b"a", b"import base\n"),
+            (b"b", b"import shared\n"),
+            (b"c", b"x = 1\n"),
+        ]);
+
+        let names: Vec<(&[u8], u32)> = vec![(b"base", 2), (b"shared", 2)];
+
+        let resolve = |specifier: &[u8], _from: FileID, _store: &Store| {
+            for (name, index) in &names {
+                if *name == specifier {
+                    return *index;
+                }
+            }
+
+            NONE
+        };
+
+        let mut graph = Graph::reserve(16, 3);
+
+        assert!(graph.build(&store, &resolve));
+        assert_eq!(graph.count(), 2);
+
+        assert!(graph.edges_of(FileID::of(0))[0].resolved);
+        assert_eq!(graph.edges_of(FileID::of(0))[0].to, 2);
+        assert_eq!(graph.edges_of(FileID::of(1))[0].to, 2);
+        assert_eq!(graph.dependents_of(FileID::of(2)).count(), 2);
+
+        assert_eq!(names.len(), 2);
     }
 }

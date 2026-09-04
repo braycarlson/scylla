@@ -1740,7 +1740,7 @@ fn project_benches() {
             assert!(index != NONE);
         }
 
-        assert!(graph.build(&store, specifier_resolve));
+        assert!(graph.build(&store, &specifier_resolve));
     });
 
     store.clear();
@@ -1752,7 +1752,7 @@ fn project_benches() {
         assert!(index != NONE);
     }
 
-    assert!(graph.build(&store, specifier_resolve));
+    assert!(graph.build(&store, &specifier_resolve));
 
     measure("project-query", bytes, &mut || {
         let mut seen = 0_u32;

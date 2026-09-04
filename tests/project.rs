@@ -329,7 +329,7 @@ fn tree_of(name: &str, files: &[(&[u8], &str)], language: Language) -> (Store, G
 
     let mut graph = Graph::reserve(64, u32::try_from(files.len()).expect("a small tree"));
 
-    assert!(graph.build(&store, specifier_resolve));
+    assert!(graph.build(&store, &specifier_resolve));
 
     (store, graph)
 }

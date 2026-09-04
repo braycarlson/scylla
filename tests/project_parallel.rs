@@ -198,7 +198,7 @@ fn project() -> (Store, Graph) {
 
     let mut graph = Graph::reserve(256, limits.file_count_max);
 
-    assert!(graph.build(&store, resolve));
+    assert!(graph.build(&store, &resolve));
 
     (store, graph)
 }

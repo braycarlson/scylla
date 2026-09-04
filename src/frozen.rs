@@ -1824,7 +1824,7 @@ fn the_project_graph_runs_on_a_frozen_thread() {
     }
 
     for _ in 0..64 {
-        assert!(graph.build(&store, project_resolve));
+        assert!(graph.build(&store, &project_resolve));
         assert_eq!(graph.order().len(), 5);
         assert_eq!(graph.cycles().count(), 1);
 
@@ -1901,7 +1901,7 @@ fn the_project_report_runs_on_a_frozen_thread() {
         assert!(index != NONE);
     }
 
-    assert!(project.build(project_resolve));
+    assert!(project.build(&project_resolve));
 
     let mut expected = 0;
 
