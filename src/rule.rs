@@ -8,7 +8,7 @@ use crate::scan::{DECIMAL_BYTES_MAX, decimal_write};
 use crate::suppress::Regions;
 
 pub const NONE: u32 = u32::MAX;
-pub const CODE_COUNT_MAX: u32 = 64;
+pub const CODE_COUNT_MAX: u32 = 128;
 pub const CODE_TEXT_BYTES_MAX: usize = 5;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -37,7 +37,7 @@ pub struct Rule {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct CodeSet {
-    bits: u64,
+    bits: u128,
 }
 
 #[derive(Debug)]
@@ -63,32 +63,32 @@ impl CodeSet {
         assert!(count <= CODE_COUNT_MAX);
 
         if count == CODE_COUNT_MAX {
-            return Self { bits: u64::MAX };
+            return Self { bits: u128::MAX };
         }
 
         Self {
-            bits: (1_u64 << count) - 1,
+            bits: (1_u128 << count) - 1,
         }
     }
 
-    pub const fn of_bits(bits: u64) -> Self {
+    pub const fn of_bits(bits: u128) -> Self {
         Self { bits }
     }
 
-    pub const fn bits(self) -> u64 {
+    pub const fn bits(self) -> u128 {
         self.bits
     }
 
     pub fn contains(self, code: u32) -> bool {
         assert!(code < CODE_COUNT_MAX);
 
-        self.bits & (1_u64 << code) != 0
+        self.bits & (1_u128 << code) != 0
     }
 
     pub fn insert(&mut self, code: u32) {
         assert!(code < CODE_COUNT_MAX);
 
-        self.bits |= 1_u64 << code;
+        self.bits |= 1_u128 << code;
     }
 }
 

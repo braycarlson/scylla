@@ -791,7 +791,7 @@ pub enum Reason {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Unused {
-    pub kept: u64,
+    pub kept: u128,
     pub payload: Span,
     pub reason: Reason,
     pub span: Span,
@@ -802,12 +802,12 @@ pub struct Unused {
 pub struct Regions {
     dropped: u32,
     entries: BoundedVec<Suppression>,
-    file: u64,
+    file: u128,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct Parsed {
-    codes: u64,
+    codes: u128,
     kind: Region,
     payload: Span,
     unknown: bool,
@@ -816,14 +816,14 @@ struct Parsed {
 
 #[derive(Clone, Copy, Debug)]
 struct Suppression {
-    codes: u64,
+    codes: u128,
     kind: Region,
     line: u32,
     payload: Span,
     span: Span,
     trailing: bool,
     unknown: bool,
-    used: u64,
+    used: u128,
     wildcard: bool,
 }
 
@@ -968,7 +968,7 @@ impl Regions {
         self.entries.count()
     }
 
-    pub fn unused_at(&self, index: u32, enabled: u64) -> Option<Unused> {
+    pub fn unused_at(&self, index: u32, enabled: u128) -> Option<Unused> {
         let entry = self.entries.get(index as usize)?;
 
         let whole = Unused {
@@ -1020,7 +1020,7 @@ impl Regions {
     pub fn claim(&mut self, line: u32, code: u32) -> bool {
         assert!(code < crate::rule::CODE_COUNT_MAX);
 
-        let mask = 1_u64 << code;
+        let mask = 1_u128 << code;
 
         if self.file & mask != 0 {
             self.mark(Region::File, mask);
@@ -1073,7 +1073,7 @@ impl Regions {
         false
     }
 
-    fn mark(&mut self, kind: Region, mask: u64) {
+    fn mark(&mut self, kind: Region, mask: u128) {
         for index in 0..self.entries.count() as usize {
             if self.entries[index].kind == kind && self.entries[index].codes & mask != 0 {
                 self.entries[index].used |= mask;
@@ -1081,7 +1081,7 @@ impl Regions {
         }
     }
 
-    fn reopened(&self, start: usize, line: u32, mask: u64) -> bool {
+    fn reopened(&self, start: usize, line: u32, mask: u128) -> bool {
         let opened = self.entries[start].line;
 
         for index in start + 1..self.entries.count() as usize {
@@ -1118,13 +1118,13 @@ pub fn directive_removed(source: &[u8], index: &lines::Index, found: &Unused) ->
     Span::between(start, line.end())
 }
 
-pub fn codes_written(codes: u64, prefix: &[u8], width: usize, target: &mut [u8]) -> Option<usize> {
+pub fn codes_written(codes: u128, prefix: &[u8], width: usize, target: &mut [u8]) -> Option<usize> {
     assert!(width >= 1);
 
     let mut length = 0;
 
     for code in 0..crate::rule::CODE_COUNT_MAX {
-        if codes & (1_u64 << code) == 0 {
+        if codes & (1_u128 << code) == 0 {
             continue;
         }
 
@@ -1203,8 +1203,8 @@ fn directive_of(
     None
 }
 
-fn codes_of(text: &[u8], code_of: &impl Fn(&[u8]) -> Option<u32>) -> (u64, bool, bool) {
-    let mut codes = 0_u64;
+fn codes_of(text: &[u8], code_of: &impl Fn(&[u8]) -> Option<u32>) -> (u128, bool, bool) {
+    let mut codes = 0_u128;
     let mut found = false;
     let mut offset = 0;
     let mut unknown = false;
@@ -1212,7 +1212,7 @@ fn codes_of(text: &[u8], code_of: &impl Fn(&[u8]) -> Option<u32>) -> (u64, bool,
     while offset < text.len() {
         if !text[offset].is_ascii_alphanumeric() {
             if text[offset] == b'*' {
-                return (u64::MAX, false, true);
+                return (u128::MAX, false, true);
             }
 
             offset += 1;
@@ -1224,7 +1224,7 @@ fn codes_of(text: &[u8], code_of: &impl Fn(&[u8]) -> Option<u32>) -> (u64, bool,
 
         match code_of(&text[offset..end]) {
             Some(index) if index < crate::rule::CODE_COUNT_MAX => {
-                codes |= 1_u64 << index;
+                codes |= 1_u128 << index;
                 found = true;
             }
             _ => unknown = true,
@@ -1234,7 +1234,7 @@ fn codes_of(text: &[u8], code_of: &impl Fn(&[u8]) -> Option<u32>) -> (u64, bool,
     }
 
     if !found && !unknown {
-        return (u64::MAX, false, true);
+        return (u128::MAX, false, true);
     }
 
     (codes, unknown, false)
@@ -1946,7 +1946,7 @@ mod tests {
         crate::rule::code_number_of(code)
     }
 
-    fn parsed_of(text: &[u8]) -> (Region, u64, bool) {
+    fn parsed_of(text: &[u8]) -> (Region, u128, bool) {
         let parsed = directive_of(text, &TIGERSTYLE, &tigerstyle_code).expect("it parses");
 
         (parsed.kind, parsed.codes, parsed.unknown)
@@ -1961,12 +1961,12 @@ mod tests {
 
         assert_eq!(
             parsed_of(b"# tigerstyle-ignore: *"),
-            (Region::Line, u64::MAX, false)
+            (Region::Line, u128::MAX, false)
         );
 
         assert_eq!(
             parsed_of(b"# tigerstyle-ignore:"),
-            (Region::Line, u64::MAX, false)
+            (Region::Line, u128::MAX, false)
         );
 
         assert!(directive_of(b"# a note", &TIGERSTYLE, &tigerstyle_code).is_none());

@@ -85,6 +85,7 @@ const READ_GENERATION: fn(&Store, FileID) -> u32 = Store::generation_of;
 const READ_GO_SEMANTIC: fn(&Store, FileID) -> Option<&GoSemantic> = Store::go_semantic;
 const READ_GO_VIEW: fn(&Store, FileID, u32) -> Option<go::ast::View<'_>> = Store::go_view;
 const READ_HASH: fn(&Store, FileID) -> u64 = Store::hash_of;
+const READ_IS_PENDING: fn(&Store, FileID) -> bool = Store::is_pending;
 
 const READ_JAVASCRIPT_SEMANTIC: fn(&Store, FileID) -> Option<&JavaScriptSemantic> =
     Store::javascript_semantic;
@@ -717,6 +718,7 @@ fn pending_builds_run_in_parallel_and_match_the_serial_answer() {
         let file = FileID::of(serial.find(hash_of(key.as_bytes())));
         let twin = FileID::of(parallel.find(hash_of(key.as_bytes())));
 
+        assert!(!READ_IS_PENDING(&parallel, twin));
         assert_eq!(serial.structure_of(file), parallel.structure_of(twin));
         assert_eq!(serial.source_of(file), parallel.source_of(twin));
         assert_eq!(serial.tokens_of(file).len(), parallel.tokens_of(twin).len());

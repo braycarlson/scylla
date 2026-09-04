@@ -361,6 +361,34 @@ impl Front {
         self.language
     }
 
+    pub fn markup_tokens(&self) -> &[markup::Token] {
+        match &self.tables {
+            Tables::Markup { tokens, .. } => tokens.as_slice(),
+            Tables::Css { .. }
+            | Tables::Go { .. }
+            | Tables::JavaScript { .. }
+            | Tables::Odin { .. }
+            | Tables::Python { .. }
+            | Tables::Rust { .. }
+            | Tables::TypeScript { .. }
+            | Tables::Zig { .. } => &[],
+        }
+    }
+
+    pub fn markup_tree(&self) -> Option<&Tree<MarkupKind>> {
+        match &self.tables {
+            Tables::Markup { tree, .. } => Some(tree),
+            Tables::Css { .. }
+            | Tables::Go { .. }
+            | Tables::JavaScript { .. }
+            | Tables::Odin { .. }
+            | Tables::Python { .. }
+            | Tables::Rust { .. }
+            | Tables::TypeScript { .. }
+            | Tables::Zig { .. } => None,
+        }
+    }
+
     pub fn markup_errors(&self) -> &[TreeError] {
         match &self.tables {
             Tables::Markup { tree, .. } => tree.errors(),

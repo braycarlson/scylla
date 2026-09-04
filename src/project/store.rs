@@ -697,6 +697,14 @@ impl Store {
         self.pending.clear();
     }
 
+    pub fn is_pending(&self, file: FileID) -> bool {
+        let index = file.index();
+
+        assert!(index < self.limits.file_count_max);
+
+        self.slots[index as usize].pending.load(Ordering::Acquire)
+    }
+
     pub fn pending_count(&self) -> u32 {
         count_of(self.pending.len())
     }
@@ -951,6 +959,10 @@ impl Store {
                     return index;
                 }
 
+                if slot.pending.load(Ordering::Acquire) {
+                    continue;
+                }
+
                 if slot.touch < oldest_touch {
                     oldest = index;
                     oldest_touch = slot.touch;
@@ -1180,6 +1192,55 @@ mod tests {
         assert!(store.errors_of(file).is_empty());
         assert!(!store.tokens_of(file).is_empty());
         assert_eq!(store.lines_of(file).count(), 6);
+    }
+
+    #[test]
+    fn an_eviction_never_takes_a_slot_whose_build_is_pending() {
+        let limits = limits_of(&[(Language::Python, 2)]);
+        let mut store = Store::reserve(&limits, Eviction::LeastRecentlyUsed);
+        let first = store.insert_pending(hash_of(b"a.py"), Language::Python, PYTHON);
+        let second = store.insert_pending(hash_of(b"b.py"), Language::Python, PYTHON_OTHER);
+
+        assert!(first != NONE);
+        assert!(second != NONE);
+        assert!(store.is_pending(FileID::of(first)));
+        assert!(store.is_pending(FileID::of(second)));
+
+        let third = store.insert_pending(hash_of(b"c.py"), Language::Python, PYTHON);
+
+        assert_eq!(
+            third, NONE,
+            "a store whose every slot is waiting on a build has no room, and \
+             answering with a pending slot would drop a build the caller is \
+             about to run"
+        );
+
+        assert!(store.is_pending(FileID::of(first)));
+        assert!(store.is_pending(FileID::of(second)));
+        assert_eq!(store.pending_count(), 2);
+    }
+
+    #[test]
+    fn an_eviction_passes_over_a_pending_slot_for_a_settled_one() {
+        let limits = limits_of(&[(Language::Python, 2)]);
+        let mut store = Store::reserve(&limits, Eviction::LeastRecentlyUsed);
+        let settled = store.insert(hash_of(b"a.py"), Language::Python, PYTHON);
+        let waiting = store.insert_pending(hash_of(b"b.py"), Language::Python, PYTHON_OTHER);
+
+        assert!(settled != NONE);
+        assert!(waiting != NONE);
+
+        let third = store.insert(hash_of(b"c.py"), Language::Python, PYTHON);
+
+        assert_eq!(
+            third, settled,
+            "the settled slot is the older one and the only one free to take"
+        );
+
+        assert!(store.is_pending(FileID::of(waiting)));
+        assert_eq!(store.find(hash_of(b"a.py")), NONE);
+        assert_eq!(store.find(hash_of(b"b.py")), waiting);
+        assert_eq!(store.find(hash_of(b"c.py")), third);
     }
 
     #[test]

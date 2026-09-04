@@ -16,12 +16,14 @@ use std::sync::{Condvar, Mutex};
 use std::thread::{JoinHandle, spawn};
 
 pub const WORKER_COUNT_MAX: u32 = 64;
+const CLAIM_GENERATION_SHIFT: u32 = 32;
+const CLAIM_INDEX_MASK: u64 = 0xFFFF_FFFF;
 const DRAIN_WAIT_MICROS: u64 = 100;
 
 type Trampoline = fn(NonNull<()>, u32, u32);
 
 struct Shared {
-    claim: AtomicU32,
+    claim: AtomicU64,
     count: AtomicU32,
     done: AtomicU32,
     generation: AtomicU64,
@@ -127,31 +129,40 @@ impl Pool {
     }
 
     fn launch(&self, erased: NonNull<()>, carried: Trampoline, count: u32) {
-        self.publish(erased, carried, count);
+        let generation = self.publish(erased, carried, count);
 
-        claim_and_run(self.shared, count, self.count());
+        claim_and_run(self.shared, generation, count, self.count());
 
         self.retire(count);
     }
 
-    fn publish(&self, erased: NonNull<()>, carried: Trampoline, count: u32) {
+    fn publish(&self, erased: NonNull<()>, carried: Trampoline, count: u32) -> u64 {
         let erased_body: *mut () = unsafe { transmute::<Trampoline, *mut ()>(carried) };
 
         self.shared.task.store(erased.as_ptr(), Ordering::Release);
         self.shared.trampoline.store(erased_body, Ordering::Release);
         self.shared.count.store(count, Ordering::Release);
         self.shared.done.store(0, Ordering::Release);
-        self.shared.claim.store(0, Ordering::Release);
 
         let Ok(started) = self.shared.lock.lock() else {
             panic!("a worker panicked and poisoned the pool")
         };
 
-        self.shared.generation.fetch_add(1, Ordering::AcqRel);
+        let generation = self
+            .shared
+            .generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+
+        self.shared
+            .claim
+            .store(tagged(generation), Ordering::Release);
 
         drop(started);
 
         self.shared.ready.notify_all();
+
+        generation
     }
 
     fn retire(&self, count: u32) {
@@ -206,7 +217,7 @@ impl Pool {
         );
 
         let shared: &'static Shared = Box::leak(Box::new(Shared {
-            claim: AtomicU32::new(0),
+            claim: AtomicU64::new(0),
             count: AtomicU32::new(0),
             done: AtomicU32::new(0),
             generation: AtomicU64::new(0),
@@ -271,8 +282,8 @@ impl Pool {
 
         let job = Job { body, task };
         let erased: NonNull<()> = NonNull::from(&job).cast::<()>();
+        let _generation = self.publish(erased, trampoline::<T>, count);
 
-        self.publish(erased, trampoline::<T>, count);
         self.drain_until(count, &mut drain);
         self.retire(count);
     }
@@ -327,8 +338,8 @@ impl Pool {
             task,
         };
         let erased: NonNull<()> = NonNull::from(&job).cast::<()>();
+        let _generation = self.publish(erased, stateful_trampoline::<T, S>, count);
 
-        self.publish(erased, stateful_trampoline::<T, S>, count);
         self.drain_until(count, &mut drain);
         self.retire(count);
     }
@@ -375,9 +386,9 @@ fn announce(shared: &'static Shared) {
     shared.retired.notify_all();
 }
 
-fn claim_and_run(shared: &'static Shared, count: u32, worker: u32) {
+fn claim_and_run(shared: &'static Shared, generation: u64, count: u32, worker: u32) {
     for _ in 0..count.saturating_add(1) {
-        let index = shared.claim.fetch_add(1, Ordering::AcqRel);
+        let index = claimed(shared, generation, count);
 
         if index >= count {
             return;
@@ -412,6 +423,36 @@ fn claim_and_run(shared: &'static Shared, count: u32, worker: u32) {
     }
 }
 
+fn claimed(shared: &'static Shared, generation: u64, count: u32) -> u32 {
+    let mut state = shared.claim.load(Ordering::Acquire);
+
+    for _ in 0..count.saturating_add(2) {
+        if state & !CLAIM_INDEX_MASK != tagged(generation) {
+            return count;
+        }
+
+        let index = u32::try_from(state & CLAIM_INDEX_MASK).unwrap_or(u32::MAX);
+
+        if index >= count {
+            return count;
+        }
+
+        let taken = shared.claim.compare_exchange(
+            state,
+            state.wrapping_add(1),
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
+
+        match taken {
+            Ok(_) => return index,
+            Err(seen) => state = seen,
+        }
+    }
+
+    panic!("a strong exchange fails only when the claim word moved, and it moves at most once an index")
+}
+
 fn serve(shared: &'static Shared, worker: u32) {
     let mut seen = 0_u64;
 
@@ -442,8 +483,12 @@ fn serve(shared: &'static Shared, worker: u32) {
 
         let count = shared.count.load(Ordering::Acquire);
 
-        claim_and_run(shared, count, worker);
+        claim_and_run(shared, seen, count, worker);
     }
+}
+
+const fn tagged(generation: u64) -> u64 {
+    (generation & CLAIM_INDEX_MASK) << CLAIM_GENERATION_SHIFT
 }
 
 fn stateful_trampoline<T, S>(task: NonNull<()>, worker: u32, index: u32)
