@@ -214,6 +214,46 @@ impl Fixes {
         true
     }
 
+    #[must_use]
+    pub fn edit_formatted(&mut self, span: Span, arguments: fmt::Arguments<'_>) -> bool {
+        assert!(self.pending.is_some());
+
+        let mut pending = self.pending.expect("a fix is open");
+
+        if pending.discarded {
+            return false;
+        }
+
+        let arena_before = self.arena.count();
+
+        let Some(written) = self.written(arguments, arena_before) else {
+            pending.discarded = true;
+            self.pending = Some(pending);
+
+            return false;
+        };
+
+        let pushed = self.edits.push(Edit {
+            replacement: written,
+            span,
+        });
+
+        if !pushed {
+            self.arena.truncate(arena_before);
+            self.overflowed = true;
+
+            pending.discarded = true;
+            self.pending = Some(pending);
+
+            return false;
+        }
+
+        pending.edit_count += 1;
+        self.pending = Some(pending);
+
+        true
+    }
+
     pub fn edits_of(&self, fix: &Fix) -> &[Edit] {
         let start = fix.edit_start as usize;
         let end = start + fix.edit_count as usize;
@@ -774,6 +814,35 @@ mod tests {
         plan(fixes, minimum, &mut claimed, &mut selected);
 
         selected.to_vec()
+    }
+
+    #[test]
+    fn a_formatted_replacement_reads_back_what_was_written() {
+        let mut fixes = reserved();
+
+        fixes.open("Rename", Applicability::Safe, 0);
+
+        assert!(fixes.edit_formatted(span(4, 5), format_args!("total_{}", 7)));
+
+        let index = fixes.close();
+        let fix = *fixes.get(index).expect("the fix is recorded");
+
+        assert_eq!(fixes.replacement_of(&fixes.edits_of(&fix)[0]), b"total_7");
+    }
+
+    #[test]
+    fn a_formatted_replacement_that_does_not_fit_discards_its_fix() {
+        let mut fixes = Fixes::reserve(4, 4, 8);
+
+        fixes.open("Rename", Applicability::Safe, 0);
+
+        assert!(!fixes.edit_formatted(
+            span(0, 1),
+            format_args!("{}", "a replacement far past the arena")
+        ));
+
+        assert_eq!(fixes.close(), NONE);
+        assert!(fixes.is_overflowed());
     }
 
     #[test]
