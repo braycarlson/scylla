@@ -1,4 +1,7 @@
+use core::fmt::{self, Write as _};
+
 use crate::bounded::{BoundedVec, Buffer, Bytes as _, Span, count_of};
+use crate::diagnostic::{MESSAGE_UNWRITTEN, Message};
 
 pub const NONE: u32 = u32::MAX;
 
@@ -39,7 +42,7 @@ pub struct Fix {
     pub edit_count: u32,
     pub edit_start: u32,
     pub isolation: u32,
-    pub title: &'static str,
+    pub title: Message,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -50,7 +53,7 @@ struct Pending {
     edit_count: u32,
     edit_start: u32,
     isolation: u32,
-    title: &'static str,
+    title: Message,
 }
 
 #[derive(Debug)]
@@ -58,7 +61,25 @@ pub struct Fixes {
     arena: Buffer,
     edits: BoundedVec<Edit>,
     items: BoundedVec<Fix>,
+    overflowed: bool,
     pending: Option<Pending>,
+}
+
+struct Writer<'run> {
+    buffer: &'run mut Buffer,
+    full: bool,
+}
+
+impl fmt::Write for Writer<'_> {
+    fn write_str(&mut self, text: &str) -> fmt::Result {
+        if self.buffer.push_bytes(text.as_bytes()) {
+            return Ok(());
+        }
+
+        self.full = true;
+
+        Err(fmt::Error)
+    }
 }
 
 impl Applicability {
@@ -83,6 +104,7 @@ impl Fixes {
             arena: Buffer::reserve(arena_bytes_max),
             edits: BoundedVec::reserve(edit_count_max),
             items: BoundedVec::reserve(fix_count_max),
+            overflowed: false,
             pending: None,
         }
     }
@@ -91,9 +113,15 @@ impl Fixes {
         self.arena.clear();
         self.edits.clear();
         self.items.clear();
+        self.overflowed = false;
         self.pending = None;
 
         assert_eq!(self.count(), 0);
+        assert!(!self.is_overflowed());
+    }
+
+    pub const fn is_overflowed(&self) -> bool {
+        self.overflowed
     }
 
     pub fn close(&mut self) -> u32 {
@@ -118,6 +146,8 @@ impl Fixes {
         });
 
         if !pushed {
+            self.overflowed = true;
+
             self.rewind(&pending);
 
             return NONE;
@@ -202,12 +232,37 @@ impl Fixes {
     }
 
     pub fn open(&mut self, title: &'static str, applicability: Applicability, isolation: u32) {
-        assert!(self.pending.is_none());
         assert!(!title.is_empty());
+
+        self.opened(Message::Static(title), applicability, isolation);
+    }
+
+    pub fn open_formatted(
+        &mut self,
+        applicability: Applicability,
+        isolation: u32,
+        arguments: fmt::Arguments<'_>,
+    ) {
+        let start = self.arena.count();
+
+        let title = self
+            .written(arguments, start)
+            .map_or(Message::Static(MESSAGE_UNWRITTEN), Message::Arena);
+
+        self.opened(title, applicability, isolation);
+    }
+
+    fn opened(&mut self, title: Message, applicability: Applicability, isolation: u32) {
+        assert!(self.pending.is_none());
+
+        let arena_start = match title {
+            Message::Arena(span) => span.offset,
+            Message::Static(_) => self.arena.count(),
+        };
 
         self.pending = Some(Pending {
             applicability,
-            arena_start: self.arena.count(),
+            arena_start,
             discarded: false,
             edit_count: 0,
             edit_start: self.edits.count(),
@@ -216,6 +271,43 @@ impl Fixes {
         });
 
         assert!(self.pending.is_some());
+    }
+
+    pub fn reshape(&mut self, index: u32, applicability: Applicability) {
+        let Some(fix) = self.items.get_mut(index as usize) else {
+            return;
+        };
+
+        fix.applicability = applicability;
+    }
+
+    pub fn title_of(&self, fix: &Fix) -> &[u8] {
+        match fix.title {
+            Message::Arena(span) => self.arena.as_bytes().get(span.range()).unwrap_or_default(),
+            Message::Static(text) => text.as_bytes(),
+        }
+    }
+
+    fn written(&mut self, arguments: fmt::Arguments<'_>, start: u32) -> Option<Span> {
+        let mut writer = Writer {
+            buffer: &mut self.arena,
+            full: false,
+        };
+
+        let outcome = write!(writer, "{arguments}");
+        let full = writer.full;
+
+        if outcome.is_err() || full {
+            self.arena.truncate(start);
+            self.overflowed = true;
+
+            return None;
+        }
+
+        Some(Span {
+            length: self.arena.count().saturating_sub(start),
+            offset: start,
+        })
     }
 
     #[must_use]
@@ -685,6 +777,66 @@ mod tests {
     }
 
     #[test]
+    fn a_formatted_title_reads_back_what_was_written() {
+        let mut fixes = reserved();
+
+        fixes.open_formatted(
+            Applicability::Safe,
+            0,
+            format_args!("Rename to `{}`", "total"),
+        );
+
+        assert!(fixes.edit(span(4, 5), b"total"));
+
+        let index = fixes.close();
+        let fix = *fixes.get(index).expect("the fix is recorded");
+
+        assert_eq!(fixes.title_of(&fix), b"Rename to `total`");
+        assert_eq!(fixes.replacement_of(&fixes.edits_of(&fix)[0]), b"total");
+    }
+
+    #[test]
+    fn a_reshaped_fix_carries_the_applicability_it_was_given() {
+        let mut fixes = reserved();
+
+        fixes.open("Rename", Applicability::Safe, 0);
+
+        assert!(fixes.edit(span(4, 5), b"total"));
+
+        let index = fixes.close();
+
+        fixes.reshape(index, Applicability::Unsafe);
+
+        assert_eq!(
+            fixes.get(index).expect("the fix is recorded").applicability,
+            Applicability::Unsafe
+        );
+
+        fixes.reshape(NONE, Applicability::Safe);
+    }
+
+    #[test]
+    fn a_table_that_ran_out_of_room_says_so() {
+        let mut fixes = Fixes::reserve(1, 4, 1 << 8);
+
+        assert!(!fixes.is_overflowed());
+
+        for _ in 0..2 {
+            fixes.open("Rename", Applicability::Safe, 0);
+
+            assert!(fixes.edit(span(0, 1), b"a"));
+
+            fixes.close();
+        }
+
+        assert!(fixes.is_overflowed());
+
+        fixes.clear();
+
+        assert!(!fixes.is_overflowed());
+    }
+
+    #[test]
     fn a_closed_fix_reads_back_what_went_in() {
         let mut fixes = reserved();
 
@@ -703,7 +855,7 @@ mod tests {
         assert_eq!(fix.applicability, Applicability::Safe);
         assert_eq!(fix.edit_count, 2);
         assert_eq!(fix.isolation, 3);
-        assert_eq!(fix.title, "Rename");
+        assert_eq!(fixes.title_of(&fix), b"Rename");
 
         let edits: Vec<Edit> = fixes.edits_of(&fix).to_vec();
 
