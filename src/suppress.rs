@@ -956,11 +956,7 @@ impl Regions {
                 trailing: !own_line,
                 unclosed: parsed.unclosed,
                 unknown: parsed.unknown,
-                used: if parsed.kind == Region::File {
-                    parsed.codes
-                } else {
-                    0
-                },
+                used: 0,
                 wildcard: parsed.wildcard,
             });
 
@@ -2227,6 +2223,21 @@ mod tests {
         assert!(regions.claim(0, 2));
         assert!(regions.claim(2, 2));
         assert!(!regions.claim(2, 3));
+    }
+
+    #[test]
+    fn a_file_directive_nothing_claims_reads_dead() {
+        const SOURCE: &[u8] = b"// tigerstyle-file-ignore: TS002\nlet x = 1;\n";
+
+        let mut regions = regions_of(SOURCE, &[Span::new(0, 32)]);
+
+        assert!(
+            regions.unused_at(0, u128::MAX).is_some(),
+            "a file directive covering a code nothing reported is dead"
+        );
+
+        assert!(regions.claim(1, 2));
+        assert!(regions.unused_at(0, u128::MAX).is_none());
     }
 
     #[test]
