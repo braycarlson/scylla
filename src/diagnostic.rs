@@ -159,35 +159,39 @@ impl Diagnostics {
         fix: u32,
         arguments: fmt::Arguments<'_>,
     ) -> bool {
-        let offset = self.arena.count();
-
-        if self.arena.write_fmt(arguments).is_err() {
-            self.arena.truncate(offset);
-
-            return self.push(Diagnostic {
+        self.push_formatted_row(
+            Diagnostic {
                 code,
                 fix,
-                message: Message::Static(MESSAGE_UNWRITTEN),
+                message: Message::Static(""),
                 related_count: 0,
                 related_start: 0,
                 rule,
                 severity,
                 span,
-            });
+            },
+            arguments,
+        )
+    }
+
+    #[must_use]
+    pub fn push_formatted_row(&mut self, row: Diagnostic, arguments: fmt::Arguments<'_>) -> bool {
+        let offset = self.arena.count();
+        let mut held = row;
+
+        if self.arena.write_fmt(arguments).is_err() {
+            self.arena.truncate(offset);
+
+            held.message = Message::Static(MESSAGE_UNWRITTEN);
+
+            return self.push(held);
         }
 
         let length = self.arena.flatten(offset);
 
-        self.push(Diagnostic {
-            code,
-            fix,
-            message: Message::Arena(Span { length, offset }),
-            related_count: 0,
-            related_start: 0,
-            rule,
-            severity,
-            span,
-        })
+        held.message = Message::Arena(Span { length, offset });
+
+        self.push(held)
     }
 
     #[must_use]
@@ -376,6 +380,27 @@ mod tests {
             diagnostics.related_message_of(&related[0]),
             b"declared here"
         );
+    }
+
+    #[test]
+    fn a_formatted_row_keeps_the_related_run_it_named() {
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
+
+        assert!(diagnostics.push_related(related_row(4)));
+
+        assert!(diagnostics.push_formatted_row(
+            Diagnostic {
+                related_count: 1,
+                related_start: 0,
+                ..row("TS001", 0, NONE)
+            },
+            format_args!("names {}", "one"),
+        ));
+
+        let held = diagnostics.at(0).copied().expect("the row was pushed");
+
+        assert_eq!(diagnostics.message_of(&held), b"names one");
+        assert_eq!(diagnostics.related_of(&held).len(), 1);
     }
 
     #[test]
