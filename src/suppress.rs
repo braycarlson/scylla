@@ -919,9 +919,7 @@ impl Regions {
         markers: &Markers,
         code_of: &impl Fn(&[u8]) -> Option<u32>,
     ) {
-        self.dropped = 0;
-        self.entries.clear();
-        self.file = 0;
+        self.clear();
 
         for comment in comments {
             assert!(comment.end() as usize <= source.len());
@@ -980,6 +978,12 @@ impl Regions {
 
     pub fn at(&self, index: u32) -> Option<&Suppression> {
         self.entries.get(index as usize)
+    }
+
+    pub fn clear(&mut self) {
+        self.dropped = 0;
+        self.entries.clear();
+        self.file = 0;
     }
 
     pub fn unclosed_at(&self, index: u32) -> bool {
@@ -2223,6 +2227,21 @@ mod tests {
         assert!(regions.claim(0, 2));
         assert!(regions.claim(2, 2));
         assert!(!regions.claim(2, 3));
+    }
+
+    #[test]
+    fn a_scan_forgets_the_regions_before_it() {
+        const SOURCE: &[u8] = b"// tigerstyle-ignore: TS002\nlet x = 1;\n";
+
+        let mut regions = regions_of(SOURCE, &[Span::new(0, 27)]);
+
+        assert_eq!(regions.count(), 1);
+
+        regions.clear();
+
+        assert_eq!(regions.count(), 0);
+        assert!(regions.at(0).is_none());
+        assert!(!regions.claim(1, 2), "a cleared table claims nothing");
     }
 
     #[test]
