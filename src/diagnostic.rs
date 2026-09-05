@@ -2,6 +2,7 @@ use core::fmt::{self, Write as _};
 
 use crate::bounded::{BoundedString, BoundedVec, Span, count_of};
 use crate::fix::NONE;
+use crate::project::store::FileID;
 
 pub const MESSAGE_UNWRITTEN: &str = "the finding message did not fit";
 
@@ -28,8 +29,17 @@ pub struct Diagnostic {
     pub code: &'static str,
     pub fix: u32,
     pub message: Message,
+    pub related_count: u32,
+    pub related_start: u32,
     pub rule: u32,
     pub severity: Severity,
+    pub span: Span,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Related {
+    pub file: FileID,
+    pub message: Message,
     pub span: Span,
 }
 
@@ -39,6 +49,7 @@ pub struct Diagnostics {
     items: BoundedVec<Diagnostic>,
     order: BoundedVec<u32>,
     overflowed: bool,
+    related: BoundedVec<Related>,
 }
 
 impl Severity {
@@ -64,6 +75,7 @@ impl Diagnostics {
             items: BoundedVec::reserve(count_max),
             order: BoundedVec::reserve(count_max),
             overflowed: false,
+            related: BoundedVec::reserve(count_max),
         }
     }
 
@@ -82,6 +94,7 @@ impl Diagnostics {
         self.items.clear();
         self.order.clear();
         self.overflowed = false;
+        self.related.clear();
 
         assert_eq!(self.count(), 0);
         assert!(!self.is_overflowed());
@@ -155,6 +168,8 @@ impl Diagnostics {
                 code,
                 fix,
                 message: Message::Static(MESSAGE_UNWRITTEN),
+                related_count: 0,
+                related_start: 0,
                 rule,
                 severity,
                 span,
@@ -167,10 +182,94 @@ impl Diagnostics {
             code,
             fix,
             message: Message::Arena(Span { length, offset }),
+            related_count: 0,
+            related_start: 0,
             rule,
             severity,
             span,
         })
+    }
+
+    #[must_use]
+    pub fn push_related(&mut self, related: Related) -> bool {
+        if self.related.push(related) {
+            return true;
+        }
+
+        self.overflowed = true;
+
+        false
+    }
+
+    pub fn push_related_formatted(
+        &mut self,
+        file: FileID,
+        span: Span,
+        arguments: fmt::Arguments<'_>,
+    ) -> bool {
+        let offset = self.arena.count();
+
+        if self.arena.write_fmt(arguments).is_err() {
+            self.arena.truncate(offset);
+
+            return self.push_related(Related {
+                file,
+                message: Message::Static(MESSAGE_UNWRITTEN),
+                span,
+            });
+        }
+
+        let length = self.arena.flatten(offset);
+
+        self.push_related(Related {
+            file,
+            message: Message::Arena(Span { length, offset }),
+            span,
+        })
+    }
+
+    pub fn related_count(&self) -> u32 {
+        self.related.count()
+    }
+
+    pub fn retain(&mut self, mut keep: impl FnMut(&Diagnostic) -> bool) {
+        let mut read = 0_u32;
+        let mut written = 0_u32;
+
+        while read < self.items.count() {
+            let held = self.items[read as usize];
+
+            read += 1;
+
+            if !keep(&held) {
+                continue;
+            }
+
+            self.items[written as usize] = held;
+            written += 1;
+        }
+
+        self.items.truncate(written);
+    }
+
+    pub fn related_message_of(&self, related: &Related) -> &[u8] {
+        match related.message {
+            Message::Arena(span) => {
+                assert!(span.end() <= self.arena.count());
+
+                &self.arena.as_bytes()[span.range()]
+            }
+            Message::Static(text) => text.as_bytes(),
+        }
+    }
+
+    pub fn related_of(&self, diagnostic: &Diagnostic) -> &[Related] {
+        let first = diagnostic.related_start as usize;
+        let count = diagnostic.related_count as usize;
+
+        self.related
+            .get(first..first.saturating_add(count))
+            .unwrap_or_default()
     }
 
     pub fn sort(&mut self) {
@@ -245,11 +344,109 @@ fn key_at(items: &[Diagnostic], index: u32) -> (u32, &'static str, u32) {
 mod tests {
     use super::*;
 
+    fn related_row(offset: u32) -> Related {
+        Related {
+            file: FileID::of(0),
+            message: Message::Static("declared here"),
+            span: Span { length: 1, offset },
+        }
+    }
+
+    #[test]
+    fn a_diagnostic_owns_the_related_rows_it_names() {
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
+
+        assert_eq!(diagnostics.related_count(), 0);
+        assert!(diagnostics.push_related(related_row(4)));
+        assert!(diagnostics.push_related(related_row(8)));
+
+        assert!(diagnostics.push(Diagnostic {
+            related_count: 2,
+            related_start: 0,
+            ..row("TS001", 0, NONE)
+        }));
+
+        let held = diagnostics.at(0).copied().expect("the row was pushed");
+        let related = diagnostics.related_of(&held);
+
+        assert_eq!(related.len(), 2);
+        assert_eq!(related[0].span.offset, 4);
+        assert_eq!(related[1].span.offset, 8);
+        assert_eq!(
+            diagnostics.related_message_of(&related[0]),
+            b"declared here"
+        );
+    }
+
+    #[test]
+    fn a_diagnostic_naming_no_related_row_reads_none() {
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
+
+        assert!(diagnostics.push(row("TS001", 0, NONE)));
+
+        let held = diagnostics.at(0).copied().expect("the row was pushed");
+
+        assert!(diagnostics.related_of(&held).is_empty());
+    }
+
+    #[test]
+    fn a_formatted_related_row_writes_into_the_arena() {
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
+
+        assert!(diagnostics.push_related_formatted(
+            FileID::of(0),
+            Span {
+                length: 1,
+                offset: 0
+            },
+            format_args!("bound at line {}", 12),
+        ));
+
+        let related = diagnostics.related_of(&Diagnostic {
+            related_count: 1,
+            related_start: 0,
+            ..row("TS001", 0, NONE)
+        });
+
+        assert_eq!(
+            diagnostics.related_message_of(&related[0]),
+            b"bound at line 12"
+        );
+    }
+
+    #[test]
+    fn a_cleared_table_forgets_its_related_rows() {
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
+
+        assert!(diagnostics.push_related(related_row(4)));
+
+        diagnostics.clear();
+
+        assert_eq!(diagnostics.related_count(), 0);
+    }
+
+    #[test]
+    fn a_retained_table_keeps_the_rows_the_test_names() {
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
+
+        for offset in 0..4 {
+            assert!(diagnostics.push(row("TS001", offset, NONE)));
+        }
+
+        diagnostics.retain(|held| held.span.offset % 2 == 0);
+
+        assert_eq!(diagnostics.count(), 2);
+        assert_eq!(diagnostics.at(0).expect("kept").span.offset, 0);
+        assert_eq!(diagnostics.at(1).expect("kept").span.offset, 2);
+    }
+
     fn row(code: &'static str, offset: u32, fix: u32) -> Diagnostic {
         Diagnostic {
             code,
             fix,
             message: Message::Static("a recorded finding"),
+            related_count: 0,
+            related_start: 0,
             rule: crate::rule::NONE,
             severity: Severity::Warning,
             span: Span { length: 1, offset },

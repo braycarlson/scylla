@@ -62,6 +62,8 @@ impl Round {
                 code: "PR001",
                 fix: index,
                 message: Message::Static("the name is renamed"),
+                related_count: 0,
+                related_start: 0,
                 rule: scylla::rule::NONE,
                 severity: Severity::Warning,
                 span: token.span(),

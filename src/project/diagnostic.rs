@@ -310,6 +310,8 @@ mod tests {
             code,
             fix: FIX_NONE,
             message: crate::diagnostic::Message::Static("a recorded finding"),
+            related_count: 0,
+            related_start: 0,
             rule: crate::rule::NONE,
             severity: Severity::Warning,
             span: Span { length: 1, offset },

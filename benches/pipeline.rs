@@ -1612,6 +1612,8 @@ fn record_renames(tokens: &[Token], fixes: &mut Fixes, diagnostics: &mut Diagnos
             code: "PR001",
             fix: index,
             message: Message::Static("a name is renamed"),
+            related_count: 0,
+            related_start: 0,
             rule: scylla::rule::NONE,
             severity: Severity::Warning,
             span: token.span(),
@@ -1670,6 +1672,8 @@ fn diagnostic_benches() {
                 code: "PR001",
                 fix: fix::NONE,
                 message: Message::Static("a row to sort"),
+                related_count: 0,
+                related_start: 0,
                 rule: scylla::rule::NONE,
                 severity: Severity::Warning,
                 span: scylla::bounded::Span {
