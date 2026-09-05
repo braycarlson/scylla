@@ -185,6 +185,8 @@ impl Fixes {
         let arena_before = self.arena.count();
 
         if !self.arena.push_bytes(replacement) {
+            self.overflowed = true;
+
             pending.discarded = true;
             self.pending = Some(pending);
 
@@ -201,6 +203,7 @@ impl Fixes {
 
         if !pushed {
             self.arena.truncate(arena_before);
+            self.overflowed = true;
 
             pending.discarded = true;
             self.pending = Some(pending);
@@ -882,6 +885,17 @@ mod tests {
         );
 
         fixes.reshape(NONE, Applicability::Safe);
+    }
+
+    #[test]
+    fn an_arena_that_fills_says_so_and_discards_the_fix() {
+        let mut fixes = Fixes::reserve(4, 4, 4);
+
+        fixes.open("Rename", Applicability::Safe, 0);
+
+        assert!(!fixes.edit(span(0, 1), b"far too long"));
+        assert_eq!(fixes.close(), NONE);
+        assert!(fixes.is_overflowed());
     }
 
     #[test]
