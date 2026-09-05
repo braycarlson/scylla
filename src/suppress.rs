@@ -773,6 +773,7 @@ pub struct Markers {
     pub enable: &'static [u8],
     pub file: &'static [u8],
     pub line: &'static [u8],
+    pub open: &'static [u8],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -793,6 +794,7 @@ pub enum Reason {
 #[derive(Clone, Copy, Debug)]
 pub struct Unused {
     pub kept: u128,
+    pub marker: Span,
     pub payload: Span,
     pub reason: Reason,
     pub span: Span,
@@ -810,22 +812,26 @@ pub struct Regions {
 struct Parsed {
     codes: u128,
     kind: Region,
+    marker: Span,
     payload: Span,
+    unclosed: bool,
     unknown: bool,
     wildcard: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Suppression {
-    codes: u128,
-    kind: Region,
-    line: u32,
-    payload: Span,
-    span: Span,
-    trailing: bool,
-    unknown: bool,
-    used: u128,
-    wildcard: bool,
+pub struct Suppression {
+    pub codes: u128,
+    pub kind: Region,
+    pub line: u32,
+    pub marker: Span,
+    pub payload: Span,
+    pub span: Span,
+    pub trailing: bool,
+    pub unclosed: bool,
+    pub unknown: bool,
+    pub used: u128,
+    pub wildcard: bool,
 }
 
 const ANNOTATION_COUNT_MAX: u32 = 32;
@@ -941,12 +947,14 @@ impl Regions {
                 codes: parsed.codes,
                 kind: parsed.kind,
                 line: target,
+                marker: Span::new(comment.offset + parsed.marker.offset, parsed.marker.length),
                 payload: Span::new(
                     comment.offset + parsed.payload.offset,
                     parsed.payload.length,
                 ),
                 span: comment,
                 trailing: !own_line,
+                unclosed: parsed.unclosed,
                 unknown: parsed.unknown,
                 used: if parsed.kind == Region::File {
                     parsed.codes
@@ -974,11 +982,36 @@ impl Regions {
         self.entries.count()
     }
 
+    pub fn at(&self, index: u32) -> Option<&Suppression> {
+        self.entries.get(index as usize)
+    }
+
+    pub fn unclosed_at(&self, index: u32) -> bool {
+        let Some(entry) = self.entries.get(index as usize) else {
+            return false;
+        };
+
+        if entry.kind != Region::Disable {
+            return false;
+        }
+
+        for later in index as usize + 1..self.entries.count() as usize {
+            let other = self.entries[later];
+
+            if other.kind == Region::Enable && other.codes & entry.codes != 0 {
+                return false;
+            }
+        }
+
+        true
+    }
+
     pub fn unused_at(&self, index: u32, enabled: u128) -> Option<Unused> {
         let entry = self.entries.get(index as usize)?;
 
         let whole = Unused {
             kept: 0,
+            marker: entry.marker,
             payload: entry.payload,
             reason: Reason::Dead,
             span: entry.span,
@@ -1161,15 +1194,57 @@ pub fn codes_written(codes: u128, prefix: &[u8], width: usize, target: &mut [u8]
     Some(length)
 }
 
-fn closed<'held>(listed: &'held [u8], close: &[u8]) -> &'held [u8] {
+fn listed_of<'held>(
+    rest: &'held [u8],
+    open: &[u8],
+    close: &[u8],
+) -> Option<(usize, &'held [u8], bool)> {
+    if !open.is_empty() && !rest.starts_with(open) {
+        return None;
+    }
+
+    let listed = &rest[open.len()..];
+
     if close.is_empty() {
-        return listed;
+        return Some((open.len(), listed, true));
     }
 
     match crate::scan::find(listed, close) {
-        Some(offset) => &listed[..offset],
-        None => listed,
+        Some(offset) => Some((open.len(), &listed[..offset], true)),
+        None => Some((open.len(), listed, false)),
     }
+}
+
+pub struct Codes<'text> {
+    offset: usize,
+    text: &'text [u8],
+}
+
+impl Iterator for Codes<'_> {
+    type Item = Span;
+
+    fn next(&mut self) -> Option<Span> {
+        while self.offset < self.text.len() {
+            if !self.text[self.offset].is_ascii_alphanumeric() {
+                self.offset += 1;
+
+                continue;
+            }
+
+            let start = self.offset;
+            let end = code_end(self.text, start);
+
+            self.offset = end;
+
+            return Some(Span::between(count_of(start), count_of(end)));
+        }
+
+        None
+    }
+}
+
+pub fn codes_at(text: &[u8]) -> Codes<'_> {
+    Codes { offset: 0, text }
 }
 
 fn code_end(text: &[u8], start: usize) -> usize {
@@ -1207,19 +1282,41 @@ fn directive_of(
             continue;
         };
 
-        let mut open = start + marker.len();
+        let word = start + marker.len();
+        let mut open = word;
 
         while open < body.len() && body[open] == b' ' {
             open += 1;
         }
 
-        let listed = closed(&body[open..], markers.close);
+        let Some((width, listed, closed)) = listed_of(&body[open..], markers.open, markers.close)
+        else {
+            return Some(Parsed {
+                codes: u128::MAX,
+                kind,
+                marker: Span::between(count_of(start), count_of(word)),
+                payload: Span::new(count_of(word), 0),
+                unclosed: false,
+                unknown: false,
+                wildcard: true,
+            });
+        };
+
+        let from = open + width;
         let (codes, unknown, wildcard) = codes_of(listed, code_of);
+
+        let end = if closed {
+            from + listed.len() + markers.close.len()
+        } else {
+            body.len()
+        };
 
         return Some(Parsed {
             codes,
             kind,
-            payload: Span::new(count_of(open), count_of(listed.trim_ascii_end().len())),
+            marker: Span::between(count_of(start), count_of(end)),
+            payload: Span::new(count_of(from), count_of(listed.trim_ascii_end().len())),
+            unclosed: !closed,
             unknown,
             wildcard,
         });
@@ -1229,33 +1326,22 @@ fn directive_of(
 }
 
 fn codes_of(text: &[u8], code_of: &impl Fn(&[u8]) -> Option<u32>) -> (u128, bool, bool) {
+    if text.contains(&b'*') {
+        return (u128::MAX, false, true);
+    }
+
     let mut codes = 0_u128;
     let mut found = false;
-    let mut offset = 0;
     let mut unknown = false;
 
-    while offset < text.len() {
-        if !text[offset].is_ascii_alphanumeric() {
-            if text[offset] == b'*' {
-                return (u128::MAX, false, true);
-            }
-
-            offset += 1;
-
-            continue;
-        }
-
-        let end = code_end(text, offset);
-
-        match code_of(&text[offset..end]) {
+    for span in codes_at(text) {
+        match code_of(&text[span.range()]) {
             Some(index) if index < crate::rule::CODE_COUNT_MAX => {
                 codes |= 1_u128 << index;
                 found = true;
             }
             _ => unknown = true,
         }
-
-        offset = end;
     }
 
     if !found && !unknown {
@@ -1962,6 +2048,7 @@ mod tests {
         enable: b"tigerstyle-enable:",
         file: b"tigerstyle-file-ignore:",
         line: b"tigerstyle-ignore:",
+        open: b"",
     };
 
     fn tigerstyle_code(code: &[u8]) -> Option<u32> {
@@ -2162,6 +2249,7 @@ mod tests {
         enable: b"parhelion: on",
         file: b"parhelion: ok-file",
         line: b"parhelion: ok",
+        open: b"(",
     };
 
     fn parhelion_code(code: &[u8]) -> Option<u32> {
@@ -2240,5 +2328,117 @@ mod tests {
             parsed_of(b"// tigerstyle-ignore: TS002-"),
             (Region::Line, 1 << 2, false)
         );
+    }
+
+    #[test]
+    fn a_marker_spans_its_own_text_and_no_more() {
+        const TEXT: &[u8] = b"{# parhelion: ok(GL001) #}";
+
+        let parsed = parhelion_of(TEXT);
+
+        assert_eq!(&TEXT[parsed.marker.range()], b"parhelion: ok(GL001)");
+        assert_eq!(&TEXT[parsed.payload.range()], b"GL001");
+        assert!(!parsed.unclosed);
+    }
+
+    #[test]
+    fn a_marker_that_opens_no_list_spans_the_word_alone() {
+        const TEXT: &[u8] = b"{# parhelion: ok #}";
+
+        let parsed = parhelion_of(TEXT);
+
+        assert_eq!(&TEXT[parsed.marker.range()], b"parhelion: ok");
+        assert_eq!(parsed.codes, u128::MAX);
+        assert!(parsed.wildcard);
+        assert!(!parsed.unknown);
+    }
+
+    #[test]
+    fn prose_where_a_list_would_open_is_not_a_code() {
+        let parsed = parhelion_of(b"{# parhelion: ok the api is legacy #}");
+
+        assert!(
+            parsed.wildcard,
+            "a reason without a list is still a blanket"
+        );
+        assert!(!parsed.unknown);
+    }
+
+    #[test]
+    fn a_file_marker_that_opens_no_list_is_a_blanket() {
+        let parsed = parhelion_of(b"{# parhelion: ok-file #}");
+
+        assert_eq!(parsed.kind, Region::File);
+        assert!(parsed.wildcard);
+    }
+
+    #[test]
+    fn a_list_that_never_closes_reads_unclosed() {
+        let parsed = parhelion_of(b"{# parhelion: ok(GL001 #}");
+
+        assert!(parsed.unclosed);
+        assert_eq!(parsed.codes, 1 << 1);
+
+        assert!(
+            !parhelion_of(b"{# parhelion: ok(GL001) #}").unclosed,
+            "a list that closes is not unclosed"
+        );
+    }
+
+    #[test]
+    fn a_list_names_the_span_of_every_code_it_holds() {
+        const TEXT: &[u8] = b"GL001, glue/unregistered-name";
+
+        let spans: Vec<&[u8]> = codes_at(TEXT).map(|span| &TEXT[span.range()]).collect();
+
+        assert_eq!(spans, [b"GL001".as_slice(), b"glue/unregistered-name"]);
+    }
+
+    #[test]
+    fn a_disable_no_enable_closes_reads_unclosed() {
+        const SOURCE: &[u8] =
+            b"{# parhelion: off(GL001) #}\n<p>x</p>\n{# parhelion: on(GL015) #}\n";
+
+        let index = indexed(SOURCE);
+        let mut regions = Regions::reserve(8);
+
+        regions.scan(
+            SOURCE,
+            fenced_of(SOURCE, b"{#", b"#}").into_iter(),
+            &index,
+            &PARHELION,
+            &parhelion_code,
+        );
+
+        assert_eq!(regions.count(), 2);
+        assert!(
+            regions.unclosed_at(0),
+            "on(GL015) does not close off(GL001)"
+        );
+        assert!(!regions.unclosed_at(1), "an enable is never unclosed");
+
+        assert_eq!(
+            regions.at(0).expect("the disable was read").kind,
+            Region::Disable
+        );
+    }
+
+    #[test]
+    fn a_disable_an_enable_closes_reads_closed() {
+        const SOURCE: &[u8] =
+            b"{# parhelion: off(GL001) #}\n<p>x</p>\n{# parhelion: on(GL001) #}\n";
+
+        let index = indexed(SOURCE);
+        let mut regions = Regions::reserve(8);
+
+        regions.scan(
+            SOURCE,
+            fenced_of(SOURCE, b"{#", b"#}").into_iter(),
+            &index,
+            &PARHELION,
+            &parhelion_code,
+        );
+
+        assert!(!regions.unclosed_at(0));
     }
 }
