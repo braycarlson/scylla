@@ -1,4 +1,4 @@
-use crate::bounded::{Buffer, Bytes as _, Span, count_of};
+use crate::bounded::{BoundedVec, Buffer, Bytes as _, Span, count_of};
 use crate::format::ir::{
     CHOICE_DEPTH_MAX,
     Document,
@@ -9,6 +9,7 @@ use crate::format::ir::{
 };
 
 pub const INDENT_COLUMNS_MAX: u32 = 1 << 10;
+const ALIGN_COLUMNS: u32 = 2;
 const FILL_RESERVE: u32 = 1;
 const SPACES: [u8; 64] = [b' '; 64];
 
@@ -19,6 +20,8 @@ pub struct Options {
     pub tabs: bool,
 }
 
+const LINE_SUFFIXES: bool = true;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Width {
     Broken,
@@ -28,6 +31,7 @@ enum Width {
 #[derive(Debug)]
 struct Printer {
     column: u32,
+    columns: u32,
     indent: u32,
     line_start: bool,
     pending_space: bool,
@@ -44,9 +48,12 @@ struct State {
     hugs: [bool; GROUP_DEPTH_MAX as usize + 1],
     losing: bool,
     losses: u32,
+    marks: [bool; GROUP_DEPTH_MAX as usize + 1],
     nested: u32,
     owes: u32,
     owing: [bool; INDENT_DEPTH_MAX as usize],
+    owning: [bool; INDENT_DEPTH_MAX as usize],
+    owns: u32,
     printer: Printer,
     seen: [u32; CHOICE_DEPTH_MAX as usize],
     skipping: bool,
@@ -64,9 +71,12 @@ impl State {
             hugs: [false; GROUP_DEPTH_MAX as usize + 1],
             losing: false,
             losses: 0,
+            marks: [false; GROUP_DEPTH_MAX as usize + 1],
             nested: 0,
             owes: 0,
             owing: [false; INDENT_DEPTH_MAX as usize],
+            owning: [false; INDENT_DEPTH_MAX as usize],
+            owns: 0,
             printer: Printer::new(),
             seen: [0; CHOICE_DEPTH_MAX as usize],
             skipping: false,
@@ -113,7 +123,7 @@ impl State {
         }
 
         let column = if self.printer.line_start {
-            self.printer.indent * options.indent_width
+            self.printer.leading(options)
         } else {
             self.printer.column + u32::from(self.printer.pending_space)
         };
@@ -184,6 +194,10 @@ impl State {
         self.broken[self.depth as usize]
     }
 
+    const fn marked(&self) -> bool {
+        self.marks[self.depth as usize]
+    }
+
     fn close(&mut self) -> bool {
         assert!(self.depth > 0);
 
@@ -204,6 +218,37 @@ impl State {
         assert!(self.printer.indent < INDENT_DEPTH_MAX);
 
         self.printer.indent += 1;
+
+        true
+    }
+
+    fn aligns(&mut self) -> bool {
+        if self.owns == INDENT_DEPTH_MAX {
+            return false;
+        }
+
+        let held = self.broken();
+
+        self.owning[self.owns as usize] = held;
+        self.owns += 1;
+
+        if held {
+            self.printer.columns += ALIGN_COLUMNS;
+        }
+
+        true
+    }
+
+    fn aligned(&mut self) -> bool {
+        assert!(self.owns > 0);
+
+        self.owns -= 1;
+
+        if self.owning[self.owns as usize] {
+            assert!(self.printer.columns >= ALIGN_COLUMNS);
+
+            self.printer.columns -= ALIGN_COLUMNS;
+        }
 
         true
     }
@@ -236,7 +281,7 @@ impl State {
 
         if self.filled[self.depth as usize] {
             let column = if self.printer.line_start {
-                self.printer.indent * options.indent_width
+                self.printer.leading(options)
             } else {
                 self.printer.column + 1
             };
@@ -263,7 +308,7 @@ impl State {
         self.hugged = false;
 
         let column = if self.printer.line_start {
-            self.printer.indent * options.indent_width
+            self.printer.leading(options)
         } else {
             self.printer.column + u32::from(self.printer.pending_space)
         };
@@ -294,7 +339,8 @@ impl State {
             (width_of(held, index, budget, blank), false)
         };
 
-        let flat = !marked && (!self.broken() || matches!(measured, Width::Flat(_)));
+        let inherits = !self.broken() && !self.hugs[self.depth as usize];
+        let flat = !marked && (inherits || matches!(measured, Width::Flat(_)));
 
         let fills = matches!(
             document.elements().get((index + 1) as usize),
@@ -305,6 +351,7 @@ impl State {
         self.broken[self.depth as usize] = !flat;
         self.filled[self.depth as usize] = fills;
         self.hugs[self.depth as usize] = hugs;
+        self.marks[self.depth as usize] = marked;
 
         true
     }
@@ -336,6 +383,7 @@ impl Printer {
     const fn new() -> Self {
         Self {
             column: 0,
+            columns: 0,
             indent: 0,
             line_start: true,
             pending_space: false,
@@ -343,8 +391,24 @@ impl Printer {
         }
     }
 
+    const fn leading(&self, options: Options) -> u32 {
+        self.indent * options.indent_width + self.columns
+    }
+
+    fn aligning(&mut self, out: &mut Buffer) -> bool {
+        assert!(self.columns <= count_of(SPACES.len()));
+
+        if !out.push_bytes(&SPACES[..self.columns as usize]) {
+            return false;
+        }
+
+        self.column += self.columns;
+
+        true
+    }
+
     fn indentation(&mut self, out: &mut Buffer, options: Options) -> bool {
-        if self.indent == 0 {
+        if self.indent == 0 && self.columns == 0 {
             return true;
         }
 
@@ -357,10 +421,10 @@ impl Printer {
 
             self.column = self.indent * options.indent_width;
 
-            return true;
+            return self.columns == 0 || self.aligning(out);
         }
 
-        let width = self.indent * options.indent_width;
+        let width = self.leading(options);
 
         assert!(width <= INDENT_COLUMNS_MAX);
 
@@ -590,6 +654,10 @@ impl Measure<'_> {
             return (0, 0, false);
         }
 
+        if LINE_SUFFIXES && self.document.suffixed() && bytes.starts_with(b"//") {
+            return (0, 0, false);
+        }
+
         columns_of(bytes)
     }
 }
@@ -630,6 +698,7 @@ fn trailing(held: &Measure<'_>, element: Element, blank: bool) -> Option<u32> {
         | Element::Pragma
         | Element::SoftLine => None,
         Element::Space => Some(u32::from(!blank)),
+        Element::Hugging(_) => Some(0),
         Element::IfBroken(_)
         | Element::Joined(_)
         | Element::Text(..)
@@ -640,9 +709,12 @@ fn trailing(held: &Measure<'_>, element: Element, blank: bool) -> Option<u32> {
         | Element::GroupClose
         | Element::GroupOpen
         | Element::Indent
+        | Element::Align
+        | Element::Dealign
         | Element::DedentBroken
         | Element::Filled
         | Element::Hugged
+        | Element::Hugs
         | Element::IndentBroken
         | Element::Wide => Some(0),
     }
@@ -780,7 +852,7 @@ fn hugged(elements: &[Element], start: u32) -> Option<u32> {
             depth -= 1;
         }
 
-        if depth == 0 && element == Element::Hugged {
+        if depth == 0 && matches!(element, Element::Hugged | Element::Hugs) {
             return Some(index);
         }
 
@@ -822,11 +894,15 @@ fn prefix_width(held: &Measure<'_>, from: u32, to: u32, budget: u32, owed: bool)
                 width += leading;
             }
             Element::Dedent
+            | Element::Align
+            | Element::Dealign
             | Element::DedentBroken
             | Element::Filled
             | Element::GroupClose
             | Element::GroupOpen
             | Element::Hugged
+            | Element::Hugging(_)
+            | Element::Hugs
             | Element::IfBroken(_)
             | Element::Indent
             | Element::IndentBroken
@@ -921,9 +997,13 @@ fn body_width(held: &Measure<'_>, elements: &[Element], start: u32, budget: u32)
                 width += leading;
             }
             Element::Dedent
+            | Element::Align
+            | Element::Dealign
             | Element::DedentBroken
             | Element::Filled
             | Element::Hugged
+            | Element::Hugging(_)
+            | Element::Hugs
             | Element::IfBroken(_)
             | Element::Indent
             | Element::IndentBroken
@@ -988,6 +1068,11 @@ enum Held {
     Wide,
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "the walk names every element the document holds, and a shorter form would be a \
+              table the compiler cannot check"
+)]
 fn spanning(held: &Measure<'_>, from: u32, budget: u32, mut width: u32, kind: Held) -> Width {
     let mut glued = kind == Held::Joined;
     let elements = held.document.elements();
@@ -1053,9 +1138,13 @@ fn spanning(held: &Measure<'_>, from: u32, budget: u32, mut width: u32, kind: He
                 width = found;
             }
             Element::Dedent
+            | Element::Align
+            | Element::Dealign
             | Element::DedentBroken
             | Element::Filled
             | Element::Hugged
+            | Element::Hugging(_)
+            | Element::Hugs
             | Element::IfBroken(_)
             | Element::Indent
             | Element::IndentBroken
@@ -1102,7 +1191,13 @@ fn measured(
             Some(0)
         }
         Element::Choice(_) | Element::ChoiceClose | Element::Variant => Some(0),
-        Element::Dedent | Element::IfBroken(_) | Element::Indent | Element::SoftLine => Some(0),
+        Element::Align
+        | Element::Dealign
+        | Element::Dedent
+        | Element::Hugging(_)
+        | Element::IfBroken(_)
+        | Element::Indent
+        | Element::SoftLine => Some(0),
         Element::GroupClose => {
             assert!(*depth > 0);
 
@@ -1131,6 +1226,7 @@ fn measured(
         Element::DedentBroken
         | Element::Filled
         | Element::Hugged
+        | Element::Hugs
         | Element::IndentBroken
         | Element::Pragma
         | Element::Wide => Some(0),
@@ -1288,20 +1384,55 @@ pub fn print(
     options: Options,
     out: &mut Buffer,
 ) -> bool {
+    printing(document, source, arena, options, out, None)
+}
+
+pub fn printing(
+    document: &Document,
+    source: &[u8],
+    arena: &[u8],
+    options: Options,
+    out: &mut Buffer,
+    mut lines: Option<&mut BoundedVec<u32>>,
+) -> bool {
     assert!(options.indent_width > 0);
     assert!(options.line_width > 0);
 
     document.close();
     out.clear();
 
+    if let Some(held) = lines.as_deref_mut() {
+        held.clear();
+    }
+
     let count = count_of(document.elements().len());
+    let mut held = 0_u32;
     let mut state = State::new();
 
     for index in 0..count {
+        let element = document.elements()[index as usize];
+        let before = out.count();
+
         if !step(&mut state, document, source, arena, options, out, index) {
             out.clear();
 
             return false;
+        }
+
+        let Some(mapped) = lines.as_deref_mut() else {
+            continue;
+        };
+
+        if let Element::Text(Source::Document, span) | Element::Verbatim(span) = element {
+            held = span.offset;
+        }
+
+        for byte in &out.as_bytes()[before as usize..] {
+            if *byte == b'\n' && !mapped.push(held) {
+                out.clear();
+
+                return false;
+            }
         }
     }
 
@@ -1370,6 +1501,7 @@ fn step(
             index,
         ),
         Element::HardLine => state.printer.newline(out),
+        Element::Hugging(span) => hugs(state, document, source, arena, options, out, span),
         Element::IfBroken(span) => {
             if !state.broken() {
                 return true;
@@ -1379,6 +1511,8 @@ fn step(
 
             state.printer.text(out, bytes, options)
         }
+        Element::Align => state.aligns(),
+        Element::Dealign => state.aligned(),
         Element::Indent => state.indent(),
         Element::IndentBroken => state.owe(),
         Element::DedentBroken => state.owed(),
@@ -1388,6 +1522,7 @@ fn step(
 
             true
         }
+        Element::Hugs => true,
         Element::Joined(span) => joins(state, document, source, arena, options, out, span),
         Element::Line => state.line(
             &Measure {
@@ -1440,6 +1575,24 @@ fn chosen(
         Element::Variant => Some(state.variant()),
         _ => None,
     }
+}
+
+fn hugs(
+    state: &mut State,
+    document: &Document,
+    source: &[u8],
+    arena: &[u8],
+    options: Options,
+    out: &mut Buffer,
+    span: Span,
+) -> bool {
+    if !state.marked() {
+        return true;
+    }
+
+    let bytes = bytes_of(document, source, arena, Source::Literal, span);
+
+    state.printer.text(out, bytes, options) && state.printer.newline(out)
 }
 
 fn joins(

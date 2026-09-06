@@ -1,0 +1,4 @@
+[
+ {"file": "src/format/javascript.rs", "on": "    binary_lines: true,", "off": "    binary_lines: false,", "mark": "    binary_lines: true,"},
+ {"file": "src/format/typescript.rs", "on": "    binary_lines: true,", "off": "    binary_lines: false,", "mark": "    binary_lines: true,"}
+]

@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/brace/wide.rs", "on": "const OBJECT_OPERANDS: bool = true;", "off": "const OBJECT_OPERANDS: bool = false;", "mark": "const OBJECT_OPERANDS: bool = true;"}
+]

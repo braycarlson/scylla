@@ -1,0 +1,4 @@
+[
+ {"file": "src/format/javascript.rs", "on": "    declare_lines: true,", "off": "    declare_lines: false,", "mark": "    declare_lines: true,"},
+ {"file": "src/format/typescript.rs", "on": "    declare_lines: true,", "off": "    declare_lines: false,", "mark": "    declare_lines: true,"}
+]

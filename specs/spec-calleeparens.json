@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/mask.rs", "on": "        if wrapped(nodes, rules, count_of(index), node) {", "off": "        if false && wrapped(nodes, rules, count_of(index), node) {", "mark": "        if wrapped(nodes, rules, count_of(index), node) {"}
+]

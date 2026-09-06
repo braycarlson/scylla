@@ -20,10 +20,10 @@ pub mod zig;
 
 use crate::bounded::{Buffer, Span};
 use crate::language::Language;
-use crate::lines;
+use crate::lines::{self, LineEnding};
 use crate::suppress::Pragmas;
 use crate::syntax::front::{Front, Tables};
-use crate::syntax::python::style::{self, LineEnding};
+use crate::syntax::python::style;
 use crate::token::{Token, TokenKind};
 
 pub use python::QuotePreference;

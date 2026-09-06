@@ -58,6 +58,14 @@ impl Span {
     pub const fn range(self) -> core::ops::Range<usize> {
         self.offset as usize..self.end() as usize
     }
+
+    #[must_use]
+    pub const fn shifted(self, base: u32) -> Self {
+        Self {
+            length: self.length,
+            offset: base.saturating_add(self.offset),
+        }
+    }
 }
 
 pub fn count_of(length: usize) -> u32 {
@@ -121,6 +129,13 @@ mod tests {
 
         assert_eq!(span, Span::new(4, 6));
         assert_eq!(Span::between(7, 7), Span::new(7, 0));
+    }
+
+    #[test]
+    fn a_shifted_span_keeps_its_length() {
+        assert_eq!(Span::new(4, 6).shifted(10), Span::new(14, 6));
+        assert_eq!(Span::new(4, 6).shifted(0), Span::new(4, 6));
+        assert_eq!(Span::new(4, 6).shifted(u32::MAX).offset, u32::MAX);
     }
 
     #[test]

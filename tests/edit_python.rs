@@ -1,13 +1,13 @@
 use scylla::bounded::{BoundedVec, Span};
 use scylla::language::Lexer as _;
 use scylla::lex::PYTHON;
-use scylla::lines;
+use scylla::lines::{self, LineEnding};
 use scylla::syntax::python::classify::classify;
 use scylla::syntax::python::edit::{self, Deletion};
 use scylla::syntax::python::imports;
 use scylla::syntax::python::kind::PythonKind;
 use scylla::syntax::python::parse;
-use scylla::syntax::python::style::{self, LineEnding, QuoteStyle};
+use scylla::syntax::python::style::{self, QuoteStyle};
 use scylla::token::Tokens;
 use scylla::tree::{Events, NONE, Structure, Tree};
 

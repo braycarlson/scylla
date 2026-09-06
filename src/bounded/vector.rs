@@ -1,5 +1,7 @@
 use core::ops::{Deref, DerefMut};
 
+use super::Bytes;
+
 #[derive(Debug)]
 pub struct BoundedVec<T> {
     capacity: u32,
@@ -121,6 +123,22 @@ impl<T: Copy> BoundedVec<T> {
     }
 }
 
+impl Bytes for BoundedVec<u8> {
+    fn push_bytes(&mut self, bytes: &[u8]) -> bool {
+        let length = self.items.len() + bytes.len();
+
+        if length > self.capacity as usize {
+            return false;
+        }
+
+        self.items.extend_from_slice(bytes);
+
+        assert_eq!(self.items.len(), length);
+
+        true
+    }
+}
+
 impl<T> Deref for BoundedVec<T> {
     type Target = [T];
 
@@ -164,6 +182,19 @@ mod tests {
 
         vector.push_assert(0);
         vector.push_assert(1);
+    }
+
+    #[test]
+    fn push_bytes_writes_all_or_nothing() {
+        let mut vector = BoundedVec::<u8>::reserve(8);
+
+        assert!(vector.push_bytes(b"abcd"));
+        assert!(!vector.push_bytes(b"efghi"));
+        assert_eq!(&*vector, b"abcd");
+
+        assert!(vector.push_bytes(b"efgh"));
+        assert_eq!(&*vector, b"abcdefgh");
+        assert!(vector.is_full());
     }
 
     #[test]

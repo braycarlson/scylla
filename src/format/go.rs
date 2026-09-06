@@ -11,13 +11,16 @@ const DEPTH_MAX: u32 = 64;
 pub const POLICY: Policy = Policy {
     angle_calls: false,
     angle_objects: false,
+    arm_bars: false,
     arm_empties: false,
     arm_flattens: false,
     arm_guards: false,
     arrow_after: &[],
+    arrow_bodies: false,
     arrow_parens: false,
     assign_groups: false,
     assign_joins: false,
+    assign_lines: false,
     assign_values: false,
     assign_wraps: false,
     chain_soles: false,
@@ -34,10 +37,12 @@ pub const POLICY: Policy = Policy {
     attribute_width: 0,
     attribute_words: &[],
     bar_levels: false,
+    binary_lines: false,
     binary_parts: false,
     binding_bases: &[],
     binding_codes: false,
     binding_leads: false,
+    binder_words: &[],
     binding_words: &[],
     blank_edges: false,
     blank_max: 1,
@@ -45,8 +50,10 @@ pub const POLICY: Policy = Policy {
     block_joins: false,
     block_leads: &[],
     block_words: &[],
+    body_owns: false,
     body_parts: false,
     body_words: &[],
+    brace_bodies: false,
     brace_continues: true,
     brace_counts: false,
     brace_dedents: false,
@@ -67,21 +74,26 @@ pub const POLICY: Policy = Policy {
     carriage_breaks: false,
     callee_marks: &[],
     callee_words: &[],
+    cast_joins: false,
     cast_words: &[],
     clause_bases: false,
     clause_ends: false,
+    clause_lines: false,
     clause_words: &[],
     close_hugs: true,
     colon_continues: false,
     comma_continues: true,
     comma_adds: false,
     comma_drops: false,
+    comma_parts: false,
+    compose_parts: false,
     construct_words: &[],
     continue_words: &[],
     convention_strings: false,
     define_joins: false,
     define_widths: false,
     define_words: &[],
+    declare_lines: false,
     declaration_words: &[],
     declare_words: &[b"const", b"func", b"import", b"type", b"var"],
     dedent_words: &[b"case", b"default"],
@@ -102,7 +114,9 @@ pub const POLICY: Policy = Policy {
     header_extends: false,
     header_joins: false,
     header_levels: false,
+    header_lines: false,
     header_parens: false,
+    header_widths: false,
     header_words: &[],
     heritage_parts: false,
     hug_braces: true,
@@ -110,6 +124,8 @@ pub const POLICY: Policy = Policy {
     hug_lasts: false,
     hug_soles: false,
     hug_words: &[b"chan", b"func", b"interface", b"map", b"struct"],
+    inline_layout: false,
+    inline_remarks: false,
     item_words: &[],
     key_quotes: false,
     key_words: &[],
@@ -146,6 +162,7 @@ pub const POLICY: Policy = Policy {
     nested_levels: false,
     number_forms: false,
     operand_joins: false,
+    operand_levels: false,
     operand_words: &[b"assert", b"require"],
     operator_words: &[],
     order_words: &[],
@@ -154,12 +171,15 @@ pub const POLICY: Policy = Policy {
     pattern_words: &[],
     postfix_words: &[b"++", b"--"],
     prefix_words: &[],
+    printed_gaps: false,
     raise_hugged: false,
     remark_carries: true,
     remark_dedents: false,
     sentinel_colons: false,
     remark_gaps: true,
     remark_levels: false,
+    remark_suffix: false,
+    remark_tails: false,
     return_parens: false,
     rest_binds: false,
     remark_leads: true,
@@ -175,6 +195,7 @@ pub const POLICY: Policy = Policy {
     source_words: &[],
     spaced_words: &[],
     span_levels: false,
+    spread_blanks: false,
     tight_from_source: &[],
     spec_depths: true,
     special_macros: &[],
@@ -183,6 +204,8 @@ pub const POLICY: Policy = Policy {
     template_units: false,
     ternary_colon: false,
     ternary_levels: false,
+    ternary_parts: false,
+    test_joins: false,
     tight_words: &[],
     value_cap: 0,
     value_columns: true,
@@ -1612,6 +1635,11 @@ fn braced<'held>(
     roles: &'held [u8],
 ) -> brace::Input<'held> {
     brace::Input {
+        added: &[],
+        origin: &[],
+        origins: &[],
+        gives: &[],
+        macros: &[],
         roles,
         options: input.options,
         policy: POLICY,
@@ -2220,40 +2248,80 @@ impl Formatter {
     }
 
     #[must_use]
-    fn columned(&mut self) -> bool {
-        if !align::align(self.scratch.as_bytes(), Target::Field, &mut self.staged) {
+    fn columned(&mut self, line_width: u32) -> bool {
+        if !align::align(
+            self.scratch.as_bytes(),
+            Target::Field,
+            line_width,
+            &mut self.staged,
+        ) {
             return false;
         }
 
         if POLICY.value_columns {
-            if !align::align(self.staged.as_bytes(), Target::Value, &mut self.scratch) {
+            if !align::align(
+                self.staged.as_bytes(),
+                Target::Value,
+                line_width,
+                &mut self.scratch,
+            ) {
                 return false;
             }
 
             core::mem::swap(&mut self.scratch, &mut self.staged);
         }
 
-        if !align::align(self.staged.as_bytes(), Target::Type, &mut self.scratch) {
+        if !align::align(
+            self.staged.as_bytes(),
+            Target::Type,
+            line_width,
+            &mut self.scratch,
+        ) {
             return false;
         }
 
-        if !align::align(self.scratch.as_bytes(), Target::Tag, &mut self.staged) {
+        if !align::align(
+            self.scratch.as_bytes(),
+            Target::Tag,
+            line_width,
+            &mut self.staged,
+        ) {
             return false;
         }
 
-        if !align::align(self.staged.as_bytes(), Target::Assign, &mut self.scratch) {
+        if !align::align(
+            self.staged.as_bytes(),
+            Target::Assign,
+            line_width,
+            &mut self.scratch,
+        ) {
             return false;
         }
 
-        if !align::align(self.scratch.as_bytes(), Target::Body, &mut self.staged) {
+        if !align::align(
+            self.scratch.as_bytes(),
+            Target::Body,
+            line_width,
+            &mut self.staged,
+        ) {
             return false;
         }
 
-        if !align::align(self.staged.as_bytes(), Target::Key, &mut self.scratch) {
+        if !align::align(
+            self.staged.as_bytes(),
+            Target::Key,
+            line_width,
+            &mut self.scratch,
+        ) {
             return false;
         }
 
-        align::align(self.scratch.as_bytes(), Target::Comment, &mut self.staged)
+        align::align(
+            self.scratch.as_bytes(),
+            Target::Comment,
+            line_width,
+            &mut self.staged,
+        )
     }
 
     pub fn format(&mut self, input: &Input<'_>, out: &mut Buffer) -> Outcome {
@@ -2285,7 +2353,7 @@ impl Formatter {
             return Outcome::Overflow;
         }
 
-        if !self.columned() {
+        if !self.columned(input.options.line_width) {
             return Outcome::Overflow;
         }
 

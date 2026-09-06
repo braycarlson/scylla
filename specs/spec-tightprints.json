@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/brace/span.rs", "on": "const TIGHT_PRINTS: bool = true;", "off": "const TIGHT_PRINTS: bool = false;", "mark": "const TIGHT_PRINTS: bool = true;"}
+]

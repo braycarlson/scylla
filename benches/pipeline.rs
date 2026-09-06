@@ -1393,7 +1393,7 @@ fn python_format_benches(held: &mut Syntax<scylla::syntax::python::kind::PythonK
         let outcome = held.parse(&PYTHON, classify, parse::build, &corpus);
 
         let input = scylla::format::python::Input {
-            line_ending: scylla::syntax::python::style::LineEnding::LineFeed,
+            line_ending: lines::LineEnding::LineFeed,
             magic_trailing_comma: true,
             options: Options::DEFAULT,
             pragmas: &[],

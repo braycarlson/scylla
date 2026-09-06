@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/mask.rs", "on": "    if mark & NAME_WORDS != 0 && matches!(kind, TokenKind::Keyword(_)) {", "off": "    if mark & 0 != 0 && matches!(kind, TokenKind::Keyword(_)) {", "mark": "    if mark & NAME_WORDS != 0 && matches!(kind, TokenKind::Keyword(_)) {"}
+]

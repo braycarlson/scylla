@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/brace/mod.rs", "on": "const LOGICAL_INLINES: bool = true;", "off": "const LOGICAL_INLINES: bool = false;", "mark": "const LOGICAL_INLINES: bool = true;"}
+]

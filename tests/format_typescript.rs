@@ -612,14 +612,7 @@ fn listed(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
         .enumerate()
         .filter(|(index, held)| {
             !matches!(**held, TypeScriptKind::Comma | TypeScriptKind::Semicolon)
-                || !matches!(
-                    kinds.get(index + 1),
-                    Some(
-                        TypeScriptKind::BraceClose
-                            | TypeScriptKind::BracketClose
-                            | TypeScriptKind::ParenClose
-                    )
-                )
+                || !closing(kinds, index + 1)
         })
         .map(|(_, held)| match held {
             TypeScriptKind::Comma => TypeScriptKind::Semicolon,
@@ -628,22 +621,44 @@ fn listed(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
         .collect()
 }
 
+fn closing(kinds: &[TypeScriptKind], from: usize) -> bool {
+    let mut at = from;
+
+    while kinds.get(at) == Some(&TypeScriptKind::Comment) {
+        at += 1;
+    }
+
+    matches!(
+        kinds.get(at),
+        Some(
+            TypeScriptKind::BraceClose | TypeScriptKind::BracketClose | TypeScriptKind::ParenClose
+        )
+    )
+}
+
 fn separated(words: &[String]) -> Vec<String> {
     words
         .iter()
         .enumerate()
-        .filter(|(index, held)| {
-            !matches!(held.as_str(), "," | ";")
-                || !matches!(
-                    words.get(index + 1).map(String::as_str),
-                    Some(")" | "]" | "}")
-                )
-        })
+        .filter(|(index, held)| !matches!(held.as_str(), "," | ";") || !closes(words, index + 1))
         .map(|(_, held)| match held.as_str() {
             "," => ";".to_owned(),
             _ => held.clone(),
         })
         .collect()
+}
+
+fn closes(words: &[String], from: usize) -> bool {
+    let mut at = from;
+
+    while words
+        .get(at)
+        .is_some_and(|word| word.starts_with("//") || word.starts_with("/*"))
+    {
+        at += 1;
+    }
+
+    matches!(words.get(at).map(String::as_str), Some(")" | "]" | "}"))
 }
 
 fn constructed(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
@@ -692,6 +707,46 @@ fn constructed(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
     }
 
     found
+}
+
+fn called(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
+    let mut depth = 0_u32;
+    let mut held = Vec::with_capacity(kinds.len());
+    let mut owed: Vec<u32> = Vec::new();
+
+    for (index, kind) in kinds.iter().enumerate() {
+        if *kind == TypeScriptKind::ParenOpen {
+            depth += 1;
+
+            let next = kinds.get(index + 1);
+
+            let functions = next == Some(&TypeScriptKind::FunctionKeyword)
+                || next == Some(&TypeScriptKind::AsyncKeyword)
+                    && kinds.get(index + 2) == Some(&TypeScriptKind::FunctionKeyword);
+
+            if functions {
+                owed.push(depth);
+
+                continue;
+            }
+        }
+
+        if *kind == TypeScriptKind::ParenClose {
+            let dropped = owed.last() == Some(&depth);
+
+            depth = depth.saturating_sub(1);
+
+            if dropped {
+                owed.pop();
+
+                continue;
+            }
+        }
+
+        held.push(*kind);
+    }
+
+    held
 }
 
 fn parenthesised(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
@@ -880,8 +935,8 @@ fn formatting_keeps_every_token_it_was_given() {
         }
 
         let formatted = out.as_bytes().to_vec();
-        let before = wrapped(&parenthesised(&listed(&held.kinds(&source))));
-        let after = wrapped(&parenthesised(&listed(&held.kinds(&formatted))));
+        let before = wrapped(&called(&parenthesised(&listed(&held.kinds(&source)))));
+        let after = wrapped(&called(&parenthesised(&listed(&held.kinds(&formatted)))));
 
         assert!(terminated(&before, &after), "{name} lost or gained a token");
     }
@@ -1400,12 +1455,12 @@ fn the_three_relations_hold_over_the_corpus() {
             }
 
             let once = first.as_bytes().to_vec();
-            let before = wrapped(&constructed(&parenthesised(&listed(&unioned(
+            let before = wrapped(&constructed(&called(&parenthesised(&listed(&unioned(
                 &held.kinds(&source),
-            )))));
-            let after = wrapped(&constructed(&parenthesised(&listed(&unioned(
+            ))))));
+            let after = wrapped(&constructed(&called(&parenthesised(&listed(&unioned(
                 &held.kinds(&once),
-            )))));
+            ))))));
 
             if let Some((carried, at)) = divergence(&before, &after) {
                 panic!(
@@ -2147,6 +2202,81 @@ fn a_union_of_objects_that_each_fit_parts_before_every_bar() {
 fn a_union_that_fits_is_written_flat_and_drops_the_bar_the_source_spelled() {
     const SOURCE: &[u8] = b"export namespace Held {\n    export type ElicitRequestParams =\n        | ElicitRequestFormParams\n        | ElicitRequestURLParams;\n}\n";
     const WANTED: &[u8] = b"export namespace Held {\n    export type ElicitRequestParams = ElicitRequestFormParams | ElicitRequestURLParams;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_calls_arguments_that_compose_functions_part_at_every_comma() {
+    const SOURCE: &[u8] = b"f(a.map((t) => t), b);\nf(a, (b) => b);\nf(new Foo(() => {}), b);\nf(a.b.c(x.map((t) => t)), y);\nf(a.map((t) => t));\ncheck(\"held\", !out.some((u) => u.name === \"good\"));\nuseEffect(() => {\n    doThing();\n}, [a, b]);\n";
+    const WANTED: &[u8] = b"f(\n    a.map((t) => t),\n    b,\n);\nf(a, (b) => b);\nf(new Foo(() => {}), b);\nf(a.b.c(x.map((t) => t)), y);\nf(a.map((t) => t));\ncheck(\"held\", !out.some((u) => u.name === \"good\"));\nuseEffect(() => {\n    doThing();\n}, [a, b]);\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn an_arrow_body_that_is_a_call_stands_on_a_line_of_its_own_when_it_does_not_fit() {
+    const SOURCE: &[u8] = b"const matched = targets.some((pattern) => minimatch(relativeFilenameHere, patternLonger));\nconst held = targets.some(alpha, (pattern) => minimatch(relative, pattern));\nconst wide = targets.some((pattern) => key.startsWith(\"bs\") && !key.startsWith(\"bsConfig\"));\nexport function f<T>(g: () => Promise<T>): void {}\n";
+    const WANTED: &[u8] = b"const matched = targets.some((pattern) =>\n    minimatch(relativeFilenameHere, patternLonger),\n);\nconst held = targets.some(alpha, (pattern) => minimatch(relative, pattern));\nconst wide = targets.some(\n    (pattern) => key.startsWith(\"bs\") && !key.startsWith(\"bsConfig\"),\n);\nexport function f<T>(g: () => Promise<T>): void {}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_call_taking_a_function_body_is_one_the_layout_owns() {
+    const SOURCE: &[u8] = b"suite(\"x\", () => {\n    test(\"a name that is quite long indeed and pushes the line over the width\", () => {\n        assert.strictEqual(graph.lookup(normalize(path.join(tmpDir, \"a.js\"))), undefined);\n    });\n});\n";
+    const WANTED: &[u8] = b"suite(\"x\", () => {\n    test(\"a name that is quite long indeed and pushes the line over the width\", () => {\n        assert.strictEqual(\n            graph.lookup(normalize(path.join(tmpDir, \"a.js\"))),\n            undefined,\n        );\n    });\n});\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_first_argument_that_is_a_function_hugs_the_short_one_behind_it() {
+    const SOURCE: &[u8] = b"function d() {\n    timeout = setTimeout(\n        () => {\n            timeout = undefined;\n            fn();\n        },\n        duration,\n    );\n    const set = preserve.reduce(\n        (set, key) => {\n            set[key] = true;\n            return set;\n        },\n        {},\n    );\n}\n";
+    const WANTED: &[u8] = b"function d() {\n    timeout = setTimeout(() => {\n        timeout = undefined;\n        fn();\n    }, duration);\n    const set = preserve.reduce((set, key) => {\n        set[key] = true;\n        return set;\n    }, {});\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
+fn a_test_calls_arguments_are_written_on_the_line_the_call_opens() {
+    const SOURCE: &[u8] = b"suite(\"x\", () => {\n    test(\n        \"diffGeneratedTrees reports content, missing, and extra files (README ignored)\",\n        () => {\n            const commit = 1;\n        },\n    );\n    notATest(\n        \"this is not a test call and it is quite long indeed yes it is truly\",\n        () => {\n            doThing();\n        },\n    );\n});\n";
+    const WANTED: &[u8] = b"suite(\"x\", () => {\n    test(\"diffGeneratedTrees reports content, missing, and extra files (README ignored)\", () => {\n        const commit = 1;\n    });\n    notATest(\n        \"this is not a test call and it is quite long indeed yes it is truly\",\n        () => {\n            doThing();\n        },\n    );\n});\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);

@@ -2065,8 +2065,8 @@ fn a_branch_standing_alone_in_a_match_arm_block_keeps_its_lines() {
 
 #[test]
 fn a_match_arm_body_the_layout_parts_still_writes_its_head_on_the_arrow_line() {
-    const SOURCE: &[u8] = b"fn f() {\n    match x {\n        Some(v) => {\n            Ok(Held {\n                value: v,\n                mark: 1,\n            })\n        }\n        Y => {}\n    }\n}\n";
-    const WANTED: &[u8] = b"fn f() {\n    match x {\n        Some(v) => Ok(Held {\n            value: v,\n            mark: 1,\n        }),\n        Y => {}\n    }\n}\n";
+    const SOURCE: &[u8] = b"fn f() {\n    match x {\n        Some(v) => {\n            Ok(Held {\n                value_of_the_thing: v,\n                mark: 1,\n            })\n        }\n        Y => {}\n    }\n}\n";
+    const WANTED: &[u8] = b"fn f() {\n    match x {\n        Some(v) => Ok(Held {\n            value_of_the_thing: v,\n            mark: 1,\n        }),\n        Y => {}\n    }\n}\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
@@ -2245,8 +2245,8 @@ fn a_list_holding_a_block_remark_is_still_a_list_the_layout_parts() {
 
 #[test]
 fn a_definition_whose_generics_stand_over_lines_parts_its_parameters_too() {
-    const SOURCE: &[u8] = b"pub unsafe fn held<\n    T: Copy,\n    const ORD: AtomicOrdering,\n>(dst: *mut T, old: T, src: T) -> (T, bool);\n";
-    const WANTED: &[u8] = b"pub unsafe fn held<\n    T: Copy,\n    const ORD: AtomicOrdering,\n>(\n    dst: *mut T,\n    old: T,\n    src: T,\n) -> (T, bool);\n";
+    const SOURCE: &[u8] = b"pub unsafe fn held<\n    T: CopyAndCloneAndSendAndSync,\n    const ORDERING: AtomicOrderingKindHeld,\n>(dst: *mut T, old: T, src: T) -> (T, bool);\n";
+    const WANTED: &[u8] = b"pub unsafe fn held<\n    T: CopyAndCloneAndSendAndSync,\n    const ORDERING: AtomicOrderingKindHeld,\n>(\n    dst: *mut T,\n    old: T,\n    src: T,\n) -> (T, bool);\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);

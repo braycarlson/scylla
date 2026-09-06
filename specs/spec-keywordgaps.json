@@ -1,0 +1,4 @@
+[
+ {"file": "src/format/javascript.rs", "on": "    keyword_gaps: true,", "off": "    keyword_gaps: false,", "mark": "    keyword_gaps: true,"},
+ {"file": "src/format/typescript.rs", "on": "    keyword_gaps: true,", "off": "    keyword_gaps: false,", "mark": "    keyword_gaps: true,"}
+]

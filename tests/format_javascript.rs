@@ -579,34 +579,86 @@ fn listed(kinds: &[JavaScriptKind]) -> Vec<JavaScriptKind> {
     kinds
         .iter()
         .enumerate()
-        .filter(|(index, held)| {
-            **held != JavaScriptKind::Comma
-                || !matches!(
-                    kinds.get(index + 1),
-                    Some(
-                        JavaScriptKind::BraceClose
-                            | JavaScriptKind::BracketClose
-                            | JavaScriptKind::ParenClose
-                    )
-                )
-        })
+        .filter(|(index, held)| **held != JavaScriptKind::Comma || !closing(kinds, index + 1))
         .map(|(_, held)| *held)
         .collect()
+}
+
+fn closing(kinds: &[JavaScriptKind], from: usize) -> bool {
+    let mut at = from;
+
+    while kinds.get(at) == Some(&JavaScriptKind::Comment) {
+        at += 1;
+    }
+
+    matches!(
+        kinds.get(at),
+        Some(
+            JavaScriptKind::BraceClose | JavaScriptKind::BracketClose | JavaScriptKind::ParenClose
+        )
+    )
 }
 
 fn separated(words: &[String]) -> Vec<String> {
     words
         .iter()
         .enumerate()
-        .filter(|(index, held)| {
-            held.as_str() != ","
-                || !matches!(
-                    words.get(index + 1).map(String::as_str),
-                    Some(")" | "]" | "}")
-                )
-        })
+        .filter(|(index, held)| held.as_str() != "," || !closes(words, index + 1))
         .map(|(_, held)| held.clone())
         .collect()
+}
+
+fn closes(words: &[String], from: usize) -> bool {
+    let mut at = from;
+
+    while words
+        .get(at)
+        .is_some_and(|word| word.starts_with("//") || word.starts_with("/*"))
+    {
+        at += 1;
+    }
+
+    matches!(words.get(at).map(String::as_str), Some(")" | "]" | "}"))
+}
+
+fn called(kinds: &[JavaScriptKind]) -> Vec<JavaScriptKind> {
+    let mut depth = 0_u32;
+    let mut held = Vec::with_capacity(kinds.len());
+    let mut owed: Vec<u32> = Vec::new();
+
+    for (index, kind) in kinds.iter().enumerate() {
+        if *kind == JavaScriptKind::ParenOpen {
+            depth += 1;
+
+            let next = kinds.get(index + 1);
+
+            let functions = next == Some(&JavaScriptKind::FunctionKeyword)
+                || next == Some(&JavaScriptKind::AsyncKeyword)
+                    && kinds.get(index + 2) == Some(&JavaScriptKind::FunctionKeyword);
+
+            if functions {
+                owed.push(depth);
+
+                continue;
+            }
+        }
+
+        if *kind == JavaScriptKind::ParenClose {
+            let dropped = owed.last() == Some(&depth);
+
+            depth = depth.saturating_sub(1);
+
+            if dropped {
+                owed.pop();
+
+                continue;
+            }
+        }
+
+        held.push(*kind);
+    }
+
+    held
 }
 
 fn parenthesised(kinds: &[JavaScriptKind]) -> Vec<JavaScriptKind> {
@@ -793,8 +845,8 @@ fn formatting_keeps_every_token_it_was_given() {
         }
 
         let formatted = out.as_bytes().to_vec();
-        let before = wrapped(&parenthesised(&listed(&held.kinds(&source))));
-        let after = wrapped(&parenthesised(&listed(&held.kinds(&formatted))));
+        let before = wrapped(&called(&parenthesised(&listed(&held.kinds(&source)))));
+        let after = wrapped(&called(&parenthesised(&listed(&held.kinds(&formatted)))));
 
         assert!(terminated(&before, &after), "{name} lost or gained a token");
     }
@@ -1119,8 +1171,8 @@ fn the_three_relations_hold_over_the_corpus() {
             }
 
             let once = first.as_bytes().to_vec();
-            let before = wrapped(&parenthesised(&listed(&held.kinds(&source))));
-            let after = wrapped(&parenthesised(&listed(&held.kinds(&once))));
+            let before = wrapped(&called(&parenthesised(&listed(&held.kinds(&source)))));
+            let after = wrapped(&called(&parenthesised(&listed(&held.kinds(&once)))));
 
             if let Some((carried, at)) = divergence(&before, &after) {
                 panic!(
@@ -1293,15 +1345,14 @@ fn a_bracket_the_source_wrote_whole_keeps_the_line_it_stands_on() {
 }
 
 #[test]
-fn a_binaryish_value_a_logical_run_inlines_keeps_the_line_its_assignment_opened() {
-    const SOURCE: &[u8] = b"const inlined = someLongConditionHere && anotherLongConditionHere && { alpha: 1, beta: 2 };\n";
+fn a_binaryish_value_an_object_operand_of_a_logical_run_is_a_list_the_layout_owns() {
+    const SOURCE: &[u8] = b"const a = info ?? { folder: undefined, repository: undefined, repositoryProps: undefined };\n";
+    const WANTED: &str = "const a = info ?? {\n    folder: undefined,\n    repository: \
+                          undefined,\n    repositoryProps: undefined,\n};\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
-    assert_eq!(
-        String::from_utf8_lossy(out.as_bytes()),
-        String::from_utf8_lossy(SOURCE)
-    );
+    assert_eq!(String::from_utf8_lossy(out.as_bytes()), WANTED);
 }

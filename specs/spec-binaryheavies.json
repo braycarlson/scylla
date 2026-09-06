@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/brace/mod.rs", "on": "const BINARY_HEAVIES: bool = true;", "off": "const BINARY_HEAVIES: bool = false;", "mark": "const BINARY_HEAVIES: bool = true;"}
+]

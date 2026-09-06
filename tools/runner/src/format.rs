@@ -311,6 +311,19 @@ pub struct Rewrites {
 
 const CASTS: [&str; 4] = ["@alignCast", "@constCast", "@ptrCast", "@volatileCast"];
 
+fn remarked_close(words: &[String], from: usize) -> bool {
+    let mut at = from;
+
+    while words
+        .get(at)
+        .is_some_and(|word| word.starts_with("//") || word.starts_with("/*"))
+    {
+        at += 1;
+    }
+
+    matches!(words.get(at).map(String::as_str), Some(")" | "]" | "}"))
+}
+
 fn casted(words: &[String]) -> Vec<String> {
     words
         .iter()
@@ -541,13 +554,7 @@ pub fn preserved(before: &[String], after: &[String], rewrites: Rewrites) -> Opt
             continue;
         }
 
-        if rewrites.commas
-            && after[printed] == ","
-            && matches!(
-                after.get(printed + 1).map(String::as_str),
-                Some(")" | "]" | "}")
-            )
-        {
+        if rewrites.commas && after[printed] == "," && remarked_close(after, printed + 1) {
             printed += 1;
 
             continue;

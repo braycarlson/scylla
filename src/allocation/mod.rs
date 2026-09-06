@@ -228,7 +228,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(
-        not(debug_assertions),
+        optimized,
         ignore = "an optimized build cannot catch a panic raised inside the allocator"
     )]
     #[cfg_attr(
@@ -248,7 +248,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(
-        not(debug_assertions),
+        optimized,
         ignore = "an optimized build cannot catch a panic raised inside the allocator"
     )]
     #[cfg_attr(
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     #[cfg_attr(
-        not(debug_assertions),
+        optimized,
         ignore = "an optimized build cannot catch a panic raised inside the allocator"
     )]
     #[cfg_attr(

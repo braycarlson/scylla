@@ -5,9 +5,6 @@ import subprocess
 import sys
 import tempfile
 
-# rust-analyzer's LSIF walk never finishes on the standard library, while SCIP with the
-# sysroot, build scripts and proc macros turned off indexes the whole workspace in under
-# twenty seconds. The configuration is what makes the difference, and only `scip` takes one.
 SECONDS_MAX = 900
 
 def pin(root):
@@ -21,11 +18,6 @@ def version():
 
     return outcome.stdout.strip()
 
-# A nested cargo project is NOT covered by the workspace above it -- `library/stdarch`,
-# `library/portable-simd` and every crate under `library/vendor` sit inside the sysroot tree
-# and outside its workspace -- so pruning the walk at the first Cargo.toml left two thirds of
-# the corpus's Rust ungraded. Every manifest is offered instead, shallowest first, and one
-# whose files an outer project already covered is skipped without being indexed.
 def projects(root):
     found = []
 
@@ -51,10 +43,6 @@ def sources(project):
 
     return found
 
-# The sysroot's own workspace manifest opens with `cargo-features = ["profile-rustflags"]`,
-# which a release cargo refuses to parse, and rust-analyzer asks cargo where a crate's
-# workspace is before it indexes anything. A nightly cargo reads the manifest, so one is
-# handed to rust-analyzer through `CARGO` when the release channel comes back empty.
 def nightly():
     outcome = subprocess.run(
         ["rustup", "which", "--toolchain", "nightly", "cargo"],
@@ -81,9 +69,6 @@ def varint(data, offset):
 
         shift += 7
 
-# SCIP is protobuf and the crate carries no schema compiler, so the four fields the oracle
-# reads are walked off the wire directly: a tag is `(number << 3) | wire`, wire 0 is a varint
-# and wire 2 is length delimited.
 def fields(data, start=0, stop=None):
     stop = len(data) if stop is None else stop
     offset = start
@@ -219,11 +204,6 @@ def index(project, config, cargo=None):
         with open(target, "rb") as held:
             return held.read()
 
-# A crate vendored INSIDE another crate's workspace -- every directory under
-# `library/vendor` -- cannot be indexed where it sits, because cargo walks up from its
-# manifest, finds the sysroot workspace, and refuses a package that workspace does not list.
-# Lifted into a directory of its own it has no ancestor workspace and indexes normally, so a
-# project the walk cannot read in place is read from a copy and its rows are named back.
 def indexed(project, config, cargo, source_root):
     data = index(project, config)
 
@@ -258,11 +238,6 @@ def indexed(project, config, cargo, source_root):
 
     return found
 
-# The suite grades a landing only where it lands in the same file, so the definitions are
-# settled PER DOCUMENT. That keeps rust-analyzer's per-document `local N` symbols from
-# colliding across a crate's files, and it drops a symbol the document defines more than
-# once: every `const SIZE` written in a sibling block of one function carries the same
-# symbol, and keeping the first would answer every use with the first block's declaration.
 def rows_of(data, project, source_root):
     found = {}
 

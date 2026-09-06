@@ -3,6 +3,8 @@ use crate::format::brace::{NEST_DEPTH_MAX, is_close, is_open, opened_by, substit
 use crate::scan::string_is_terminated;
 use crate::token::{Token, TokenKind};
 
+const ALIAS_FIRST: bool = true;
+
 pub fn sorted(arena: &[u8], spans: &mut [Span]) {
     let mut index = 1;
 
@@ -65,7 +67,37 @@ pub fn precedes(arena: &[u8], left: Span, right: Span) -> bool {
         return first < second;
     }
 
-    versioned(held, other)
+    if !ALIAS_FIRST {
+        return versioned(held, other);
+    }
+
+    let (one, alias) = renamed(held);
+    let (two, named) = renamed(other);
+
+    if one != two {
+        return versioned(one, two);
+    }
+
+    match (alias, named) {
+        (Some(from), Some(to)) => versioned(from, to),
+        (Some(_), None) => true,
+        (None, Some(_)) => false,
+        (None, None) => false,
+    }
+}
+
+fn renamed(text: &[u8]) -> (&[u8], Option<&[u8]>) {
+    let mut scan = 0;
+
+    while scan + 4 <= text.len() {
+        if &text[scan..scan + 4] == b" as " {
+            return (&text[..scan], Some(&text[scan + 4..]));
+        }
+
+        scan += 1;
+    }
+
+    (text, None)
 }
 
 pub fn versioned(left: &[u8], right: &[u8]) -> bool {

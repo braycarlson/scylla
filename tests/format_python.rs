@@ -11,12 +11,11 @@ use scylla::format::print::Options;
 use scylla::format::python::{Formatter, Input, Outcome, QuotePreference};
 use scylla::language::Lexer as _;
 use scylla::lex::PYTHON;
-use scylla::lines;
+use scylla::lines::{self, LineEnding};
 use scylla::suppress::Pragmas;
 use scylla::syntax::python::classify::classify;
 use scylla::syntax::python::kind::PythonKind;
 use scylla::syntax::python::parse;
-use scylla::syntax::python::style::LineEnding;
 use scylla::token::{TokenKind, Tokens};
 use scylla::tree::{Events, Structure, Tree};
 

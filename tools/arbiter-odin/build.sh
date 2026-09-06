@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
 
-# The Odin release binaries lag the corpus checkout, and a compiler older than the source
-# it reads rejects valid Odin -- `"""` strings among it. The arbiter is therefore built
-# from the corpus checkout itself, the way `tools/oracle-ols/build.sh` builds ols. The
-# compiler reads its collections from beside its own binary, so `base`, `core` and `vendor`
-# are linked back to the same checkout. Both are ignored; `just oracle` rebuilds them.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

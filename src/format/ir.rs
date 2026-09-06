@@ -14,9 +14,11 @@ pub enum Source {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Element {
+    Align,
     BlankLine(u32),
     Choice(u32),
     ChoiceClose,
+    Dealign,
     Dedent,
     DedentBroken,
     Filled,
@@ -24,6 +26,8 @@ pub enum Element {
     GroupOpen,
     HardLine,
     Hugged,
+    Hugging(Span),
+    Hugs,
     IfBroken(Span),
     Indent,
     IndentBroken,
@@ -46,6 +50,7 @@ pub struct Document {
     group_depth: u32,
     indent_depth: u32,
     literals: BoundedVec<&'static [u8]>,
+    suffixed: bool,
 }
 
 impl Document {
@@ -61,7 +66,16 @@ impl Document {
             group_depth: 0,
             indent_depth: 0,
             literals: BoundedVec::reserve(literal_count_max),
+            suffixed: false,
         }
+    }
+
+    pub const fn suffixed(&self) -> bool {
+        self.suffixed
+    }
+
+    pub fn suffix(&mut self, held: bool) {
+        self.suffixed = held;
     }
 
     pub fn clear(&mut self) {
@@ -69,6 +83,7 @@ impl Document {
         self.elements.clear();
         self.group_depth = 0;
         self.indent_depth = 0;
+        self.suffixed = false;
 
         assert_eq!(self.count(), 0);
     }
@@ -151,9 +166,13 @@ impl Document {
                 assert!(span.offset < self.literals.count());
                 assert_eq!(span.length, count_of(self.literal_of(span.offset).len()));
             }
-            Element::BlankLine(_)
+            Element::Align
+            | Element::BlankLine(_)
+            | Element::Dealign
             | Element::HardLine
             | Element::Hugged
+            | Element::Hugging(_)
+            | Element::Hugs
             | Element::IfBroken(_)
             | Element::Joined(_)
             | Element::Line
@@ -173,6 +192,15 @@ impl Document {
             return false;
         }
 
+        self.counted(element);
+
+        assert!(self.group_depth <= GROUP_DEPTH_MAX);
+        assert!(self.indent_depth <= INDENT_DEPTH_MAX);
+
+        true
+    }
+
+    fn counted(&mut self, element: Element) {
         match element {
             Element::Choice(_) => self.choice_depth += 1,
             Element::ChoiceClose => self.choice_depth -= 1,
@@ -180,9 +208,13 @@ impl Document {
             Element::GroupClose => self.group_depth -= 1,
             Element::GroupOpen => self.group_depth += 1,
             Element::Indent => self.indent_depth += 1,
-            Element::BlankLine(_)
+            Element::Align
+            | Element::BlankLine(_)
+            | Element::Dealign
             | Element::HardLine
             | Element::Hugged
+            | Element::Hugging(_)
+            | Element::Hugs
             | Element::IfBroken(_)
             | Element::Joined(_)
             | Element::Line
@@ -198,11 +230,6 @@ impl Document {
             | Element::VerbatimArena(_)
             | Element::Wide => (),
         }
-
-        assert!(self.group_depth <= GROUP_DEPTH_MAX);
-        assert!(self.indent_depth <= INDENT_DEPTH_MAX);
-
-        true
     }
 }
 

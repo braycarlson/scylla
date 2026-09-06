@@ -8,14 +8,14 @@ pub const MESSAGE_UNWRITTEN: &str = "the finding message did not fit";
 
 #[expect(
     clippy::arbitrary_source_item_ordering,
-    reason = "the declared order is the severity ladder, strongest first"
+    reason = "the derived `Ord` makes the declared order the severity ladder, weakest first"
 )]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Severity {
-    Error,
-    Warning,
-    Information,
     Hint,
+    Information,
+    Warning,
+    Error,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,9 +57,29 @@ impl Severity {
         match self {
             Self::Error => "error",
             Self::Hint => "hint",
-            Self::Information => "information",
+            Self::Information => "info",
             Self::Warning => "warning",
         }
+    }
+
+    pub fn of(text: &str) -> Option<Self> {
+        if text.eq_ignore_ascii_case("error") {
+            return Some(Self::Error);
+        }
+
+        if text.eq_ignore_ascii_case("warn") || text.eq_ignore_ascii_case("warning") {
+            return Some(Self::Warning);
+        }
+
+        if text.eq_ignore_ascii_case("info") || text.eq_ignore_ascii_case("information") {
+            return Some(Self::Information);
+        }
+
+        if text.eq_ignore_ascii_case("hint") {
+            return Some(Self::Hint);
+        }
+
+        None
     }
 }
 
@@ -543,7 +563,12 @@ mod tests {
         assert!(!bare.is_fixed());
         assert_eq!(Severity::Error.name(), "error");
         assert_eq!(Severity::Hint.name(), "hint");
-        assert_eq!(Severity::Information.name(), "information");
+        assert_eq!(Severity::Information.name(), "info");
+        assert_eq!(Severity::of("WARN"), Some(Severity::Warning));
+        assert_eq!(Severity::of("information"), Some(Severity::Information));
+        assert_eq!(Severity::of("loud"), None);
+        assert!(Severity::Error > Severity::Warning);
+        assert!(Severity::Hint < Severity::Information);
         assert_eq!(Severity::Warning.name(), "warning");
     }
 

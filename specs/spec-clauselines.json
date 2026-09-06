@@ -1,0 +1,4 @@
+[
+ {"file": "src/format/javascript.rs", "on": "    clause_lines: true,", "off": "    clause_lines: false,", "mark": "    clause_lines: true,"},
+ {"file": "src/format/typescript.rs", "on": "    clause_lines: true,", "off": "    clause_lines: false,", "mark": "    clause_lines: true,"}
+]

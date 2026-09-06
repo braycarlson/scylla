@@ -22,6 +22,7 @@ use crate::format::rust::{Formatter as RustFormatter, Input as RustInput, Outcom
 use crate::format::zig::{Formatter as ZigFormatter, Input as ZigInput, Outcome as ZigOutcome};
 use crate::language::{Language, Lexer as _};
 use crate::lex::{CSS, GO, JAVASCRIPT, ODIN, PYTHON, RUST, TYPESCRIPT, ZIG};
+use crate::lines::LineEnding;
 use crate::markup::blocks::{self, BlockMap};
 use crate::markup::tree::{self, Tree};
 use crate::markup::{self, Tokens as MarkupTokens};
@@ -61,7 +62,6 @@ use crate::syntax::python::kind::PythonKind;
 use crate::syntax::python::parse;
 use crate::syntax::python::semantic::{AnnotationScratch, Semantic, SemanticInput};
 use crate::syntax::python::stdlib::PythonVersion;
-use crate::syntax::python::style::LineEnding;
 use crate::syntax::rust::ast::View as RustView;
 use crate::syntax::rust::classify::classify as rust_classify;
 use crate::syntax::rust::kind::RustKind;

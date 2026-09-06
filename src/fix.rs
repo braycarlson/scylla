@@ -83,6 +83,14 @@ impl fmt::Write for Writer<'_> {
 }
 
 impl Applicability {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::DisplayOnly => "display-only",
+            Self::Safe => "safe",
+            Self::Unsafe => "unsafe",
+        }
+    }
+
     pub fn reaches(self, minimum: Self) -> bool {
         match self {
             Self::DisplayOnly => false,
@@ -686,7 +694,7 @@ pub fn plan(
             .iter()
             .any(|edit| edit.span.offset <= claimed_end && overlaps_any(claimed, edit.span));
 
-        if clashes {
+        if clashes || self_overlapping(edits) {
             continue;
         }
 
@@ -759,12 +767,24 @@ fn next_of(fixes: &Fixes, previous: u32) -> u32 {
     best.1
 }
 
-fn overlaps(left: Span, right: Span) -> bool {
+pub const fn overlaps(left: Span, right: Span) -> bool {
     left.offset == right.offset || (left.offset < right.end() && right.offset < left.end())
 }
 
-fn overlaps_any(claimed: &[Span], span: Span) -> bool {
+pub fn overlaps_any(claimed: &[Span], span: Span) -> bool {
     claimed.iter().any(|held| overlaps(*held, span))
+}
+
+fn self_overlapping(edits: &[Edit]) -> bool {
+    for (position, edit) in edits.iter().enumerate() {
+        let rest = edits.get(position + 1..).unwrap_or_default();
+
+        if rest.iter().any(|other| overlaps(other.span, edit.span)) {
+            return true;
+        }
+    }
+
+    false
 }
 
 fn start_of(fixes: &Fixes, fix: &Fix) -> u32 {

@@ -1,6 +1,7 @@
 use crate::bounded::{Buffer, Bytes as _, count_of};
 
 pub const PADDING_MAX: u32 = 1024;
+const COMMENT_CAPS: bool = true;
 const BLOCK_CLOSE: &[u8] = b"*/";
 const BLOCK_OPEN: &[u8] = b"/*";
 const COMMENT: &[u8] = b"//";
@@ -21,6 +22,7 @@ pub enum Target {
 }
 
 pub const ROW_COLUMN_MAX: u32 = 8;
+const ATTRIBUTE_COLUMNS: bool = true;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Carry {
@@ -826,7 +828,18 @@ fn labelled(body: &[u8]) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || *byte == b'_')
 }
 
+fn attributed(header: &[u8]) -> bool {
+    let held = header.trim_ascii_start();
+
+    (held.starts_with(b"#[") || held.starts_with(b"#!["))
+        && !held.windows(7).any(|found| found == b"derive(")
+}
+
 fn columnless(bytes: &[u8], start: u32, line: &[u8], target: Target, groups: &mut Groups) -> bool {
+    if target == Target::Element {
+        return ATTRIBUTE_COLUMNS && groups.header_of(bytes, start).is_some_and(attributed);
+    }
+
     if target != Target::Comment {
         return false;
     }
@@ -1463,7 +1476,36 @@ const ELEMENT_BODIES: bool = true;
 const ELEMENT_LIFETIMES: bool = true;
 const ELEMENT_RUNS_FILL: bool = true;
 
-fn elements_run(bytes: &[u8], start: u32, indent: u32, groups: &mut Groups) -> (u32, u32) {
+fn capped(line: &[u8], cut: Cut, indent: u32, line_width: u32, overhead: &mut u32) -> bool {
+    if !COMMENT_CAPS || line_width == 0 {
+        return false;
+    }
+
+    if *overhead == 0 {
+        let text = &line[cut.tail as usize..];
+
+        if !text.starts_with(COMMENT) && !text.starts_with(BLOCK_OPEN) {
+            return false;
+        }
+
+        *overhead = columns_of(line, cut.head) + columns_of(line, count_of(line.len()))
+            - columns_of(line, cut.tail);
+
+        return false;
+    }
+
+    let inner = columns_of(line, cut.head).saturating_sub(indent + 1);
+
+    inner + *overhead > line_width
+}
+
+fn elements_run(
+    bytes: &[u8],
+    start: u32,
+    indent: u32,
+    line_width: u32,
+    groups: &mut Groups,
+) -> (u32, u32) {
     let attributed = ELEMENT_ATTRIBUTES
         && groups
             .header_of(bytes, start)
@@ -1479,6 +1521,7 @@ fn elements_run(bytes: &[u8], start: u32, indent: u32, groups: &mut Groups) -> (
     let mut ends = false;
     let mut growing = true;
     let mut offset = start;
+    let mut overhead = 0;
     let mut stop = start;
     let mut width = 0;
 
@@ -1509,7 +1552,10 @@ fn elements_run(bytes: &[u8], start: u32, indent: u32, groups: &mut Groups) -> (
             match found {
                 Some(_) if filled && offset > start => break,
                 Some(cut) if growing => {
-                    width = width.max(columns_of(line, cut.head));
+                    if !capped(line, cut, indent, line_width, &mut overhead) {
+                        width = width.max(columns_of(line, cut.head));
+                    }
+
                     ends = filled;
                 }
                 Some(_) => (),
@@ -1740,7 +1786,13 @@ fn run_of(
     (width, stop)
 }
 
-fn width_of(bytes: &[u8], start: u32, target: Target, memo: &mut Memo) -> (u32, u32) {
+fn width_of(
+    bytes: &[u8],
+    start: u32,
+    target: Target,
+    line_width: u32,
+    memo: &mut Memo,
+) -> (u32, u32) {
     let (indent, tagged) = {
         let (from, to) = line_at(bytes, start);
         let held = &bytes[from as usize..to as usize];
@@ -1749,7 +1801,7 @@ fn width_of(bytes: &[u8], start: u32, target: Target, memo: &mut Memo) -> (u32, 
     };
 
     if target == Target::Element {
-        return elements_run(bytes, start, indent, &mut memo.groups);
+        return elements_run(bytes, start, indent, line_width, &mut memo.groups);
     }
 
     if let Target::Row(column) = target {
@@ -1767,7 +1819,7 @@ fn width_of(bytes: &[u8], start: u32, target: Target, memo: &mut Memo) -> (u32, 
 }
 
 #[must_use]
-pub fn align(bytes: &[u8], target: Target, out: &mut Buffer) -> bool {
+pub fn align(bytes: &[u8], target: Target, line_width: u32, out: &mut Buffer) -> bool {
     out.clear();
 
     let count = count_of(bytes.len());
@@ -1787,7 +1839,7 @@ pub fn align(bytes: &[u8], target: Target, out: &mut Buffer) -> bool {
             !held && opened.is_some() && opens_a_group(bytes, from, target, &mut memo.groups);
 
         let (width, stop) = if grouped {
-            width_of(bytes, offset, target, &mut memo)
+            width_of(bytes, offset, target, line_width, &mut memo)
         } else {
             (0, 0)
         };

@@ -139,7 +139,7 @@ impl Printer<PythonKind> for Python {
     fn print(&mut self, held: &Print<'_, PythonKind>, out: &mut Buffer) -> bool {
         use scylla::format::python::{Input, Outcome, QuotePreference};
         use scylla::language::Lexer as _;
-        use scylla::syntax::python::style::LineEnding;
+        use scylla::lines::LineEnding;
 
         self.lexed.clear();
         scylla::lex::PYTHON.lex(held.source, &mut self.lexed);

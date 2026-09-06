@@ -1,19 +1,9 @@
-// Records what parse5 reads out of every `.html` under a root, one JSON per file: the
-// elements it finds, the attributes each one carries, the `id` each attribute declares and
-// the reference each one makes. parse5 is the HTML5 parser jsdom and Angular are built on,
-// and it is the only independent implementation the markup model has.
-//
-// Rows are the shape `tools/oracle-css` writes -- `[kind, name, byte offset]` -- so the
-// suites read the two roots the same way.
-
 import { parse, parseFragment } from 'parse5';
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
 const VERSION = readFileSync(new URL('./PIN', import.meta.url), 'utf8').trim();
 
-// An attribute whose value names an element by its `id`. `headers` and the ARIA relations
-// name a whole list of them, separated by whitespace; the rest name exactly one.
 const LISTED = new Set([
     'aria-activedescendant',
     'aria-controls',
@@ -28,17 +18,12 @@ const LISTED = new Set([
 
 const SINGULAR = new Set(['form', 'for', 'list']);
 
-// A fragment reference: the value names an `id` only when it opens with `#`.
 const FRAGMENT = new Set(['href', 'usemap', 'xlink:href']);
 
-// parse5 reports an offset in UTF-16 code units. Every span scylla holds is a byte offset,
-// so the prefix is measured rather than counted.
 function byteOffset(source, offset) {
     return Buffer.byteLength(source.slice(0, offset), 'utf8');
 }
 
-// A value carrying a template hole names nothing static: `id="{{ slug }}"` is a name the
-// template decides. scylla records no name for one, so neither does the oracle.
 function templated(text) {
     return text.includes('{{') || text.includes('{%') || text.includes('{#');
 }
@@ -49,12 +34,6 @@ const HOLES = [
     ['{#', '#}'],
 ];
 
-// parse5 knows nothing of Django's templates, so `<li{% if wide %} class="w"{% endif %}>`
-// reads to it as an element named `li{%` carrying attributes named `if` and `%}`, and the
-// `<em>` inside `{% translate 'Server Error <em>(500)</em>' %}` reads as an element the
-// document does not hold. Each construct is therefore blanked to spaces of its own length
-// before parsing: every offset stays where it was, and what is left is the HTML the
-// template writes around them, which is exactly what scylla reads.
 function blanked(source) {
     let held = source;
 
@@ -97,8 +76,6 @@ function nameAt(source, offset) {
     return source.slice(offset, end);
 }
 
-// The attribute's own span runs from its name to the end of its value. The value starts
-// after the first `=`, past a quote where one is written.
 function valueAt(source, location) {
     const whole = source.slice(location.startOffset, location.endOffset);
     const equals = whole.indexOf('=');
@@ -128,7 +105,6 @@ function valueAt(source, location) {
     return { offset: location.startOffset + offset, text: whole.slice(offset) };
 }
 
-// A whitespace-separated list of names, each carrying the offset it was written at.
 function namesOf(text, base) {
     const found = [];
     let offset = 0;
@@ -159,13 +135,8 @@ function collect(source) {
     const elements = [];
     const uses = [];
 
-    // Names are read out of the BLANKED text, where `<form{% if x %}>` has become `<form`
-    // followed by spaces, and offsets are measured against the original bytes.
     const held = blanked(source);
 
-    // A template that opens with `<tr>` or `<td>` is a fragment of a table, and the document
-    // parser drops an element written where a document may not hold it. The fragment parser
-    // keeps it, so a source that names no document is read as one.
     const whole = /<(?:!doctype|html\b)/iu.test(held);
     const document = whole
         ? parse(held, { sourceCodeLocationInfo: true })
@@ -180,17 +151,12 @@ function collect(source) {
             pending.push(child);
         }
 
-        // A `<template>` holds its children in a document fragment of its own rather than in
-        // `childNodes`, and `trace_viewer_full.html` writes three thousand elements inside
-        // one. Nothing below it would be read without this.
         if (node.content !== undefined) {
             pending.push(node.content);
         }
 
         const location = node.sourceCodeLocation;
 
-        // parse5 inserts `html`, `head` and `body` where a document leaves them out, and an
-        // inserted element carries no location. Nothing in the source stands for it.
         if (!location || !location.startTag) {
             continue;
         }

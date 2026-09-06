@@ -11,13 +11,16 @@ use crate::tree::{Structure, Tree};
 pub const POLICY: Policy = Policy {
     angle_calls: true,
     angle_objects: true,
+    arm_bars: false,
     arm_empties: false,
     arm_flattens: false,
     arm_guards: false,
     arrow_after: &[],
+    arrow_bodies: true,
     arrow_parens: true,
     assign_groups: true,
     assign_joins: false,
+    assign_lines: true,
     assign_values: true,
     assign_wraps: false,
     chain_soles: false,
@@ -34,10 +37,12 @@ pub const POLICY: Policy = Policy {
     attribute_width: 0,
     attribute_words: &[],
     bar_levels: false,
+    binary_lines: true,
     binary_parts: true,
     binding_bases: &[],
     binding_codes: false,
     binding_leads: false,
+    binder_words: &[b"const", b"let", b"var"],
     binding_words: &[],
     blank_edges: true,
     blank_max: 1,
@@ -45,8 +50,10 @@ pub const POLICY: Policy = Policy {
     block_joins: false,
     block_leads: &[],
     block_words: &[],
+    body_owns: true,
     body_parts: true,
     body_words: &[b"=>", b"do", b"else", b"finally", b"try"],
+    brace_bodies: false,
     brace_continues: true,
     brace_counts: false,
     brace_dedents: false,
@@ -67,21 +74,26 @@ pub const POLICY: Policy = Policy {
     carriage_breaks: true,
     callee_marks: &[b"?", b"?."],
     callee_words: &[b"super", b"this"],
+    cast_joins: false,
     cast_words: &[],
     clause_bases: false,
     clause_ends: false,
+    clause_lines: true,
     clause_words: &[b"case", b"default"],
     close_hugs: false,
-    colon_continues: false,
+    colon_continues: true,
     comma_continues: true,
     comma_adds: true,
     comma_drops: true,
+    comma_parts: false,
+    compose_parts: true,
     construct_words: &[b"new"],
     continue_words: &[b"|", b"&"],
     convention_strings: false,
     define_joins: false,
     define_widths: false,
     define_words: &[],
+    declare_lines: true,
     declaration_words: &[b"class", b"enum", b"interface", b"module", b"namespace"],
     declare_words: &[],
     dedent_words: &[],
@@ -102,7 +114,9 @@ pub const POLICY: Policy = Policy {
     header_extends: false,
     header_joins: false,
     header_levels: false,
+    header_lines: false,
     header_parens: true,
+    header_widths: false,
     header_words: &[b"for", b"if", b"while"],
     heritage_parts: true,
     hug_braces: false,
@@ -110,10 +124,12 @@ pub const POLICY: Policy = Policy {
     hug_lasts: true,
     hug_soles: true,
     hug_words: &[],
+    inline_layout: true,
+    inline_remarks: true,
     item_words: &[],
     key_quotes: true,
     key_words: &[b"new"],
-    keyword_gaps: false,
+    keyword_gaps: true,
     label_lines: true,
     label_words: &[],
     lambda_flattens: false,
@@ -146,6 +162,7 @@ pub const POLICY: Policy = Policy {
     nested_levels: false,
     number_forms: true,
     operand_joins: false,
+    operand_levels: false,
     operand_words: &[b"import", b"super", b"this"],
     operator_words: &[b"&&", b"??", b"||"],
     order_words: &[],
@@ -160,12 +177,15 @@ pub const POLICY: Policy = Policy {
     pattern_words: &[],
     postfix_words: &[],
     prefix_words: &[b"...", b"@"],
+    printed_gaps: true,
     raise_hugged: false,
     remark_carries: false,
     remark_dedents: false,
     sentinel_colons: false,
     remark_gaps: false,
     remark_levels: false,
+    remark_suffix: true,
+    remark_tails: false,
     return_parens: true,
     rest_binds: true,
     remark_leads: false,
@@ -181,6 +201,7 @@ pub const POLICY: Policy = Policy {
     source_words: &[],
     spaced_words: &[],
     span_levels: false,
+    spread_blanks: true,
     tight_from_source: &[
         b"!",
         b"*",
@@ -200,6 +221,8 @@ pub const POLICY: Policy = Policy {
     template_units: true,
     ternary_colon: true,
     ternary_levels: true,
+    ternary_parts: true,
+    test_joins: true,
     tight_words: &[],
     type_leads: &[b"abstract", b"declare", b"export"],
     type_words: &[b"interface", b"type"],
@@ -275,6 +298,20 @@ fn content(kind: Kind) -> bool {
 
 const DROPS_PARENS: bool = true;
 
+pub const RULES: brace::Rules<Kind> = brace::Rules {
+    braced,
+    denies,
+    drops,
+    names,
+    opens,
+    operators,
+    owes,
+    parens,
+    queries,
+    spans,
+    wraps,
+};
+
 fn braced(parent: Kind) -> bool {
     parent == Kind::ArrowFunction
 }
@@ -319,12 +356,49 @@ fn drops(inner: Kind, parent: Kind) -> bool {
     )
 }
 
+fn spans(kind: Kind) -> bool {
+    matches!(kind, Kind::Array | Kind::Object)
+}
+
+fn wraps(inner: Kind, parent: Kind) -> bool {
+    matches!(inner, Kind::FunctionExpression | Kind::GeneratorFunction)
+        && matches!(parent, Kind::CallExpression | Kind::NewExpression)
+}
+
+fn queries(kind: Kind) -> bool {
+    kind == Kind::TernaryExpression
+}
+
 fn parens(kind: Kind) -> bool {
     kind == Kind::ParenthesizedExpression
 }
 
+fn names(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::IdentifierNode
+            | Kind::PrivatePropertyIdentifier
+            | Kind::PropertyIdentifier
+            | Kind::ShorthandPropertyIdentifier
+            | Kind::ShorthandPropertyIdentifierPattern
+            | Kind::StatementIdentifier
+            | Kind::TypeIdentifier
+    )
+}
+
 fn opens(kind: Kind) -> bool {
     matches!(kind, Kind::JsxElement | Kind::JsxSelfClosingElement)
+}
+
+fn operators(kind: Kind) -> bool {
+    matches!(
+        kind,
+        Kind::ArrowFunction
+            | Kind::AssignmentExpression
+            | Kind::AugmentedAssignmentExpression
+            | Kind::BinaryExpression
+            | Kind::VariableDeclarator
+    )
 }
 
 fn denies(kind: Kind, parent: Kind) -> bool {
@@ -400,26 +474,22 @@ impl Formatter {
             return Outcome::Refusal;
         }
 
-        let rules = brace::Rules {
-            braced,
-            denies,
-            drops,
-            opens,
-            owes,
-            parens,
-        };
-
         if !brace::terminated(
             input.tree,
             input.source,
             input.tokens,
-            rules,
+            RULES,
             &mut self.stream,
         ) {
             return Outcome::Overflow;
         }
 
         let held = brace::Input {
+            added: &[],
+            origin: &[],
+            origins: &[],
+            gives: &[],
+            macros: &[],
             roles: self.stream.roles(),
             options: input.options,
             policy: POLICY,

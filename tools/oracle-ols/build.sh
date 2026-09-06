@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 
-# ols has no release binary for the pin the corpus carries, so the oracle builds it from the
-# corpus checkout into this directory. The binary is ignored; `just oracle` rebuilds it.
 set -euo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

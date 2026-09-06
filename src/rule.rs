@@ -47,6 +47,17 @@ pub struct Registry {
 }
 
 impl Fixable {
+    pub const fn applicability(self) -> Applicability {
+        match self {
+            Self::Always | Self::Sometimes => Applicability::Safe,
+            Self::Never => Applicability::DisplayOnly,
+        }
+    }
+
+    pub const fn is_offered(self) -> bool {
+        matches!(self, Self::Always | Self::Sometimes)
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::Always => "always",

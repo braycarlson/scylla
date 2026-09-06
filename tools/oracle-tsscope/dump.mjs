@@ -1,14 +1,3 @@
-// Dumps the scope tree @typescript-eslint/scope-manager builds for every source
-// under a root, one JSON per file, in the row shape oracle-gotypes writes: an
-// identifier's offset, its kind, its name, and the offset of the definition it
-// resolves to. A row whose definition equals its own offset IS the definition;
-// a row whose definition is -1 resolved to nothing the file declares.
-//
-// The scope manager is the model ESLint's own no-unused-vars, no-undef and
-// no-redeclare are computed from, so it answers the same question the oxlint
-// oracle answers, one layer lower and for every identifier rather than for the
-// few a rule happens to report.
-
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -64,10 +53,6 @@ const sources = (root) => {
     return found
 }
 
-// Every range the parser reports counts UTF-16 code units, the way a JavaScript
-// string is indexed. scylla counts bytes, so a file holding one non-ASCII
-// character shifts every offset after it and the two models stop lining up.
-// An all-ASCII file needs no map, which is nearly every file.
 const bytes_of = (source) => {
     if (Buffer.byteLength(source, 'utf8') === source.length) {
         return null
@@ -116,10 +101,6 @@ const role_of = (reference) => {
     return 'Read'
 }
 
-// A parameter written in a type-level signature -- a call signature, a method
-// signature, a function type, an overload or an ambient declaration -- names a
-// position rather than declaring a value. It is marked so a reader that models
-// the value space alone can tell those rows apart from real parameters.
 const SIGNATURE_NODE = new Set([
     'TSCallSignatureDeclaration',
     'TSConstructSignatureDeclaration',
@@ -133,15 +114,8 @@ const SIGNATURE_NODE = new Set([
 const signature_parameter = (held) =>
     held.type === 'Parameter' && held.node !== undefined && SIGNATURE_NODE.has(held.node.type)
 
-// `const` in `x as const` and `this` in `function (this: T)` are reserved words
-// standing where ESTree wants an identifier node. Neither can be renamed,
-// shadowed or reached by another name, so a row for either describes the shape
-// of the tree rather than a binding of the language.
 const RESERVED = new Set(['const', 'this'])
 
-// A reference standing on its own definition (`const x = 1` writes `x` where it
-// declares it) is one identifier, so the definition row wins and the reference
-// row is dropped. Every other offset carries exactly one row.
 const rows_of = (manager, map) => {
     const at = (offset) => (map === null ? offset : map[offset])
     const rows = new Map()

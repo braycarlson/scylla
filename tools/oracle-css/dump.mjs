@@ -4,15 +4,10 @@ import { dirname, join, relative, sep } from 'node:path';
 
 const VERSION = readFileSync(new URL('./PIN', import.meta.url), 'utf8').trim();
 
-// postcss reports an offset in UTF-16 code units. Every span scylla holds is a byte offset,
-// so the prefix is measured rather than counted.
 function byteOffset(source, offset) {
     return Buffer.byteLength(source.slice(0, offset), 'utf8');
 }
 
-// scylla records a value name for each `PlainValue` or `StringValue` child of a declaration,
-// with a string's quotes stripped. A function call is a `CallExpression` and names nothing,
-// so its whole span is stepped over here the same way.
 function valuesOf(text, base) {
     const found = [];
     let offset = 0;
@@ -70,8 +65,6 @@ function valuesOf(text, base) {
 
         const name = text.slice(offset, end);
 
-        // scylla's value children are `PlainValue` or `StringValue`; a bare number lexes as
-        // `Number` and names nothing, so `Font Awesome\ 5 Brands` carries three names, not four.
         const numeric = /^[+-]?(\d+\.?\d*|\.\d+)$/.test(name);
 
         if (end > offset && text[offset] !== '!' && !numeric) {
@@ -96,8 +89,6 @@ function collect(whole, path) {
     const definitions = [];
     const uses = [];
 
-    // postcss strips a leading byte-order mark before it parses, so every offset it reports
-    // is into the text behind the mark while every span scylla holds counts the mark's bytes.
     const marked = whole.startsWith(BYTE_ORDER_MARK);
     const source = marked ? whole.slice(BYTE_ORDER_MARK.length) : whole;
     const shift = marked ? Buffer.byteLength(BYTE_ORDER_MARK, 'utf8') : 0;

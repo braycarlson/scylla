@@ -22,6 +22,7 @@ panic = "unwind"
 
 [profile.release]
 codegen-units = 1
+debug-assertions = true
 lto = true
 overflow-checks = true
 panic = "unwind"

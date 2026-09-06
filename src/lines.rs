@@ -3,13 +3,22 @@ use core::ops::{Deref, DerefMut};
 use crate::bounded::{BoundedVec, Span, count_of};
 use crate::scan::mark_width;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Encoding {
+    #[default]
     Utf16,
+    Utf32,
     Utf8,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LineEnding {
+    CarriageReturn,
+    CarriageReturnLineFeed,
+    LineFeed,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct Position {
     pub character: u32,
     pub line: u32,
@@ -40,16 +49,57 @@ impl Encoding {
 
     pub const fn name(self) -> &'static str {
         match self {
-            Self::Utf8 => "utf-8",
             Self::Utf16 => "utf-16",
+            Self::Utf32 => "utf-32",
+            Self::Utf8 => "utf-8",
+        }
+    }
+
+    pub const fn of(name: &[u8]) -> Option<Self> {
+        match name {
+            b"utf-16" => Some(Self::Utf16),
+            b"utf-32" => Some(Self::Utf32),
+            b"utf-8" => Some(Self::Utf8),
+            _ => None,
         }
     }
 
     pub fn width(self, character: char) -> u32 {
         match self {
-            Self::Utf8 => count_of(character.len_utf8()),
             Self::Utf16 => count_of(character.len_utf16()),
+            Self::Utf32 => 1,
+            Self::Utf8 => count_of(character.len_utf8()),
         }
+    }
+}
+
+impl LineEnding {
+    pub const fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::CarriageReturn => b"\r",
+            Self::CarriageReturnLineFeed => b"\r\n",
+            Self::LineFeed => b"\n",
+        }
+    }
+
+    pub fn of_source(source: &[u8]) -> Self {
+        for (index, byte) in source.iter().enumerate() {
+            if *byte == b'\n' {
+                return Self::LineFeed;
+            }
+
+            if *byte != b'\r' {
+                continue;
+            }
+
+            if source.get(index + 1) == Some(&b'\n') {
+                return Self::CarriageReturnLineFeed;
+            }
+
+            return Self::CarriageReturn;
+        }
+
+        Self::LineFeed
     }
 }
 
@@ -247,6 +297,40 @@ impl Index {
         }
     }
 
+    pub fn offset_clamped(&self, source: &[u8], position: Position, encoding: Encoding) -> u32 {
+        let length = count_of(source.len());
+        let line = position.line.min(self.count() - 1);
+        let start = self.line_start(line);
+        let end = self.line_end(line, length);
+
+        let Some(text) = text_between(source, start, end) else {
+            return start;
+        };
+
+        let mut offset = start;
+        let mut units = 0;
+
+        for character in text.chars() {
+            if units >= position.character || character == '\n' {
+                break;
+            }
+
+            units += encoding.width(character);
+            offset += count_of(character.len_utf8());
+        }
+
+        offset.min(length)
+    }
+
+    pub fn position_clamped(&self, source: &[u8], offset: u32, encoding: Encoding) -> Position {
+        let at = offset.min(count_of(source.len()));
+        let line = self.line_of(at);
+        let start = self.line_start(line);
+        let character = text_between(source, start, at).map_or(0, |text| encoding.count(text));
+
+        Position { character, line }
+    }
+
     pub fn offset_of(&self, source: &str, position: Position, encoding: Encoding) -> Option<u32> {
         if position.line >= self.count() {
             return None;
@@ -310,6 +394,16 @@ fn terminator_start(source: &[u8], newline: u32, start: u32) -> u32 {
     }
 
     newline
+}
+
+fn text_between(source: &[u8], start: u32, end: u32) -> Option<&str> {
+    let (Ok(first), Ok(last)) = (usize::try_from(start), usize::try_from(end)) else {
+        return None;
+    };
+
+    let bytes = source.get(first..last.max(first))?;
+
+    core::str::from_utf8(bytes).ok()
 }
 
 fn slice_of(source: &str, start: u32, end: u32) -> &str {
@@ -391,6 +485,44 @@ mod tests {
                 line: 1
             }
         );
+    }
+
+    #[test]
+    fn a_clamped_position_stops_at_the_line_and_the_source() {
+        let source = "one\ntwo\n";
+        let index = built(source);
+        let bytes = source.as_bytes();
+
+        assert_eq!(
+            index.offset_clamped(bytes, Position { character: 1, line: 1 }, Encoding::Utf8),
+            5
+        );
+
+        assert_eq!(
+            index.offset_clamped(bytes, Position { character: 99, line: 1 }, Encoding::Utf8),
+            7
+        );
+
+        assert_eq!(
+            index.offset_clamped(bytes, Position { character: 0, line: 99 }, Encoding::Utf8),
+            8
+        );
+
+        assert_eq!(index.position_clamped(bytes, 99, Encoding::Utf8).line, 2);
+    }
+
+    #[test]
+    fn utf_thirty_two_counts_one_unit_a_character() {
+        let source = "a\u{1F600}b\n";
+        let index = built(source);
+        let bytes = source.as_bytes();
+        let after = count_of("a\u{1F600}".len());
+
+        assert_eq!(index.position_clamped(bytes, after, Encoding::Utf32).character, 2);
+        assert_eq!(index.position_clamped(bytes, after, Encoding::Utf16).character, 3);
+        assert_eq!(index.position_clamped(bytes, after, Encoding::Utf8).character, 5);
+        assert_eq!(Encoding::of(b"utf-32"), Some(Encoding::Utf32));
+        assert_eq!(Encoding::of(b"utf-7"), None);
     }
 
     #[test]

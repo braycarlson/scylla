@@ -1,0 +1,11 @@
+[
+ {"file": "src/format/javascript.rs", "on": "    keyword_gaps: true,", "off": "    keyword_gaps: false,", "mark": "    keyword_gaps: true,"},
+ {"file": "src/format/typescript.rs", "on": "    keyword_gaps: true,", "off": "    keyword_gaps: false,", "mark": "    keyword_gaps: true,"},
+ {"file": "src/format/mask.rs", "on": "    if mark & NAME_WORDS != 0 && matches!(kind, TokenKind::Keyword(_)) {", "off": "    if mark & 0 != 0 && matches!(kind, TokenKind::Keyword(_)) {", "mark": "    if mark & NAME_WORDS != 0 && matches!(kind, TokenKind::Keyword(_)) {"},
+ {"file": "src/format/mask.rs", "on": "        if (rules.operators)(node.kind) {", "off": "        if false && (rules.operators)(node.kind) {", "mark": "        if (rules.operators)(node.kind) {"},
+ {"file": "src/format/javascript.rs", "on": "    declare_lines: true,", "off": "    declare_lines: false,", "mark": "    declare_lines: true,"},
+ {"file": "src/format/typescript.rs", "on": "    declare_lines: true,", "off": "    declare_lines: false,", "mark": "    declare_lines: true,"},
+ {"file": "src/format/javascript.rs", "on": "    clause_lines: true,", "off": "    clause_lines: false,", "mark": "    clause_lines: true,"},
+ {"file": "src/format/typescript.rs", "on": "    clause_lines: true,", "off": "    clause_lines: false,", "mark": "    clause_lines: true,"},
+ {"file": "src/format/brace/wide.rs", "on": "                (self.tokens[before as usize].end() < token.offset || self.printed_gap(before, scan))", "off": "                (self.tokens[before as usize].end() < token.offset)", "mark": "                (self.tokens[before as usize].end() < token.offset || self.printed_gap(before, scan))"}
+]

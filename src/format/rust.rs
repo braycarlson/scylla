@@ -1,24 +1,28 @@
 use core::cmp::Ordering;
 
-use crate::bounded::{Buffer, Bytes as _, Span};
+use crate::bounded::{BoundedVec, Buffer, Bytes as _, Span, count_of};
 use crate::format::align::{self, Target};
 use crate::format::brace::{self, Policy};
 use crate::format::mask::{Tails, Terminators};
 use crate::format::print::Options;
+use crate::format::walk::{columns, ends_operand, is_close, is_open};
 use crate::syntax::rust::kind::RustKind as Kind;
-use crate::token::Token;
+use crate::token::{Punctuation, Token, TokenKind};
 use crate::tree::{Structure, Tree};
 
 pub const POLICY: Policy = Policy {
     angle_calls: false,
     angle_objects: false,
+    arm_bars: true,
     arm_empties: true,
     arm_flattens: true,
     arm_guards: true,
     arrow_after: &[],
+    arrow_bodies: false,
     arrow_parens: false,
     assign_groups: false,
     assign_joins: true,
+    assign_lines: false,
     assign_values: false,
     assign_wraps: true,
     chain_soles: true,
@@ -35,10 +39,12 @@ pub const POLICY: Policy = Policy {
     attribute_width: 70,
     attribute_words: &[b"derive"],
     bar_levels: false,
+    binary_lines: false,
     binary_parts: false,
     binding_bases: &[b"if"],
     binding_codes: false,
     binding_leads: true,
+    binder_words: &[],
     binding_words: &[
         &[b"*", b"/", b"%"],
         &[b"+", b"-"],
@@ -50,7 +56,7 @@ pub const POLICY: Policy = Policy {
         &[b"&&"],
         &[b"||"],
     ],
-    blank_edges: false,
+    blank_edges: true,
     blank_max: 1,
     block_chains: true,
     block_joins: true,
@@ -78,8 +84,10 @@ pub const POLICY: Policy = Policy {
         b"while",
     ],
     block_words: &[],
+    body_owns: false,
     body_parts: false,
     body_words: &[],
+    brace_bodies: true,
     brace_continues: true,
     brace_counts: false,
     brace_dedents: true,
@@ -100,15 +108,19 @@ pub const POLICY: Policy = Policy {
     carriage_breaks: true,
     callee_marks: &[],
     callee_words: &[],
+    cast_joins: true,
     cast_words: &[],
     clause_bases: true,
     clause_ends: true,
+    clause_lines: false,
     clause_words: &[b"where"],
     close_hugs: false,
     colon_continues: true,
     comma_continues: false,
     comma_adds: false,
     comma_drops: false,
+    comma_parts: true,
+    compose_parts: false,
     construct_words: &[],
     continue_words: &[
         b"!=",
@@ -132,6 +144,7 @@ pub const POLICY: Policy = Policy {
     define_joins: true,
     define_widths: true,
     define_words: &[b"fn"],
+    declare_lines: false,
     declaration_words: &[],
     declare_words: &[],
     dedent_words: &[],
@@ -152,7 +165,9 @@ pub const POLICY: Policy = Policy {
     header_extends: true,
     header_joins: true,
     header_levels: false,
+    header_lines: true,
     header_parens: false,
+    header_widths: true,
     header_words: &[b"for", b"if", b"match", b"while"],
     heritage_parts: false,
     hug_braces: false,
@@ -160,6 +175,8 @@ pub const POLICY: Policy = Policy {
     hug_lasts: false,
     hug_soles: false,
     hug_words: &[b"!", b"::", b"fn"],
+    inline_layout: false,
+    inline_remarks: false,
     item_words: &[b"impl"],
     key_quotes: false,
     key_words: &[],
@@ -196,6 +213,7 @@ pub const POLICY: Policy = Policy {
     nested_levels: true,
     number_forms: false,
     operand_joins: true,
+    operand_levels: true,
     operand_words: &[b"Self", b"await", b"crate", b"self", b"super"],
     operator_words: &[],
     order_words: &[],
@@ -204,12 +222,15 @@ pub const POLICY: Policy = Policy {
     pattern_words: &[b"match"],
     postfix_words: &[],
     prefix_words: &[b"$", b"@", b"'"],
+    printed_gaps: false,
     raise_hugged: true,
     remark_carries: false,
     remark_dedents: true,
     sentinel_colons: false,
     remark_gaps: false,
     remark_levels: false,
+    remark_suffix: false,
+    remark_tails: true,
     return_parens: false,
     rest_binds: false,
     remark_leads: false,
@@ -225,6 +246,7 @@ pub const POLICY: Policy = Policy {
     source_words: &[b"|"],
     spaced_words: &[],
     span_levels: false,
+    spread_blanks: false,
     tight_from_source: &[b"!", b"*", b"+", b":", b"<", b">", b">>", b"?"],
     spec_depths: false,
     special_macros: &[
@@ -254,6 +276,8 @@ pub const POLICY: Policy = Policy {
     template_units: false,
     ternary_colon: false,
     ternary_levels: false,
+    ternary_parts: false,
+    test_joins: false,
     tight_words: &[b"#", b"::"],
     type_leads: &[],
     type_words: &[],
@@ -277,6 +301,7 @@ const FILE_HEAD_MAX: u32 = 4096;
 const TAIL_ENDS: bool = true;
 const BODY_BLOCKS: bool = true;
 const BODY_DROPS: bool = true;
+const STRUCT_BODIES: bool = true;
 const ARM_BLOCKS: bool = true;
 const NO_MACRO: i32 = i32::MIN;
 const RANK_CRATE: u8 = 2;
@@ -1030,10 +1055,929 @@ pub struct Input<'held> {
 
 #[derive(Debug)]
 pub struct Formatter {
+    gives: BoundedVec<u32>,
     inner: brace::Formatter,
+    lines: BoundedVec<u32>,
+    macros: BoundedVec<u32>,
     scratch: Buffer,
     staged: Buffer,
     stream: Terminators,
+}
+
+const ELEMENT_ALIGNS: bool = true;
+const GIVE_UPS: bool = true;
+const GIVE_PASSES: u32 = 3;
+const GIVE_REMARKS: bool = true;
+const GIVE_VALUES: bool = true;
+const GIVE_MACROS: bool = true;
+const GIVE_COLONS: bool = true;
+const GIVE_ITEMS: bool = true;
+const GIVE_BRACES: bool = true;
+const GIVE_LAMBDAS: bool = true;
+const GIVE_LIVES: bool = true;
+const GIVE_STRINGS: bool = true;
+
+const GIVE_OPERATORS: [&[u8]; 12] = [
+    b"!=",
+    b"%",
+    b"&&",
+    b"*",
+    b"+",
+    b"-",
+    b"/",
+    b"<=",
+    b"==",
+    b">=",
+    b"^",
+    b"||",
+];
+const GIVE_MARKS_MAX: u32 = 1 << 12;
+const GIVE_TOKENS: bool = true;
+const MACRO_UPS: bool = true;
+const MACRO_RULE_MAX: u32 = 8;
+const MACRO_HEADS: &[&[u8]] = &[b"pub", b"unsafe"];
+const ARM_GIVES: bool = true;
+const GIVE_LONES: bool = true;
+const GIVE_ATS: bool = true;
+const LONE_KEEPS: &[&[u8]] = &[b"!", b"..", b","];
+const ARM_GIVE_MAX: u32 = 8;
+const ARM_SCAN_MAX: u32 = 256;
+
+const ARM_STOPS: &[&[u8]] = &[
+    b"=>",
+    b"else",
+    b"fn",
+    b"if",
+    b"impl",
+    b"loop",
+    b"mod",
+    b"trait",
+    b"unsafe",
+    b"while",
+];
+
+fn remarked_line(line: &[u8]) -> bool {
+    let text = line
+        .iter()
+        .position(|byte| !matches!(*byte, b' ' | b'\t'))
+        .map_or(&line[..0], |at| &line[at..]);
+
+    text.starts_with(b"//") || text.starts_with(b"/*") || text.starts_with(b"*")
+}
+
+fn token_at(tokens: &[Token], offset: u32) -> Option<u32> {
+    let mut low = 0_usize;
+    let mut high = tokens.len();
+
+    while low < high {
+        let middle = low + (high - low) / 2;
+
+        if tokens[middle].offset <= offset {
+            low = middle + 1;
+        } else {
+            high = middle;
+        }
+    }
+
+    (low > 0).then(|| count_of(low - 1))
+}
+
+fn carried_end(source: &[u8], tokens: &[Token], position: u32) -> bool {
+    let mut scan = position as usize + 1;
+
+    while scan < tokens.len() {
+        let token = tokens[scan];
+
+        if token.length > 0 && token.kind != TokenKind::Newline {
+            let text = token.text(source);
+
+            return matches!(text, b"else" | b"." | b"?");
+        }
+
+        scan += 1;
+    }
+
+    false
+}
+
+const GIVE_CLIMB_MAX: u32 = 8;
+const GIVE_GUARD_MAX: u32 = 16;
+const ITEM_WORDS: &[&[u8]] = &[
+    b"async",
+    b"const",
+    b"default",
+    b"enum",
+    b"extern",
+    b"fn",
+    b"impl",
+    b"macro_rules",
+    b"mod",
+    b"pub",
+    b"static",
+    b"struct",
+    b"trait",
+    b"type",
+    b"union",
+    b"unsafe",
+    b"use",
+];
+
+fn settled(tokens: &[Token], position: u32) -> u32 {
+    let mut scan = position;
+
+    while (scan as usize) < tokens.len() {
+        let token = tokens[scan as usize];
+
+        if token.length > 0 && token.kind != TokenKind::Comment && token.kind != TokenKind::Newline
+        {
+            return scan;
+        }
+
+        scan += 1;
+    }
+
+    position
+}
+
+fn statement_head(source: &[u8], tokens: &[Token], position: u32) -> u32 {
+    let mut depth = 0_u32;
+    let mut scan = position;
+
+    while scan > 0 {
+        let held = scan - 1;
+        let kind = tokens[held as usize].kind;
+
+        if kind == TokenKind::BlockEnd {
+            if depth == 0 && !carried_end(source, tokens, held) {
+                return settled(tokens, scan);
+            }
+
+            depth += 1;
+        } else if is_close(kind) {
+            depth += 1;
+        } else if kind == TokenKind::BlockStart {
+            if depth == 0 {
+                return settled(tokens, scan);
+            }
+
+            depth -= 1;
+        } else if is_open(kind) {
+            depth = depth.saturating_sub(1);
+        } else if depth == 0 && kind == TokenKind::Punctuation(Punctuation::Semicolon) {
+            return settled(tokens, scan);
+        }
+
+        scan = held;
+    }
+
+    settled(tokens, 0)
+}
+
+fn block_open(tokens: &[Token], position: u32) -> Option<u32> {
+    let mut depth = 0_u32;
+    let mut scan = position;
+
+    while scan > 0 {
+        let held = scan - 1;
+        let kind = tokens[held as usize].kind;
+
+        if kind == TokenKind::BlockEnd {
+            depth += 1;
+        } else if kind == TokenKind::BlockStart {
+            if depth == 0 {
+                return Some(held);
+            }
+
+            depth -= 1;
+        }
+
+        scan = held;
+    }
+
+    None
+}
+
+fn item_headed(source: &[u8], tokens: &[Token], head: u32) -> bool {
+    let text = tokens[head as usize].text(source);
+
+    text == b"#" || ITEM_WORDS.contains(&text)
+}
+
+fn behind(tokens: &[Token], position: u32) -> Option<u32> {
+    let mut scan = position;
+
+    while scan > 0 {
+        let held = scan - 1;
+        let token = tokens[held as usize];
+
+        if token.length > 0 && token.kind != TokenKind::Comment && token.kind != TokenKind::Newline
+        {
+            return Some(held);
+        }
+
+        scan = held;
+    }
+
+    None
+}
+
+fn group_open(tokens: &[Token], position: u32) -> Option<u32> {
+    let mut depth = 0_u32;
+    let mut scan = position;
+
+    while scan > 0 {
+        let held = scan - 1;
+        let kind = tokens[held as usize].kind;
+
+        if is_close(kind) || kind == TokenKind::BlockEnd {
+            depth += 1;
+        } else if is_open(kind) || kind == TokenKind::BlockStart {
+            if depth == 0 {
+                return Some(held);
+            }
+
+            depth -= 1;
+        }
+
+        scan = held;
+    }
+
+    None
+}
+
+fn dotted_callee(source: &[u8], tokens: &[Token], open: u32) -> bool {
+    if !matches!(
+        tokens[open as usize].kind,
+        TokenKind::Punctuation(Punctuation::BracketOpen | Punctuation::ParenOpen)
+    ) {
+        return false;
+    }
+
+    let Some(name) = behind(tokens, open) else {
+        return false;
+    };
+
+    if tokens[name as usize].kind != TokenKind::Identifier {
+        return false;
+    }
+
+    let Some(dot) = behind(tokens, name) else {
+        return false;
+    };
+
+    tokens[dot as usize].kind == TokenKind::Punctuation(Punctuation::Dot)
+        && !tokens[dot as usize].text(source).starts_with(b"..")
+}
+
+fn guarded(source: &[u8], tokens: &[Token], position: u32, head: u32) -> bool {
+    let mut scan = position;
+
+    for _ in 0..GIVE_GUARD_MAX {
+        let Some(open) = group_open(tokens, scan).filter(|held| *held >= head) else {
+            return false;
+        };
+
+        if dotted_callee(source, tokens, open) {
+            return true;
+        }
+
+        scan = open;
+    }
+
+    false
+}
+
+fn stated_head(source: &[u8], tokens: &[Token], position: u32) -> u32 {
+    let mut head = statement_head(source, tokens, position);
+
+    if !ARM_GIVES {
+        return head;
+    }
+
+    for _ in 0..ARM_GIVE_MAX {
+        let Some(open) = block_open(tokens, head) else {
+            return head;
+        };
+
+        let Some(matched) = matching(source, tokens, open) else {
+            return head;
+        };
+
+        head = statement_head(source, tokens, matched);
+    }
+
+    head
+}
+
+fn matching(source: &[u8], tokens: &[Token], open: u32) -> Option<u32> {
+    let mut depth = 0_u32;
+    let mut scan = open;
+
+    for _ in 0..ARM_SCAN_MAX {
+        scan = scan.checked_sub(1)?;
+
+        let kind = tokens[scan as usize].kind;
+
+        if is_close(kind) || kind == TokenKind::BlockEnd {
+            depth += 1;
+
+            continue;
+        }
+
+        if is_open(kind) || kind == TokenKind::BlockStart {
+            depth = depth.checked_sub(1)?;
+
+            continue;
+        }
+
+        if depth > 0 || tokens[scan as usize].length == 0 {
+            continue;
+        }
+
+        let text = tokens[scan as usize].text(source);
+
+        if text == b"match" {
+            return Some(scan);
+        }
+
+        if kind == TokenKind::Punctuation(Punctuation::Semicolon) || ARM_STOPS.contains(&text) {
+            return None;
+        }
+    }
+
+    None
+}
+
+fn outer_head(source: &[u8], tokens: &[Token], position: u32) -> u32 {
+    let mut head = statement_head(source, tokens, position);
+
+    for _ in 0..GIVE_CLIMB_MAX {
+        let Some(open) = block_open(tokens, head) else {
+            return head;
+        };
+
+        let owner = statement_head(source, tokens, open);
+
+        if item_headed(source, tokens, owner) {
+            return head;
+        }
+
+        head = owner;
+    }
+
+    head
+}
+
+fn assigned(tokens: &[Token], position: u32) -> bool {
+    let mut scan = position;
+
+    while scan > 0 {
+        scan -= 1;
+
+        let token = tokens[scan as usize];
+
+        if token.kind == TokenKind::Newline || token.length == 0 || token.kind == TokenKind::Comment
+        {
+            continue;
+        }
+
+        return token.kind == TokenKind::Punctuation(Punctuation::Assign);
+    }
+
+    false
+}
+
+fn operated(source: &[u8], tokens: &[Token], position: u32) -> bool {
+    let token = tokens[position as usize];
+    let text = token.text(source);
+
+    if GIVE_OPERATORS.contains(&text) {
+        return true;
+    }
+
+    if !matches!(text, b"&" | b"|") {
+        return false;
+    }
+
+    tokens
+        .get(position as usize + 1)
+        .is_some_and(|next| next.text(source) == text && next.offset == token.end())
+}
+
+fn remarks(source: &[u8], tokens: &[Token], gives: &mut BoundedVec<u32>) -> bool {
+    if !GIVE_REMARKS {
+        return false;
+    }
+
+    let mut found = false;
+
+    for position in 0..count_of(tokens.len()) {
+        if tokens[position as usize].kind != TokenKind::Comment {
+            continue;
+        }
+
+        let mut scan = position + 1;
+
+        while (scan as usize) < tokens.len()
+            && (tokens[scan as usize].kind == TokenKind::Newline
+                || tokens[scan as usize].length == 0
+                || tokens[scan as usize].kind == TokenKind::Comment)
+        {
+            scan += 1;
+        }
+
+        let valued = GIVE_VALUES && assigned(tokens, position);
+
+        if !valued && (scan as usize >= tokens.len() || !operated(source, tokens, scan)) {
+            continue;
+        }
+
+        found |= given(gives, statement_head(source, tokens, position));
+    }
+
+    found
+}
+
+// A brace behind a closure's own `|..|` is that closure's BODY, and `parse_expr` takes the whole
+// closure. The statements inside it may carry a `:`, a `=>` or a `fn` of their own without any of
+// them reaching the invocation's parser.
+fn barred(source: &[u8], tokens: &[Token], previous: Option<u32>) -> bool {
+    GIVE_LAMBDAS
+        && previous.is_some_and(|held| matches!(tokens[held as usize].text(source), b"|" | b"||"))
+}
+
+fn lived(source: &[u8], tokens: &[Token], scan: u32, previous: Option<u32>) -> bool {
+    lifetimed(source, tokens[scan as usize])
+        && previous.is_none_or(|held| {
+            matches!(
+                tokens[held as usize].kind,
+                TokenKind::Punctuation(
+                    Punctuation::BracketOpen | Punctuation::Comma | Punctuation::ParenOpen
+                )
+            )
+        })
+        && matches!(
+            tokens[named_end(tokens, scan) as usize].kind,
+            TokenKind::Punctuation(
+                Punctuation::BracketClose | Punctuation::Comma | Punctuation::ParenClose
+            )
+        )
+}
+
+fn arrowed(source: &[u8], tokens: &[Token], open: u32) -> bool {
+    let mut braced = 0_u32;
+    let mut depth = 0_u32;
+    let mut lambda = false;
+    let mut previous: Option<u32> = None;
+    let mut scan = open;
+
+    while (scan as usize) < tokens.len() {
+        let token = tokens[scan as usize];
+        let kind = token.kind;
+        let opens = previous.is_none_or(|held| !ends_operand(tokens[held as usize].kind));
+        let inner = depth == 1 || GIVE_BRACES && braced > 0 && depth == braced;
+
+        if is_open(kind) || kind == TokenKind::BlockStart {
+            depth += 1;
+
+            if braced == 0
+                && kind == TokenKind::BlockStart
+                && opens
+                && !barred(source, tokens, previous)
+            {
+                braced = depth;
+            }
+        } else if is_close(kind) || kind == TokenKind::BlockEnd {
+            if braced == depth {
+                braced = 0;
+            }
+
+            depth -= 1;
+
+            if depth == 0 {
+                return false;
+            }
+        } else if depth == 1 && token.text(source) == b"|" && (lambda || opens) {
+            lambda = !lambda;
+        } else if inner
+            && !lambda
+            && (token.text(source) == b"=>"
+                || GIVE_COLONS && token.text(source) == b":"
+                || lived(source, tokens, scan, previous)
+                || GIVE_LONES && loned(source, tokens, scan, previous)
+                || GIVE_ATS && token.text(source) == b"@"
+                || GIVE_ITEMS
+                    && token.text(source) == b"fn"
+                    && !item_bodied(tokens, scan, count_of(tokens.len())))
+        {
+            return true;
+        }
+
+        // An `@` LEADING a group is a binding with no name in front of it, which no parser takes
+        // at any depth: `minimal_quote!((@ proc_macro_crate) ::Span::recover(..))` comes back
+        // from its own snippet. An `@` standing BETWEEN two operands is a pattern and parses,
+        // but only where the group around it is one -- at the invocation's own depth the
+        // expression parser takes the name and stops at the sigil.
+        if GIVE_ATS
+            && !lambda
+            && token.text(source) == b"@"
+            && previous.is_some_and(|held| is_open(tokens[held as usize].kind))
+        {
+            return true;
+        }
+
+        if token.length > 0 && kind != TokenKind::Newline && kind != TokenKind::Comment {
+            previous = Some(scan);
+        }
+
+        scan += 1;
+    }
+
+    false
+}
+
+fn loned(source: &[u8], tokens: &[Token], scan: u32, previous: Option<u32>) -> bool {
+    let token = tokens[scan as usize];
+
+    if !matches!(token.kind, TokenKind::Punctuation(_)) || LONE_KEEPS.contains(&token.text(source))
+    {
+        return false;
+    }
+
+    let opened = previous.is_some_and(|held| {
+        matches!(
+            tokens[held as usize].kind,
+            TokenKind::Punctuation(
+                Punctuation::BracketOpen | Punctuation::Comma | Punctuation::ParenOpen
+            )
+        )
+    });
+
+    opened
+        && matches!(
+            tokens[settled(tokens, scan + 1) as usize].kind,
+            TokenKind::Punctuation(
+                Punctuation::BracketClose | Punctuation::Comma | Punctuation::ParenClose
+            )
+        )
+}
+
+fn lifetimed(source: &[u8], token: Token) -> bool {
+    if !GIVE_LIVES {
+        return false;
+    }
+
+    let text = token.text(source);
+
+    if !text.starts_with(b"'") {
+        return false;
+    }
+
+    if token.kind == TokenKind::Identifier {
+        return true;
+    }
+
+    if token.kind != TokenKind::String
+        || text.len() < 4
+        || !text.ends_with(b"'")
+        || text[1] == b'\\'
+    {
+        return false;
+    }
+
+    let held = &text[1..text.len() - 1];
+
+    held.iter().filter(|byte| (**byte & 0xC0) != 0x80).count() > 1
+}
+
+fn named_end(tokens: &[Token], apostrophe: u32) -> u32 {
+    let held = settled(tokens, apostrophe + 1);
+
+    if tokens[held as usize].kind != TokenKind::Identifier {
+        return held;
+    }
+
+    settled(tokens, held + 1)
+}
+
+fn item_bodied(tokens: &[Token], head: u32, stop: u32) -> bool {
+    let mut depth = 0_u32;
+    let mut last = head;
+    let mut scan = head;
+
+    while scan < stop {
+        let token = tokens[scan as usize];
+        let kind = token.kind;
+
+        if is_open(kind) || kind == TokenKind::BlockStart {
+            depth += 1;
+        } else if is_close(kind) || kind == TokenKind::BlockEnd {
+            if depth == 0 {
+                break;
+            }
+
+            depth -= 1;
+        } else if depth == 0
+            && matches!(
+                kind,
+                TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
+            )
+        {
+            break;
+        }
+
+        if token.length > 0 && kind != TokenKind::Newline && kind != TokenKind::Comment {
+            last = scan;
+        }
+
+        scan += 1;
+    }
+
+    matches!(
+        tokens[last as usize].kind,
+        TokenKind::BlockEnd | TokenKind::Punctuation(Punctuation::Semicolon)
+    )
+}
+
+fn headed(source: &[u8], tokens: &[Token], bang: u32) -> u32 {
+    let mut head = statement_head(source, tokens, bang);
+
+    for _ in 0..GIVE_CLIMB_MAX {
+        if head >= bang || tokens[head as usize].text(source) != b"#" {
+            return head;
+        }
+
+        let mut scan = head;
+
+        while scan < bang {
+            if tokens[scan as usize].kind == TokenKind::Punctuation(Punctuation::BracketClose) {
+                break;
+            }
+
+            scan += 1;
+        }
+
+        head = settled(tokens, scan + 1);
+    }
+
+    head
+}
+
+fn banged(source: &[u8], tokens: &[Token], position: u32) -> bool {
+    if tokens[position as usize].text(source) != b"!" {
+        return false;
+    }
+
+    behind(tokens, position).is_some_and(|held| {
+        matches!(
+            tokens[held as usize].kind,
+            TokenKind::Identifier | TokenKind::Keyword(_)
+        ) && tokens[held as usize].end() == tokens[position as usize].offset
+    })
+}
+
+fn give_macros(
+    source: &[u8],
+    tokens: &[Token],
+    gives: &mut BoundedVec<u32>,
+    macros: &mut BoundedVec<u32>,
+) -> bool {
+    if !GIVE_MACROS {
+        return false;
+    }
+
+    let mut found = false;
+
+    for position in 0..count_of(tokens.len()) {
+        if !banged(source, tokens, position) {
+            continue;
+        }
+
+        let open = settled(tokens, position + 1);
+
+        if !matches!(
+            tokens[open as usize].kind,
+            TokenKind::Punctuation(Punctuation::ParenOpen | Punctuation::BracketOpen)
+        ) || !arrowed(source, tokens, open)
+        {
+            continue;
+        }
+
+        let head = headed(source, tokens, position);
+
+        given(macros, head);
+
+        found |= given(gives, head);
+    }
+
+    found
+}
+
+fn linked_below(printed: &[u8], stop: u32) -> bool {
+    let mut scan = stop as usize + 1;
+
+    while scan < printed.len() && matches!(printed[scan], b' ' | b'\t') {
+        scan += 1;
+    }
+
+    printed.get(scan) == Some(&b'.')
+}
+
+fn given(gives: &mut BoundedVec<u32>, head: u32) -> bool {
+    let Err(at) = gives.binary_search(&head) else {
+        return false;
+    };
+
+    if !gives.push(head) {
+        return false;
+    }
+
+    gives[at..].rotate_right(1);
+
+    true
+}
+
+fn copied(source: &[u8], out: &mut Buffer) -> Outcome {
+    out.clear();
+
+    if out.push_bytes(source) {
+        return Outcome::Complete;
+    }
+
+    Outcome::Overflow
+}
+
+fn printing(
+    inner: &mut brace::Formatter,
+    gives: &mut BoundedVec<u32>,
+    macros: &mut BoundedVec<u32>,
+    lines: &mut BoundedVec<u32>,
+    scratch: &mut Buffer,
+    held: &brace::Input<'_>,
+    width: u32,
+) -> bool {
+    gives.clear();
+    macros.clear();
+
+    remarks(held.source, held.tokens, gives);
+    give_macros(held.source, held.tokens, gives, macros);
+
+    for _ in 0..GIVE_PASSES {
+        let round = brace::Input {
+            gives: gives.as_ref(),
+            macros: macros.as_ref(),
+            ..*held
+        };
+
+        if !inner.formatting(&round, scratch, Some(lines)) {
+            return false;
+        }
+
+        if !GIVE_UPS
+            || !marks(
+                held.source,
+                held.tokens,
+                scratch.as_bytes(),
+                lines,
+                width,
+                held.options.indent_width,
+                gives,
+            )
+        {
+            break;
+        }
+    }
+
+    true
+}
+
+fn quoted(source: &[u8], position: u32, tokens: &[Token]) -> bool {
+    let token = tokens[position as usize];
+
+    token.kind == TokenKind::String && token.text(source).starts_with(b"\"")
+}
+
+fn columned(source: &[u8], tokens: &[Token], head: u32) -> u32 {
+    let offset = (tokens[head as usize].offset as usize).min(source.len());
+    let mut start = offset;
+
+    while start > 0 && source[start - 1] != b'\n' {
+        start -= 1;
+    }
+
+    columns(source, count_of(start), count_of(offset))
+}
+
+fn ruled_head(source: &[u8], tokens: &[Token], head: u32) -> bool {
+    let mut scan = head;
+
+    for _ in 0..MACRO_RULE_MAX {
+        let text = tokens[scan as usize].text(source);
+
+        if text == b"macro_rules" || text == b"macro" {
+            return true;
+        }
+
+        if !MACRO_HEADS.contains(&text) {
+            return false;
+        }
+
+        scan = settled(tokens, scan + 1);
+    }
+
+    false
+}
+
+fn macro_ruled(source: &[u8], tokens: &[Token], position: u32) -> Option<u32> {
+    let mut scan = position;
+
+    for _ in 0..GIVE_CLIMB_MAX {
+        let open = block_open(tokens, scan)?;
+        let head = statement_head(source, tokens, open);
+
+        if ruled_head(source, tokens, head) {
+            return Some(head);
+        }
+
+        scan = open;
+    }
+
+    None
+}
+
+fn marks(
+    source: &[u8],
+    tokens: &[Token],
+    printed: &[u8],
+    lines: &[u32],
+    width: u32,
+    indent: u32,
+    gives: &mut BoundedVec<u32>,
+) -> bool {
+    let mut found = false;
+    let mut index = 0_usize;
+    let mut start = 0_u32;
+
+    for (at, byte) in printed.iter().enumerate() {
+        if *byte != b'\n' {
+            continue;
+        }
+
+        let stop = count_of(at);
+        let line = &printed[start as usize..at];
+
+        start = stop + 1;
+        index += 1;
+
+        let owed = u32::from(GIVE_STRINGS && line.ends_with(b"\"") && linked_below(printed, stop));
+        let spread = columns(printed, stop.saturating_sub(count_of(line.len())), stop) + owed;
+
+        if spread <= width || remarked_line(line) {
+            continue;
+        }
+
+        let Some(offset) = lines.get(index - 1).copied() else {
+            continue;
+        };
+
+        let Some(position) = token_at(tokens, offset) else {
+            continue;
+        };
+
+        if MACRO_UPS && let Some(ruled) = macro_ruled(source, tokens, position) {
+            found |= given(gives, ruled);
+
+            continue;
+        }
+
+        if GIVE_TOKENS && !quoted(source, position, tokens) {
+            let token = tokens[position as usize];
+            let owner = stated_head(source, tokens, position);
+            let spelled = columns(source, token.offset, token.end());
+
+            if columned(source, tokens, owner) + indent + spelled > width {
+                found |= given(gives, owner);
+
+                continue;
+            }
+        }
+
+        if owed > 0 {
+            found |= given(gives, stated_head(source, tokens, position));
+
+            continue;
+        }
+
+        let head = outer_head(source, tokens, position);
+
+        if !guarded(source, tokens, position, head) {
+            continue;
+        }
+
+        found |= given(gives, head);
+    }
+
+    found
 }
 
 fn owes(kind: Kind, parent: Kind) -> bool {
@@ -1057,12 +2001,13 @@ fn bodies(kind: Kind) -> u32 {
         Kind::ExprCall | Kind::ExprMacro | Kind::ExprTuple => POLICY.call_width,
         Kind::ExprMethodCall => POLICY.chain_width,
         Kind::ExprIf => POLICY.branch_width,
+        Kind::ExprStruct if STRUCT_BODIES => POLICY.literal_width,
         _ => 0,
     }
 }
 
 fn argued(kind: Kind) -> bool {
-    matches!(kind, Kind::ExprCall | Kind::ExprMacro)
+    matches!(kind, Kind::ExprCall | Kind::ExprMacro) || STRUCT_BODIES && kind == Kind::ExprStruct
 }
 
 fn chained(kind: Kind) -> bool {
@@ -1127,6 +2072,7 @@ const TAILS: Tails<Kind> = Tails {
     indent: 0,
     lambda,
     line: 0,
+    literal: POLICY.literal_width,
     owes,
     width: POLICY.else_width,
     wraps,
@@ -1164,7 +2110,10 @@ impl Formatter {
         assert!(!crate::allocation::is_frozen());
 
         Self {
+            gives: BoundedVec::reserve(GIVE_MARKS_MAX),
             inner: brace::Formatter::reserve(element_count_max, scratch_bytes_max),
+            lines: BoundedVec::reserve(element_count_max),
+            macros: BoundedVec::reserve(GIVE_MARKS_MAX),
             scratch: Buffer::reserve(scratch_bytes_max),
             staged: Buffer::reserve(scratch_bytes_max),
             stream: Terminators::reserve(element_count_max, scratch_bytes_max),
@@ -1180,13 +2129,7 @@ impl Formatter {
         }
 
         if skipped_file(input.source) {
-            out.clear();
-
-            return if out.push_bytes(input.source) {
-                Outcome::Complete
-            } else {
-                Outcome::Overflow
-            };
+            return copied(input.source, out);
         }
 
         if TAIL_ENDS
@@ -1206,6 +2149,15 @@ impl Formatter {
         }
 
         let held = brace::Input {
+            added: if TAIL_ENDS { self.stream.added() } else { &[] },
+            origin: input.source,
+            origins: if TAIL_ENDS {
+                self.stream.origins()
+            } else {
+                &[]
+            },
+            gives: &[],
+            macros: &[],
             roles: &[],
             options: input.options,
             policy: POLICY,
@@ -1221,11 +2173,19 @@ impl Formatter {
             },
         };
 
-        if !self.inner.format(&held, &mut self.scratch) {
+        if !printing(
+            &mut self.inner,
+            &mut self.gives,
+            &mut self.macros,
+            &mut self.lines,
+            &mut self.scratch,
+            &held,
+            input.options.line_width,
+        ) {
             return Outcome::Overflow;
         }
 
-        if !align::align(self.scratch.as_bytes(), Target::Element, &mut self.staged) {
+        if !self.columned(input.options.line_width) {
             return Outcome::Overflow;
         }
 
@@ -1238,6 +2198,22 @@ impl Formatter {
         }
 
         Outcome::Complete
+    }
+
+    #[must_use]
+    fn columned(&mut self, line_width: u32) -> bool {
+        if ELEMENT_ALIGNS {
+            return align::align(
+                self.scratch.as_bytes(),
+                Target::Element,
+                line_width,
+                &mut self.staged,
+            );
+        }
+
+        self.staged.clear();
+
+        self.staged.push_bytes(self.scratch.as_bytes())
     }
 
     #[must_use]

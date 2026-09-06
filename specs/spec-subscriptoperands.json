@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/brace/span.rs", "on": "const SUBSCRIPT_OPERANDS: bool = true;", "off": "const SUBSCRIPT_OPERANDS: bool = false;", "mark": "const SUBSCRIPT_OPERANDS: bool = true;"}
+]

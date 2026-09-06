@@ -1,0 +1,3 @@
+[
+ {"file": "src/format/mask.rs", "on": "        if (rules.operators)(node.kind) {", "off": "        if false && (rules.operators)(node.kind) {", "mark": "        if (rules.operators)(node.kind) {"}
+]

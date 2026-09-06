@@ -4,9 +4,9 @@ use crate::format::print::{self, Options};
 use crate::format::walk::columns;
 use crate::language::Lexer as _;
 use crate::lex::PYTHON;
+use crate::lines::LineEnding;
 use crate::suppress::{Pragma, PragmaAt};
 use crate::syntax::python::kind::PythonKind as Kind;
-use crate::syntax::python::style::LineEnding;
 use crate::token::{Lex, Token, TokenKind, Tokens};
 use crate::tree::{NONE, Structure, Tree};
 

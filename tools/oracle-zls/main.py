@@ -5,7 +5,6 @@ import signal
 import subprocess
 import sys
 
-# Zig keywords never name a definition, so asking about one only costs a round trip.
 KEYWORDS = frozenset(
     """
     addrspace align allowzero and anyframe anytype asm async await break callconv catch
@@ -17,13 +16,8 @@ KEYWORDS = frozenset(
 
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
-# One file the server never finishes answering would stall the whole corpus, so each file is
-# given a budget and the server is restarted when it runs out.
 SECONDS_MAX = 20
 
-# `const Held = enum {...}` makes zls answer with the `enum`, because that is what the name
-# is bound TO. scylla answers with the name itself, so an answer that lands past the `=` of a
-# declaration on its own line is walked back onto the name it declares.
 DECLARED = re.compile(r"^(\s*)(?:pub\s+)?(?:const|var)\s+([A-Za-z_][A-Za-z0-9_]*)")
 BINDER = re.compile(r"\b(?:const|var)\s+[A-Za-z_]")
 
@@ -36,9 +30,6 @@ def version():
 
     return outcome.stdout.strip()
 
-# The scan walks the source rather than trusting a regex over raw lines: a name inside a
-# comment, a string, a character literal or an `@"quoted"` identifier is not a reference and
-# asking zls about it only produces noise.
 def spots(text):
     found = []
     offset = 0
@@ -86,8 +77,6 @@ def spots(text):
 
             continue
 
-        # A block label lives in its own namespace in scylla -- `blk: { ... break :blk x }`
-        # binds no value -- so neither the label nor the `:blk` naming it is a reference.
         labelled = match.end() < length and text[match.end()] == ":"
         broken = match.start() > 0 and text[match.start() - 1] == ":"
 
@@ -122,9 +111,6 @@ class Client:
                 "params": {
                     "processId": os.getpid(),
                     "rootUri": "file://" + root,
-                    # Without link support zls answers with a plain `Location` whose range
-                    # covers the whole definition, so `const Arch = enum {...}` lands on the
-                    # `enum` rather than on the name. A `LocationLink` carries both.
                     "capabilities": {
                         "textDocument": {"definition": {"linkSupport": True}},
                     },
@@ -202,8 +188,6 @@ class Client:
             }
         )
 
-# LSP positions are a line and a UTF-16 code unit, and every span scylla holds is a byte
-# offset, so both directions are measured rather than counted.
 class Places:
     def __init__(self, text):
         self.text = text
@@ -254,15 +238,11 @@ class Places:
         if match is None:
             return offset
 
-        # `const arch_os, const cpu = ...` declares two names on one line and zls answers with
-        # the right one already, so only a line declaring a single name is walked back.
         if len(BINDER.findall(line)) != 1:
             return offset
 
         equals = line.find("=")
 
-        # An answer at or before the `=` is the name itself; only the value expression past it
-        # is what scylla spells as the name it declares.
         if equals < 0 or offset - start <= equals:
             return offset
 
