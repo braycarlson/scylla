@@ -107,15 +107,16 @@ const CALL_NESTED: bool = true;
 pub struct Rules<K> {
     pub braced: fn(K) -> bool,
     pub denies: fn(K, K) -> bool,
-    pub drops: fn(K, K) -> bool,
+    pub drops: fn(K, K, Option<K>) -> bool,
     pub names: fn(K) -> bool,
     pub opens: fn(K) -> bool,
     pub operators: fn(K) -> bool,
     pub owes: fn(K, K) -> bool,
     pub parens: fn(K) -> bool,
     pub queries: fn(K) -> bool,
-    pub spans: fn(K) -> bool,
-    pub wraps: fn(K, K) -> bool,
+    pub spans: fn(K, K, Option<K>) -> bool,
+    pub mixes: fn(K) -> bool,
+    pub wraps: fn(K, K, Option<K>, bool) -> bool,
 }
 
 fn separated_already(tokens: &[Token], flags: &[u8], position: u32) -> bool {
@@ -183,7 +184,7 @@ where
 
     let flags = &mut **marks;
 
-    ended(tree, tokens, rules, flags);
+    ended(tree, source, tokens, rules, flags);
     dropped(tree, source, tokens, rules, flags);
 
     let mut written = 0;
@@ -329,6 +330,48 @@ fn separates(
     }) && roles.push(0)
 }
 
+fn cast_commented(text: &[u8]) -> bool {
+    let Some(body) = text.strip_prefix(b"/**") else {
+        return false;
+    };
+
+    let body = body.strip_suffix(b"*/").unwrap_or(body);
+
+    body.split(u8::is_ascii_whitespace).any(|word| {
+        let after = word
+            .strip_prefix(b"@type".as_slice())
+            .or_else(|| word.strip_prefix(b"@satisfies".as_slice()));
+
+        matches!(after, Some(rest) if rest.is_empty() || rest.first() == Some(&b'{'))
+    })
+}
+
+fn cast_leads(source: &[u8], tokens: &[Token], open: u32) -> bool {
+    let mut scan = open;
+
+    while scan > 0 {
+        scan -= 1;
+
+        let token = tokens[scan as usize];
+
+        if token.kind == TokenKind::Comment {
+            if cast_commented(token.text(source)) {
+                return true;
+            }
+
+            continue;
+        }
+
+        if token.kind == TokenKind::Newline || token.length == 0 {
+            continue;
+        }
+
+        return false;
+    }
+
+    false
+}
+
 fn dropped<K, T>(tree: &Tree<K>, source: &[u8], tokens: &[Token], rules: Rules<K>, flags: &mut [u8])
 where
     K: Kind<Error = T>,
@@ -347,8 +390,9 @@ where
 
         let inner = nodes[node.child_first as usize];
         let parent = nodes[node.parent as usize].kind;
+        let head = (inner.child_first != NONE).then(|| nodes[inner.child_first as usize].kind);
 
-        if !(rules.drops)(inner.kind, parent) {
+        if !(rules.drops)(inner.kind, parent, head) {
             continue;
         }
 
@@ -364,6 +408,10 @@ where
             continue;
         }
 
+        if cast_leads(source, tokens, open) {
+            continue;
+        }
+
         if (rules.braced)(parent) && tokens[inner.token_start as usize].text(source) == b"{" {
             continue;
         }
@@ -371,7 +419,7 @@ where
         let span =
             &source[tokens[open as usize].offset as usize..tokens[close as usize].end() as usize];
 
-        if span.contains(&b'\n') && !(rules.spans)(inner.kind) {
+        if span.contains(&b'\n') && !(rules.spans)(inner.kind, parent, head) {
             continue;
         }
 
@@ -380,7 +428,7 @@ where
     }
 }
 
-fn ended<K, T>(tree: &Tree<K>, tokens: &[Token], rules: Rules<K>, flags: &mut [u8])
+fn ended<K, T>(tree: &Tree<K>, source: &[u8], tokens: &[Token], rules: Rules<K>, flags: &mut [u8])
 where
     K: Kind<Error = T>,
     T: Copy,
@@ -388,7 +436,8 @@ where
     let nodes = tree.as_slice();
 
     for (index, node) in nodes.iter().enumerate() {
-        if wrapped(nodes, rules, count_of(index), node) {
+        if wrapped(nodes, rules, count_of(index), node) || mixed(nodes, source, tokens, rules, node)
+        {
             if let Some(mark_at) = flags.get_mut(node.token_start as usize) {
                 *mark_at |= PAREN_OPENS;
             }
@@ -444,6 +493,63 @@ where
     }
 }
 
+const LOGICAL_MARKS: [&[u8]; 3] = [b"&&", b"??", b"||"];
+
+fn operator_of<K>(nodes: &[Node<K>], tokens: &[Token], node: &Node<K>) -> Option<u32>
+where
+    K: Kind,
+{
+    if node.child_first == NONE {
+        return None;
+    }
+
+    let mut scan = nodes[node.child_first as usize].token_end;
+
+    while (scan as usize) < tokens.len() && scan < node.token_end {
+        if tokens[scan as usize].kind != TokenKind::Comment {
+            return Some(scan);
+        }
+
+        scan += 1;
+    }
+
+    None
+}
+
+fn mixed<K, T>(
+    nodes: &[Node<K>],
+    source: &[u8],
+    tokens: &[Token],
+    rules: Rules<K>,
+    node: &Node<K>,
+) -> bool
+where
+    K: Kind<Error = T>,
+    T: Copy,
+{
+    if !(rules.mixes)(node.kind) || node.parent == NONE || node.token_end == 0 {
+        return false;
+    }
+
+    let parent = nodes[node.parent as usize];
+
+    if !(rules.mixes)(parent.kind) {
+        return false;
+    }
+
+    let (Some(inner), Some(outer)) = (
+        operator_of(nodes, tokens, node),
+        operator_of(nodes, tokens, &parent),
+    ) else {
+        return false;
+    };
+
+    let held = tokens[inner as usize].text(source);
+    let above = tokens[outer as usize].text(source);
+
+    LOGICAL_MARKS.contains(&held) && LOGICAL_MARKS.contains(&above) && held != above
+}
+
 fn wrapped<K, T>(nodes: &[Node<K>], rules: Rules<K>, index: u32, node: &Node<K>) -> bool
 where
     K: Kind<Error = T>,
@@ -454,8 +560,14 @@ where
     }
 
     let parent = nodes[node.parent as usize];
+    let ancestor = (parent.parent != NONE).then(|| nodes[parent.parent as usize].kind);
 
-    parent.child_first == index && (rules.wraps)(node.kind, parent.kind)
+    (rules.wraps)(
+        node.kind,
+        parent.kind,
+        ancestor,
+        parent.child_first == index,
+    )
 }
 
 fn queried<K>(nodes: &[Node<K>], tokens: &[Token], node: &Node<K>, flags: &mut [u8])
@@ -927,9 +1039,6 @@ where
         let chained = (rules.chained)(body.kind) && linked(tokens, body.token_start, end) < 2;
         let width = (rules.bodies)(body.kind);
         let ones = BODY_ONES && argues && soled(tokens, source, head, end);
-
-        // `LimitedHorizontalVertical(fn_call_width)` measures the ITEMS and their separators,
-        // never the brackets around them, so an argued body owes its two delimiters back.
         let inside = CALL_ARGS && argues && head < count_of(end) && end > 0;
         let (from, stop) = if inside {
             (head + 1, end - 1)
@@ -958,9 +1067,6 @@ where
         let horizontal =
             !CALL_STUBS || stubbed_run(source, tokens, open, body.token_start) <= rules.call_width;
 
-        // `last_item_shape` hands a SOLE item the whole one-line shape unless `is_nested_call`
-        // answers for it, and that reads through the unary prefixes to a Call or a MacCall and
-        // nothing else. A sole item carrying a `.` is a chain, and its budget is the LINE.
         let soled = CALL_SOLES && !separated && dotted_item(source, tokens, open) >= CALL_LINKS;
 
         if capping(source, tokens, open, separated, nested)
@@ -1013,7 +1119,10 @@ where
             break;
         };
 
-        if separated || tokens[open as usize].text(source) != b"(" {
+        if separated
+            || tokens[open as usize].text(source) != b"("
+            || callee_width(source, tokens, open) == 0
+        {
             break;
         }
 

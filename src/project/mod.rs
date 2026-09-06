@@ -4,7 +4,7 @@ pub mod resolve;
 pub mod store;
 pub mod view;
 
-pub use diagnostic::{Budget, Project};
+pub use diagnostic::Budget;
 pub use graph::{Edge, Graph};
 pub use resolve::{CHAIN_MAX, Target, target_of};
 pub use store::{
@@ -20,4 +20,4 @@ pub use store::{
     hash_of,
     hash_seeded,
 };
-pub use view::{Node, Sink};
+pub use view::Node;

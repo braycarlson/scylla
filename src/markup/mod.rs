@@ -2,6 +2,7 @@ pub mod blocks;
 pub mod facts;
 pub mod kind;
 pub mod lexer;
+pub mod regions;
 pub mod semantic;
 pub mod token;
 pub mod tree;

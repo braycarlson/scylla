@@ -3,14 +3,15 @@ use std::path::PathBuf;
 use std::thread;
 
 use scylla::bounded::Random;
-use scylla::diagnostic::{Diagnostics, Severity};
+use scylla::bounded::Span;
+use scylla::diagnostic::{Diagnostic, Diagnostics, Message, Severity};
+use scylla::fix::NONE as FIX_NONE;
 use scylla::language::Language;
 use scylla::lines;
 use scylla::markup;
 use scylla::markup::tree::TreeError;
 use scylla::project::graph::Edge;
 use scylla::project::store::BuildScratch;
-use scylla::project::view::Sink;
 use scylla::project::{
     CLASS_COUNT,
     Eviction,
@@ -23,7 +24,7 @@ use scylla::project::{
     hash_of,
     target_of,
 };
-use scylla::rule::{Fixable, Registry, Rule};
+use scylla::rule::NONE as RULE_NONE;
 use scylla::syntax::css::semantic::Semantic as CSSSemantic;
 use scylla::syntax::front;
 use scylla::syntax::go::semantic::Semantic as GoSemantic;
@@ -207,7 +208,25 @@ fn resolve(specifier: &[u8], _from: FileID, store: &Store) -> u32 {
     store.find(hash_of(specifier))
 }
 
-fn rule(store: &Store, graph: &Graph, file: FileID, sink: &mut Sink<'_>) {
+fn recorded(
+    diagnostics: &mut Diagnostics,
+    code: &'static str,
+    severity: Severity,
+    span: Span,
+) -> bool {
+    diagnostics.push(Diagnostic {
+        code,
+        fix: FIX_NONE,
+        message: Message::Static("a recorded finding"),
+        related_count: 0,
+        related_start: 0,
+        rule: RULE_NONE,
+        severity,
+        span,
+    })
+}
+
+fn rule(store: &Store, graph: &Graph, file: FileID, out: &mut Diagnostics) {
     for step in store.walk(file) {
         let Step::Enter(node) = step else {
             continue;
@@ -217,9 +236,7 @@ fn rule(store: &Store, graph: &Graph, file: FileID, sink: &mut Sink<'_>) {
             continue;
         };
 
-        let recorded = sink.record("PAR001", Severity::Hint, view.span(), "a recorded finding");
-
-        assert!(recorded);
+        assert!(recorded(out, "PAR001", Severity::Hint, view.span()));
     }
 
     let index = file.index();
@@ -237,32 +254,21 @@ fn rule(store: &Store, graph: &Graph, file: FileID, sink: &mut Sink<'_>) {
         Target::Unresolved => "PAR013",
     };
 
-    let recorded = sink.record(
-        code,
-        Severity::Warning,
-        scylla::bounded::Span {
-            length: 1,
-            offset: index,
-        },
-        "a recorded finding",
-    );
+    let span = Span {
+        length: 1,
+        offset: index,
+    };
 
-    assert!(recorded);
+    assert!(recorded(out, code, Severity::Warning, span));
 }
 
 fn baseline(store: &Store, graph: &Graph, files: &[FileID]) -> Vec<(u32, &'static str, u32)> {
-    let held_rules = Registry::reserve(&RULES);
-    let registry = &held_rules;
     let mut found = Vec::new();
 
     for file in files {
         let mut held = Diagnostics::reserve(1 << 12, 1 << 12);
 
-        {
-            let mut sink = Sink::new(*file, &mut held, registry);
-
-            rule(store, graph, *file, &mut sink);
-        }
+        rule(store, graph, *file, &mut held);
 
         for diagnostic in &held {
             found.push((file.index(), diagnostic.code, diagnostic.span.offset));
@@ -295,8 +301,6 @@ fn merged(
     stride: usize,
 ) -> Vec<(u32, &'static str, u32)> {
     let sets = shards(files, stride);
-    let held_registry = Registry::reserve(&RULES);
-    let registry = &held_registry;
 
     let parts: Vec<Vec<(u32, &'static str, u32)>> = thread::scope(|scope| {
         let mut handles = Vec::new();
@@ -308,12 +312,7 @@ fn merged(
 
                 for file in set {
                     held.clear();
-
-                    {
-                        let mut sink = Sink::new(*file, &mut held, registry);
-
-                        rule(store, graph, *file, &mut sink);
-                    }
+                    rule(store, graph, *file, &mut held);
 
                     for diagnostic in &held {
                         found.push((file.index(), diagnostic.code, diagnostic.span.offset));
@@ -598,69 +597,6 @@ fn a_rejecting_store_churns_without_leaking_a_slot() {
 fn an_evicting_store_churns_without_leaking_a_slot() {
     churn(Eviction::LeastRecentlyUsed);
 }
-
-static RULES: [Rule; 4] = [
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "A001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-one",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "B001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-two",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "C001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-three",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "D001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-four",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-];
 
 #[test]
 fn pending_builds_run_in_parallel_and_match_the_serial_answer() {

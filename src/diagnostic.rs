@@ -1,10 +1,10 @@
 use core::fmt::{self, Write as _};
 
 use crate::bounded::{BoundedString, BoundedVec, Span, count_of};
-use crate::fix::NONE;
-use crate::project::store::FileID;
+use crate::fix::NONE as FIX_NONE;
 
 pub const MESSAGE_UNWRITTEN: &str = "the finding message did not fit";
+pub const NONE: u32 = u32::MAX;
 
 #[expect(
     clippy::arbitrary_source_item_ordering,
@@ -17,6 +17,9 @@ pub enum Severity {
     Warning,
     Error,
 }
+
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub struct FileID(u32);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Message {
@@ -50,6 +53,20 @@ pub struct Diagnostics {
     order: BoundedVec<u32>,
     overflowed: bool,
     related: BoundedVec<Related>,
+}
+
+impl FileID {
+    pub const fn of(index: u32) -> Self {
+        assert!(index != NONE);
+
+        Self(index)
+    }
+
+    pub const fn index(self) -> u32 {
+        assert!(self.0 != NONE);
+
+        self.0
+    }
 }
 
 impl Severity {
@@ -167,18 +184,6 @@ impl Diagnostics {
         fix: u32,
         arguments: fmt::Arguments<'_>,
     ) -> bool {
-        self.push_formatted_for(code, crate::rule::NONE, severity, span, fix, arguments)
-    }
-
-    pub fn push_formatted_for(
-        &mut self,
-        code: &'static str,
-        rule: u32,
-        severity: Severity,
-        span: Span,
-        fix: u32,
-        arguments: fmt::Arguments<'_>,
-    ) -> bool {
         self.push_formatted_row(
             Diagnostic {
                 code,
@@ -186,7 +191,7 @@ impl Diagnostics {
                 message: Message::Static(""),
                 related_count: 0,
                 related_start: 0,
-                rule,
+                rule: crate::rule::NONE,
                 severity,
                 span,
             },
@@ -350,7 +355,7 @@ impl<'items> IntoIterator for &'items Diagnostics {
 
 impl Diagnostic {
     pub const fn is_fixed(&self) -> bool {
-        self.fix != NONE
+        self.fix != FIX_NONE
     }
 }
 
@@ -387,7 +392,7 @@ mod tests {
         assert!(diagnostics.push(Diagnostic {
             related_count: 2,
             related_start: 0,
-            ..row("TS001", 0, NONE)
+            ..row("TS001", 0, FIX_NONE)
         }));
 
         let held = diagnostics.at(0).copied().expect("the row was pushed");
@@ -412,7 +417,7 @@ mod tests {
             Diagnostic {
                 related_count: 1,
                 related_start: 0,
-                ..row("TS001", 0, NONE)
+                ..row("TS001", 0, FIX_NONE)
             },
             format_args!("names {}", "one"),
         ));
@@ -427,7 +432,7 @@ mod tests {
     fn a_diagnostic_naming_no_related_row_reads_none() {
         let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
 
-        assert!(diagnostics.push(row("TS001", 0, NONE)));
+        assert!(diagnostics.push(row("TS001", 0, FIX_NONE)));
 
         let held = diagnostics.at(0).copied().expect("the row was pushed");
 
@@ -450,7 +455,7 @@ mod tests {
         let related = diagnostics.related_of(&Diagnostic {
             related_count: 1,
             related_start: 0,
-            ..row("TS001", 0, NONE)
+            ..row("TS001", 0, FIX_NONE)
         });
 
         assert_eq!(
@@ -475,7 +480,7 @@ mod tests {
         let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
 
         for offset in 0..4 {
-            assert!(diagnostics.push(row("TS001", offset, NONE)));
+            assert!(diagnostics.push(row("TS001", offset, FIX_NONE)));
         }
 
         diagnostics.retain(|held| held.span.offset % 2 == 0);
@@ -502,25 +507,25 @@ mod tests {
     fn a_push_stops_at_the_reserved_count() {
         let mut diagnostics = Diagnostics::reserve(2, 1 << 12);
 
-        assert!(diagnostics.push(row("TS001", 0, NONE)));
+        assert!(diagnostics.push(row("TS001", 0, FIX_NONE)));
         assert!(diagnostics.push(row("TS002", 4, 1)));
-        assert!(!diagnostics.push(row("TS003", 8, NONE)));
+        assert!(!diagnostics.push(row("TS003", 8, FIX_NONE)));
         assert_eq!(diagnostics.count(), 2);
 
         diagnostics.clear();
 
         assert_eq!(diagnostics.count(), 0);
-        assert!(diagnostics.push(row("TS003", 8, NONE)));
+        assert!(diagnostics.push(row("TS003", 8, FIX_NONE)));
     }
 
     #[test]
     fn a_sort_orders_by_offset_then_code() {
         let mut diagnostics = Diagnostics::reserve(8, 1 << 12);
 
-        assert!(diagnostics.push(row("TS009", 12, NONE)));
-        assert!(diagnostics.push(row("TS002", 4, NONE)));
-        assert!(diagnostics.push(row("TS001", 4, NONE)));
-        assert!(diagnostics.push(row("TS005", 0, NONE)));
+        assert!(diagnostics.push(row("TS009", 12, FIX_NONE)));
+        assert!(diagnostics.push(row("TS002", 4, FIX_NONE)));
+        assert!(diagnostics.push(row("TS001", 4, FIX_NONE)));
+        assert!(diagnostics.push(row("TS005", 0, FIX_NONE)));
 
         diagnostics.sort();
 
@@ -557,7 +562,7 @@ mod tests {
     #[test]
     fn a_fix_index_reads_back_as_a_fixed_row() {
         let fixed = row("TS001", 0, 4);
-        let bare = row("TS001", 0, NONE);
+        let bare = row("TS001", 0, FIX_NONE);
 
         assert!(fixed.is_fixed());
         assert!(!bare.is_fixed());
@@ -579,7 +584,7 @@ mod tests {
         let _scope = crate::allocation::freeze_scope();
 
         for _ in 0..64 {
-            assert!(diagnostics.push(row("TS001", random.below(1_000), NONE)));
+            assert!(diagnostics.push(row("TS001", random.below(1_000), FIX_NONE)));
         }
 
         diagnostics.sort();

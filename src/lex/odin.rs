@@ -1,4 +1,4 @@
-use crate::language::Lexer;
+use crate::language::{Grammar, Lexer};
 use crate::scan::{
     Numbers,
     identifier_scan,
@@ -13,6 +13,77 @@ use crate::scan::{
 use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static ODIN: OdinLexer = OdinLexer;
+
+const PRIMITIVE_TYPES: &[&[u8]] = &[
+    b"any",
+    b"b16",
+    b"b32",
+    b"b64",
+    b"b8",
+    b"bool",
+    b"complex128",
+    b"complex32",
+    b"complex64",
+    b"cstring",
+    b"f16",
+    b"f16be",
+    b"f16le",
+    b"f32",
+    b"f32be",
+    b"f32le",
+    b"f64",
+    b"f64be",
+    b"f64le",
+    b"i128",
+    b"i128be",
+    b"i128le",
+    b"i16",
+    b"i16be",
+    b"i16le",
+    b"i32",
+    b"i32be",
+    b"i32le",
+    b"i64",
+    b"i64be",
+    b"i64le",
+    b"i8",
+    b"int",
+    b"quaternion128",
+    b"quaternion256",
+    b"quaternion64",
+    b"rawptr",
+    b"rune",
+    b"string",
+    b"typeid",
+    b"u128",
+    b"u128be",
+    b"u128le",
+    b"u16",
+    b"u16be",
+    b"u16le",
+    b"u32",
+    b"u32be",
+    b"u32le",
+    b"u64",
+    b"u64be",
+    b"u64le",
+    b"u8",
+    b"uint",
+    b"uintptr",
+];
+
+static GRAMMAR: Grammar = Grammar {
+    annotation_prefix: b"@",
+    cast_words: &[b"auto_cast", b"cast", b"transmute"],
+    comment_block_close: b"*/",
+    comment_block_open: b"/*",
+    decorator_prefix: b"@",
+    defer_word: b"defer",
+    discard_prefix: b"_ = ",
+    primitive_types: PRIMITIVE_TYPES,
+    sized_type_names: &[b"int", b"uint", b"uintptr"],
+    ..Grammar::DEFAULT
+};
 const MODIFIER_COUNT_MAX: usize = 4;
 const BODY_WORD: &[u8] = b"do";
 const BODY_COUNT_MAX: u32 = 8;
@@ -23,6 +94,10 @@ const ASSERT_NAMES: &[&[u8]] = &[b"assert", b"ensure", b"panic", b"unimplemented
 pub struct OdinLexer;
 
 impl Lexer for OdinLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"odin"]
     }
@@ -460,24 +535,8 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
         return (TokenKind::BlockEnd, offset + 1);
     }
 
-    if byte == b'"' {
-        if source[offset + 1..].starts_with(b"\"\"") {
-            return (TokenKind::String, string_triple_scan(source, offset, b'"'));
-        }
-
-        return (TokenKind::String, string_scan(source, offset, b'"'));
-    }
-
-    if byte == b'\'' {
-        return (TokenKind::String, string_scan(source, offset, b'\''));
-    }
-
-    if byte == b'`' {
-        if source[offset + 1..].starts_with(b"``") {
-            return (TokenKind::String, string_triple_scan(source, offset, b'`'));
-        }
-
-        return (TokenKind::String, string_raw_scan(source, offset));
+    if matches!(byte, b'"' | b'\'' | b'`') {
+        return (TokenKind::String, string_end_of(source, offset, byte));
     }
 
     if byte == b'#' || byte == b'@' {
@@ -511,6 +570,22 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
     let (punctuation, length) = punctuation_of(source, offset);
 
     (TokenKind::Punctuation(punctuation), offset + length)
+}
+
+fn string_end_of(source: &[u8], offset: usize, quote: u8) -> usize {
+    assert_eq!(source[offset], quote);
+
+    let tripled = quote != b'\'' && source[offset + 1..].starts_with(&[quote, quote]);
+
+    if tripled {
+        return string_triple_scan(source, offset, quote);
+    }
+
+    if quote == b'`' {
+        return string_raw_scan(source, offset);
+    }
+
+    string_scan(source, offset, quote)
 }
 
 fn word_token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {

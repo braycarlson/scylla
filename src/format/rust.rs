@@ -25,6 +25,7 @@ pub const POLICY: Policy = Policy {
     assign_lines: false,
     assign_values: false,
     assign_wraps: true,
+    chain_simples: false,
     chain_soles: true,
     chain_hugs: true,
     chain_joins: true,
@@ -113,6 +114,7 @@ pub const POLICY: Policy = Policy {
     clause_bases: true,
     clause_ends: true,
     clause_lines: false,
+    clause_values: &[b"type"],
     clause_words: &[b"where"],
     close_hugs: false,
     colon_continues: true,
@@ -212,6 +214,7 @@ pub const POLICY: Policy = Policy {
     member_words: &[],
     nested_levels: true,
     number_forms: false,
+    object_words: &[],
     operand_joins: true,
     operand_levels: true,
     operand_words: &[b"Self", b"await", b"crate", b"self", b"super"],
@@ -227,6 +230,8 @@ pub const POLICY: Policy = Policy {
     remark_carries: false,
     remark_dedents: true,
     sentinel_colons: false,
+    sequence_lines: false,
+    sequence_stops: &[],
     remark_gaps: false,
     remark_levels: false,
     remark_suffix: false,
@@ -247,6 +252,7 @@ pub const POLICY: Policy = Policy {
     spaced_words: &[],
     span_levels: false,
     spread_blanks: false,
+    spread_owns: false,
     tight_from_source: &[b"!", b"*", b"+", b":", b"<", b">", b">>", b"?"],
     spec_depths: false,
     special_macros: &[
@@ -1498,9 +1504,6 @@ fn remarks(source: &[u8], tokens: &[Token], gives: &mut BoundedVec<u32>) -> bool
     found
 }
 
-// A brace behind a closure's own `|..|` is that closure's BODY, and `parse_expr` takes the whole
-// closure. The statements inside it may carry a `:`, a `=>` or a `fn` of their own without any of
-// them reaching the invocation's parser.
 fn barred(source: &[u8], tokens: &[Token], previous: Option<u32>) -> bool {
     GIVE_LAMBDAS
         && previous.is_some_and(|held| matches!(tokens[held as usize].text(source), b"|" | b"||"))
@@ -1573,11 +1576,6 @@ fn arrowed(source: &[u8], tokens: &[Token], open: u32) -> bool {
             return true;
         }
 
-        // An `@` LEADING a group is a binding with no name in front of it, which no parser takes
-        // at any depth: `minimal_quote!((@ proc_macro_crate) ::Span::recover(..))` comes back
-        // from its own snippet. An `@` standing BETWEEN two operands is a pattern and parses,
-        // but only where the group around it is one -- at the invocation's own depth the
-        // expression parser takes the name and stops at the sigil.
         if GIVE_ATS
             && !lambda
             && token.text(source) == b"@"

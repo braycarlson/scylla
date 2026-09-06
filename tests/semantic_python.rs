@@ -39,6 +39,7 @@ const ERROR_COUNT_MAX: u32 = 1 << 10;
 const EVENT_COUNT_MAX: u32 = 1 << 21;
 const EVERY_CATEGORY: [&str; 4] = ["check", "model", "not-python", "ruff"];
 const EXPORT_COUNT_MAX: u32 = 1 << 12;
+const FILE_PREFIXES: [&[u8]; 2] = [b"flake8:", b"ruff:"];
 const MODULE_SCOPE: u32 = 0;
 const LINE_COUNT_MAX: u32 = 1 << 16;
 const NODE_COUNT_MAX: u32 = 1 << 19;
@@ -107,8 +108,13 @@ impl Machine {
             }
         }
 
-        self.suppressions
-            .scan(source, self.comments.iter().copied(), b"noqa", &self.index);
+        self.suppressions.scan(
+            source,
+            self.comments.iter().copied(),
+            b"noqa",
+            &FILE_PREFIXES,
+            &self.index,
+        );
 
         self.suppressions
             .join(source, self.lexed.as_slice(), &self.index)

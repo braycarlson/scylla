@@ -396,6 +396,247 @@ where
         .join(" ")
 }
 
+const PAREN_PASS_MAX: u32 = 32;
+
+const ASSIGNING: [TypeScriptKind; 19] = [
+    TypeScriptKind::AmpersandAmpersand,
+    TypeScriptKind::AmpersandAmpersandEqual,
+    TypeScriptKind::AmpersandEqual,
+    TypeScriptKind::BarBar,
+    TypeScriptKind::BarBarEqual,
+    TypeScriptKind::BarEqual,
+    TypeScriptKind::CaretEqual,
+    TypeScriptKind::Equal,
+    TypeScriptKind::GreaterGreaterEqual,
+    TypeScriptKind::GreaterGreaterGreaterEqual,
+    TypeScriptKind::LessLessEqual,
+    TypeScriptKind::MinusEqual,
+    TypeScriptKind::PercentEqual,
+    TypeScriptKind::PlusEqual,
+    TypeScriptKind::QuestionQuestion,
+    TypeScriptKind::QuestionQuestionEqual,
+    TypeScriptKind::SlashEqual,
+    TypeScriptKind::StarEqual,
+    TypeScriptKind::StarStarEqual,
+];
+
+const ASSIGNING_WORDS: [&str; 19] = [
+    "%=",
+    "&&",
+    "&&=",
+    "&=",
+    "**=",
+    "*=",
+    "+=",
+    "-=",
+    "/=",
+    "<<=",
+    "=",
+    ">>=",
+    ">>>=",
+    "??",
+    "??=",
+    "^=",
+    "|=",
+    "||",
+    "||=",
+];
+
+fn calling(kinds: &[TypeScriptKind], open: usize) -> bool {
+    if open == 0 {
+        return false;
+    }
+
+    matches!(
+        kinds[open - 1],
+        TypeScriptKind::BracketClose
+            | TypeScriptKind::Identifier
+            | TypeScriptKind::ParenClose
+            | TypeScriptKind::PropertyIdentifier
+            | TypeScriptKind::SuperKeyword
+            | TypeScriptKind::ThisKeyword
+    )
+}
+
+fn assigns(kinds: &[TypeScriptKind], open: usize, close: usize) -> bool {
+    let mut depth = 0_u32;
+
+    for kind in &kinds[open + 1..close] {
+        if matches!(
+            kind,
+            TypeScriptKind::BraceOpen | TypeScriptKind::BracketOpen | TypeScriptKind::ParenOpen
+        ) {
+            depth += 1;
+        } else if matches!(
+            kind,
+            TypeScriptKind::BraceClose | TypeScriptKind::BracketClose | TypeScriptKind::ParenClose
+        ) {
+            depth = depth.saturating_sub(1);
+        } else if depth == 0 && ASSIGNING.contains(kind) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn assigned(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
+    let mut held = kinds.to_vec();
+
+    for _ in 0..PAREN_PASS_MAX {
+        let found = unassigned(&held);
+
+        if found.len() == held.len() {
+            return found;
+        }
+
+        held = found;
+    }
+
+    held
+}
+
+fn unassigned(kinds: &[TypeScriptKind]) -> Vec<TypeScriptKind> {
+    let pairs = partners(
+        kinds,
+        &TypeScriptKind::ParenOpen,
+        &TypeScriptKind::ParenClose,
+    );
+    let mut found: Vec<TypeScriptKind> = Vec::with_capacity(kinds.len());
+    let mut skips: Vec<usize> = Vec::new();
+    let mut index = 0;
+
+    while index < kinds.len() {
+        if skips.last() == Some(&index) {
+            skips.pop();
+            index += 1;
+
+            continue;
+        }
+
+        let dropped = kinds[index] == TypeScriptKind::ParenOpen
+            && pairs[index] > index
+            && !calling(kinds, index)
+            && assigns(kinds, index, pairs[index]);
+
+        if dropped {
+            skips.push(pairs[index]);
+            index += 1;
+
+            continue;
+        }
+
+        found.push(kinds[index]);
+        index += 1;
+    }
+
+    found
+}
+
+fn assigns_words(words: &[String], open: usize, close: usize) -> bool {
+    let mut depth = 0_u32;
+
+    for word in &words[open + 1..close] {
+        if matches!(word.as_str(), "{" | "[" | "(") {
+            depth += 1;
+        } else if matches!(word.as_str(), "}" | "]" | ")") {
+            depth = depth.saturating_sub(1);
+        } else if depth == 0 && ASSIGNING_WORDS.contains(&word.as_str()) {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn calls_words(words: &[String], open: usize) -> bool {
+    if open == 0 {
+        return false;
+    }
+
+    let held = words[open - 1].as_str();
+
+    held == "]"
+        || held == ")"
+        || held == "super"
+        || held == "this"
+        || held
+            .chars()
+            .next()
+            .is_some_and(|first| first.is_alphanumeric() || first == '_' || first == '$')
+            && !matches!(
+                held,
+                "case"
+                    | "catch"
+                    | "do"
+                    | "else"
+                    | "for"
+                    | "if"
+                    | "in"
+                    | "instanceof"
+                    | "of"
+                    | "return"
+                    | "switch"
+                    | "throw"
+                    | "typeof"
+                    | "void"
+                    | "while"
+                    | "with"
+                    | "yield"
+            )
+}
+
+fn assigned_words(words: &[String]) -> Vec<String> {
+    let mut held = words.to_vec();
+
+    for _ in 0..PAREN_PASS_MAX {
+        let found = unassigned_words(&held);
+
+        if found.len() == held.len() {
+            return found;
+        }
+
+        held = found;
+    }
+
+    held
+}
+
+fn unassigned_words(words: &[String]) -> Vec<String> {
+    let open = "(".to_owned();
+    let close = ")".to_owned();
+    let pairs = partners(words, &open, &close);
+    let mut found: Vec<String> = Vec::with_capacity(words.len());
+    let mut skips: Vec<usize> = Vec::new();
+    let mut index = 0;
+
+    while index < words.len() {
+        if skips.last() == Some(&index) {
+            skips.pop();
+            index += 1;
+
+            continue;
+        }
+
+        let dropped = words[index] == open
+            && pairs[index] > index
+            && !calls_words(words, index)
+            && assigns_words(words, index, pairs[index]);
+
+        if dropped {
+            skips.push(pairs[index]);
+            index += 1;
+
+            continue;
+        }
+
+        found.push(words[index].clone());
+        index += 1;
+    }
+
+    found
+}
+
 fn partners<T>(held: &[T], open: &T, close: &T) -> Vec<usize>
 where
     T: PartialEq,
@@ -935,8 +1176,12 @@ fn formatting_keeps_every_token_it_was_given() {
         }
 
         let formatted = out.as_bytes().to_vec();
-        let before = wrapped(&called(&parenthesised(&listed(&held.kinds(&source)))));
-        let after = wrapped(&called(&parenthesised(&listed(&held.kinds(&formatted)))));
+        let before = wrapped(&assigned(&called(&parenthesised(&listed(
+            &held.kinds(&source),
+        )))));
+        let after = wrapped(&assigned(&called(&parenthesised(&listed(
+            &held.kinds(&formatted),
+        )))));
 
         assert!(terminated(&before, &after), "{name} lost or gained a token");
     }
@@ -1455,11 +1700,11 @@ fn the_three_relations_hold_over_the_corpus() {
             }
 
             let once = first.as_bytes().to_vec();
-            let before = wrapped(&constructed(&called(&parenthesised(&listed(&unioned(
-                &held.kinds(&source),
+            let before = wrapped(&constructed(&assigned(&called(&parenthesised(&listed(
+                &unioned(&held.kinds(&source)),
             ))))));
-            let after = wrapped(&constructed(&called(&parenthesised(&listed(&unioned(
-                &held.kinds(&once),
+            let after = wrapped(&constructed(&assigned(&called(&parenthesised(&listed(
+                &unioned(&held.kinds(&once)),
             ))))));
 
             if let Some((carried, at)) = divergence(&before, &after) {
@@ -1540,8 +1785,12 @@ fn formatting_keeps_every_word_it_was_given() {
         }
 
         let formatted = out.as_bytes().to_vec();
-        let before = opened(&bracketed(&separated(&held.words(&source))));
-        let after = opened(&bracketed(&separated(&held.words(&formatted))));
+        let before = opened(&assigned_words(&bracketed(&separated(
+            &held.words(&source),
+        ))));
+        let after = opened(&assigned_words(&bracketed(&separated(
+            &held.words(&formatted),
+        ))));
 
         assert!(
             ended(&before, &after),
@@ -2155,8 +2404,8 @@ fn an_optional_members_parameter_list_is_one_the_layout_owns() {
 
 #[test]
 fn a_ternarys_branches_stand_one_level_in_from_the_line_its_test_opens_on() {
-    const SOURCE: &[u8] = b"function f() {\n\tif (match) {\n\t\tconst directives = this.client.apiVersion.gte(API.v390)\n\t\t\t? tsDirectives390\n\t\t\t: tsDirectives;\n\t\treturn directives;\n\t}\n}\nconst held = alpha\n\t? beta\n\t: gamma\n\t\t? delta\n\t\t: epsilon;\n";
-    const WANTED: &[u8] = b"function f() {\n    if (match) {\n        const directives = this.client.apiVersion.gte(API.v390)\n            ? tsDirectives390\n            : tsDirectives;\n        return directives;\n    }\n}\nconst held = alpha\n    ? beta\n    : gamma\n        ? delta\n        : epsilon;\n";
+    const SOURCE: &[u8] = b"function f() {\n\tif (match) {\n\t\tconst directives = this.client.apiVersion.gte(API.v390)\n\t\t\t? tsDirectives390\n\t\t\t: tsDirectives;\n\t\treturn directives;\n\t}\n}\nconst heldLongerName = alphaConditionValue\n\t? betaResultValue\n\t: gammaConditionValue\n\t\t? deltaResultValue\n\t\t: epsilonResultValue;\n";
+    const WANTED: &[u8] = b"function f() {\n    if (match) {\n        const directives = this.client.apiVersion.gte(API.v390)\n            ? tsDirectives390\n            : tsDirectives;\n        return directives;\n    }\n}\nconst heldLongerName = alphaConditionValue\n    ? betaResultValue\n    : gammaConditionValue\n      ? deltaResultValue\n      : epsilonResultValue;\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);

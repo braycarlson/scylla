@@ -1,7 +1,8 @@
 use scylla::bounded::Span;
-use scylla::diagnostic::{Diagnostics, Severity};
+use scylla::diagnostic::{Diagnostic, Diagnostics, Message, Severity};
+use scylla::fix::NONE as FIX_NONE;
 use scylla::language::Language;
-use scylla::project::view::{Node, Sink};
+use scylla::project::view::Node;
 use scylla::project::{
     CLASS_COUNT,
     Eviction,
@@ -14,7 +15,7 @@ use scylla::project::{
     hash_of,
     target_of,
 };
-use scylla::rule::{Fixable, Registry, Rule};
+use scylla::rule::NONE as RULE_NONE;
 use scylla::syntax::FactKind;
 use scylla::syntax::front;
 use scylla::syntax::python::kind::PythonKind;
@@ -25,7 +26,25 @@ const MAIN: &[u8] =
 
 const HELPER: &[u8] = b"def thing():\n    return 1\n\n\ndef other():\n    return 2\n";
 
-fn rule_definitions(store: &Store, file: FileID, sink: &mut Sink<'_>) {
+fn recorded(
+    diagnostics: &mut Diagnostics,
+    code: &'static str,
+    severity: Severity,
+    span: Span,
+) -> bool {
+    diagnostics.push(Diagnostic {
+        code,
+        fix: FIX_NONE,
+        message: Message::Static("a recorded finding"),
+        related_count: 0,
+        related_start: 0,
+        rule: RULE_NONE,
+        severity,
+        span,
+    })
+}
+
+fn rule_definitions(store: &Store, file: FileID, out: &mut Diagnostics) {
     for step in store.walk(file) {
         let Step::Enter(node) = step else {
             continue;
@@ -39,18 +58,11 @@ fn rule_definitions(store: &Store, file: FileID, sink: &mut Sink<'_>) {
             continue;
         }
 
-        let recorded = sink.record(
-            "PRJ001",
-            Severity::Warning,
-            view.span(),
-            "a recorded finding",
-        );
-
-        assert!(recorded);
+        assert!(recorded(out, "PRJ001", Severity::Warning, view.span()));
     }
 }
 
-fn rule_imports(store: &Store, file: FileID, sink: &mut Sink<'_>) {
+fn rule_imports(store: &Store, file: FileID, out: &mut Diagnostics) {
     let source = store.source_of(file);
 
     for fact in store.facts_of(file) {
@@ -67,14 +79,7 @@ fn rule_imports(store: &Store, file: FileID, sink: &mut Sink<'_>) {
             continue;
         }
 
-        let recorded = sink.record(
-            "PRJ002",
-            Severity::Error,
-            fact.specifier,
-            "a recorded finding",
-        );
-
-        assert!(recorded);
+        assert!(recorded(out, "PRJ002", Severity::Error, fact.specifier));
     }
 }
 
@@ -83,7 +88,7 @@ struct Collected {
     nodes: Vec<Node>,
 }
 
-fn rule_collected(store: &Store, file: FileID, sink: &mut Sink<'_>) {
+fn rule_collected(store: &Store, file: FileID, out: &mut Diagnostics) {
     let mut collected = Collected::default();
 
     for step in store.walk(file) {
@@ -107,9 +112,7 @@ fn rule_collected(store: &Store, file: FileID, sink: &mut Sink<'_>) {
             .python_view(held.file, held.node)
             .expect("the handle names a python node");
 
-        let recorded = sink.record("PRJ003", Severity::Hint, view.span(), "a recorded finding");
-
-        assert!(recorded);
+        assert!(recorded(out, "PRJ003", Severity::Hint, view.span()));
     }
 }
 
@@ -163,25 +166,18 @@ fn codes_of(diagnostics: &Diagnostics) -> Vec<(&'static str, Span)> {
 
 #[test]
 fn an_intra_file_rule_reads_one_slot() {
-    let registry = Registry::reserve(&RULES);
     let (store, main, helper) = project();
     let mut diagnostics = Diagnostics::reserve(64, 1 << 12);
-    let mut sink = Sink::new(main, &mut diagnostics, &registry);
 
-    rule_definitions(&store, main, &mut sink);
+    rule_definitions(&store, main, &mut diagnostics);
 
-    assert_eq!(sink.file(), main);
-    assert_eq!(sink.count(), 1);
+    assert_eq!(diagnostics.count(), 1);
 
     let mut second = Diagnostics::reserve(64, 1 << 12);
 
-    {
-        let mut other = Sink::new(helper, &mut second, &registry);
+    rule_definitions(&store, helper, &mut second);
 
-        rule_definitions(&store, helper, &mut other);
-
-        assert_eq!(other.count(), 2);
-    }
+    assert_eq!(second.count(), 2);
 
     for (code, _) in codes_of(&second) {
         assert_eq!(code, "PRJ001");
@@ -190,12 +186,10 @@ fn an_intra_file_rule_reads_one_slot() {
 
 #[test]
 fn a_cross_file_rule_reaches_the_second_slot_through_the_store() {
-    let registry = Registry::reserve(&RULES);
     let (store, main, _) = project();
     let mut diagnostics = Diagnostics::reserve(64, 1 << 12);
-    let mut sink = Sink::new(main, &mut diagnostics, &registry);
 
-    rule_imports(&store, main, &mut sink);
+    rule_imports(&store, main, &mut diagnostics);
 
     let found = codes_of(&diagnostics);
 
@@ -206,12 +200,10 @@ fn a_cross_file_rule_reaches_the_second_slot_through_the_store() {
 
 #[test]
 fn a_rule_holds_node_handles_past_the_traversal() {
-    let registry = Registry::reserve(&RULES);
     let (store, _, helper) = project();
     let mut diagnostics = Diagnostics::reserve(64, 1 << 12);
-    let mut sink = Sink::new(helper, &mut diagnostics, &registry);
 
-    rule_collected(&store, helper, &mut sink);
+    rule_collected(&store, helper, &mut diagnostics);
 
     let found = codes_of(&diagnostics);
 
@@ -313,6 +305,8 @@ fn tree_of(name: &str, files: &[(&[u8], &str)], language: Language) -> (Store, G
 
     let limits = limits_of(&[(language, u32::try_from(files.len()).expect("a small tree"))]);
     let mut store = Store::reserve(&limits, Eviction::Reject);
+
+    store.template_imports_set(&[b"extends", b"include"]);
 
     for (key, path) in files {
         let source = std::fs::read(root.join(path)).expect("the fixture is readable");
@@ -452,66 +446,3 @@ fn a_template_tree_resolves_through_the_same_machinery() {
     assert_eq!(graph.dependents_of(base).count(), 1);
     assert_eq!(target_of(&store, &graph, page, b"body"), Target::Missing);
 }
-
-static RULES: [Rule; 4] = [
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "A001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-one",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "B001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-two",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "C001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-three",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-    Rule {
-        citation_nasa: "",
-        citation_tigerstyle: "",
-        default_on: true,
-        description: "",
-        code: "D001",
-        explanation: "",
-        fix_title: "",
-        fixable: Fixable::Never,
-        name: "probe-four",
-        preview: false,
-        severity: Severity::Warning,
-        summary: "",
-        url: "",
-    },
-];

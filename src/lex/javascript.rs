@@ -1,4 +1,4 @@
-use crate::language::Lexer;
+use crate::language::{Grammar, Lexer};
 use crate::scan::{
     BYTE_ORDER_MARK,
     CLASS_IDENTIFIER_PART,
@@ -17,6 +17,35 @@ use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static JAVASCRIPT: JavaScriptLexer = JavaScriptLexer;
 pub static TYPESCRIPT: TypeScriptLexer = TypeScriptLexer;
+
+const PRIMITIVE_TYPES: &[&[u8]] = &[
+    b"any",
+    b"bigint",
+    b"boolean",
+    b"never",
+    b"null",
+    b"number",
+    b"object",
+    b"string",
+    b"symbol",
+    b"undefined",
+    b"unknown",
+    b"void",
+];
+
+static JAVASCRIPT_GRAMMAR: Grammar = Grammar {
+    annotation_prefix: b"@",
+    comment_block_close: b"*/",
+    comment_block_open: b"/*",
+    decorator_prefix: b"@",
+    ..Grammar::DEFAULT
+};
+
+static TYPESCRIPT_GRAMMAR: Grammar = Grammar {
+    cast_words: &[b"as", b"satisfies"],
+    primitive_types: PRIMITIVE_TYPES,
+    ..JAVASCRIPT_GRAMMAR
+};
 const ASSERTION_PREFIXES: &[&[u8]] = &[b"assert", b"expect", b"invariant"];
 const ESCAPE_BRACED_BYTES_MAX: usize = 8;
 
@@ -42,6 +71,10 @@ pub struct JavaScriptLexer;
 pub struct TypeScriptLexer;
 
 impl Lexer for JavaScriptLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &JAVASCRIPT_GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"cjs", b"js", b"jsx", b"mjs"]
     }
@@ -58,6 +91,10 @@ impl Lexer for JavaScriptLexer {
 }
 
 impl Lexer for TypeScriptLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &TYPESCRIPT_GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"cts", b"mts", b"ts", b"tsx"]
     }

@@ -36,6 +36,7 @@ const INPUT: Input = Input {
 const OPTIONS: Options<'static> = Options {
     globals: &[],
     python_version: PythonVersion::Py310,
+    template_imports: &[],
 };
 
 const OUT_BYTES_MAX: u32 = 1 << 22;

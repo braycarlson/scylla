@@ -1,8 +1,48 @@
-use super::{Emitter, VALUE_ARROWS, Wrap, is_close, is_open};
+use super::{Emitter, VALUE_ARROWS, Wrap, ends_operand, is_close, is_open};
 use crate::bounded::count_of;
+use crate::format::walk::columns;
 use crate::token::{Punctuation, TokenKind};
 
 const ARGUMENT_COUNT_MAX: u32 = 64;
+const ARGUMENT_DEPTH_MAX: u32 = 3;
+const REGEX_PATTERN_MAX: u32 = 5;
+const SIMPLE_COMPARES: [&[u8]; 6] = [b"!=", b"!==", b"<=", b"==", b"===", b">="];
+const SIMPLE_BINARIES: [&[u8]; 22] = [
+    b"!=",
+    b"!==",
+    b"%",
+    b"&",
+    b"&&",
+    b"*",
+    b"**",
+    b"+",
+    b"-",
+    b"/",
+    b"<",
+    b"<<",
+    b"<=",
+    b"==",
+    b"===",
+    b">",
+    b">=",
+    b">>",
+    b">>>",
+    b"^",
+    b"|",
+    b"||",
+];
+const SIMPLE_STOPS: [&[u8]; 10] = [
+    b"...",
+    b"=>",
+    b"?",
+    b"await",
+    b"class",
+    b"delete",
+    b"function",
+    b"typeof",
+    b"void",
+    b"yield",
+];
 pub(super) const BINARY_LEVEL_MAX: u32 = 12;
 pub(super) const LOGICAL_LEVEL_MAX: u32 = 3;
 const ARROW: &[u8] = b"=>";
@@ -121,6 +161,109 @@ impl Emitter<'_> {
         }
 
         close
+    }
+
+    pub(super) fn arguments_simple(&self, open: u32, close: u32) -> bool {
+        let Some(from) = self.next_of(open).filter(|held| *held < close) else {
+            return true;
+        };
+
+        let Some(to) = self.back_of(close).filter(|held| *held >= from) else {
+            return true;
+        };
+
+        self.argument_simple(from, to)
+    }
+
+    fn argument_simple(&self, from: u32, to: u32) -> bool {
+        let mut depth = 0_u32;
+        let mut scan = from;
+
+        while scan <= to {
+            let token = self.tokens[scan as usize];
+
+            if token.kind == TokenKind::Comment {
+                return false;
+            }
+
+            if is_open(token.kind) || token.kind == TokenKind::BlockStart {
+                depth += 1;
+
+                if depth > ARGUMENT_DEPTH_MAX {
+                    return false;
+                }
+
+                scan += 1;
+
+                continue;
+            }
+
+            if is_close(token.kind) || token.kind == TokenKind::BlockEnd {
+                depth = depth.saturating_sub(1);
+                scan += 1;
+
+                continue;
+            }
+
+            if !self.token_simple(scan) {
+                return false;
+            }
+
+            scan += 1;
+        }
+
+        true
+    }
+
+    fn token_simple(&self, position: u32) -> bool {
+        let token = self.tokens[position as usize];
+        let text = token.text(self.source);
+
+        if SIMPLE_STOPS.contains(&text) {
+            return false;
+        }
+
+        if text.ends_with(b"=") && !SIMPLE_COMPARES.contains(&text) {
+            return false;
+        }
+
+        if SIMPLE_BINARIES.contains(&text) && !self.unary_at(position) {
+            return false;
+        }
+
+        !self.regex_wide(position)
+    }
+
+    fn unary_at(&self, position: u32) -> bool {
+        if !matches!(
+            self.tokens[position as usize].text(self.source),
+            b"!" | b"+" | b"-" | b"~"
+        ) {
+            return false;
+        }
+
+        self.back_of(position)
+            .is_none_or(|held| !ends_operand(self.tokens[held as usize].kind))
+    }
+
+    fn regex_wide(&self, position: u32) -> bool {
+        let token = self.tokens[position as usize];
+
+        if token.kind != TokenKind::String {
+            return false;
+        }
+
+        let text = token.text(self.source);
+
+        if !text.starts_with(b"/") {
+            return false;
+        }
+
+        let Some(end) = text.iter().rposition(|byte| *byte == b'/') else {
+            return false;
+        };
+
+        columns(self.source, token.offset + 1, token.offset + count_of(end)) > REGEX_PATTERN_MAX
     }
 
     pub(super) fn composes(&self, open: u32, close: u32) -> bool {
@@ -535,7 +678,7 @@ impl Emitter<'_> {
     reason = "the span walk stands apart from the argument rules that use it"
 )]
 impl Emitter<'_> {
-    fn spanned_body(&self, position: u32) -> Option<u32> {
+    pub(super) fn spanned_body(&self, position: u32) -> Option<u32> {
         self.template_body(position)
             .or_else(|| self.jsx_body(position))
     }
@@ -811,8 +954,20 @@ impl Emitter<'_> {
                     return false;
                 };
 
-                if self.next_of(scan) != Some(close) {
-                    return false;
+                let held = self.next_of(scan).filter(|held| *held < close);
+
+                match held {
+                    None => (),
+                    Some(word)
+                        if self.next_of(word) == Some(close)
+                            && matches!(
+                                self.tokens[word as usize].kind,
+                                TokenKind::Identifier | TokenKind::Number | TokenKind::String
+                            ) =>
+                    {
+                        count += 1;
+                    }
+                    Some(_) => return false,
                 }
 
                 count += 1;
@@ -870,6 +1025,8 @@ impl Emitter<'_> {
                 depth += 1;
             } else if is_close(kind) || kind == TokenKind::BlockEnd {
                 depth = depth.saturating_sub(1);
+            } else if depth == 0 && self.wrapping_listed(scan) {
+                floor = 0;
             } else if depth == 0 && self.wrapping_operator(scan) {
                 floor = floor.min(binary_level(self.tokens[scan as usize].text(self.source)));
             }
@@ -923,8 +1080,17 @@ impl Emitter<'_> {
     }
 
     pub(super) fn binary_floored(&self, position: u32, floor: u32) -> bool {
+        if self.wrapping_listed(position) {
+            return floor == 0;
+        }
+
         self.wrapping_operator(position)
             && binary_level(self.tokens[position as usize].text(self.source)) == floor
+    }
+
+    pub(super) fn wrapping_listed(&self, position: u32) -> bool {
+        self.policy.return_parens
+            && self.tokens[position as usize].kind == TokenKind::Punctuation(Punctuation::Comma)
     }
 }
 
@@ -950,7 +1116,7 @@ fn binary_level(text: &[u8]) -> u32 {
     reason = "the statement walk stands beside the arrow rules that read it"
 )]
 impl Emitter<'_> {
-    fn valued_semicolon(&self, head: u32) -> Option<u32> {
+    pub(super) fn valued_semicolon(&self, head: u32) -> Option<u32> {
         let mut depth = 0_u32;
         let mut scan = head;
 
@@ -1012,7 +1178,12 @@ impl Emitter<'_> {
 
                 if kind == TokenKind::Punctuation(Punctuation::ParenOpen) && self.calling(scan) {
                     calls += 1;
-                    found = found || self.composes(scan, close);
+                    found = found
+                        || if self.policy.chain_simples {
+                            !self.arguments_simple(scan, close)
+                        } else {
+                            self.composes(scan, close)
+                        };
 
                     breaks = breaks || last > 0 && self.chain_hardened(last, scan);
                     last = scan;
@@ -1026,7 +1197,67 @@ impl Emitter<'_> {
             scan += 1;
         }
 
-        calls > 2 && found || breaks
+        calls > 2 && found || breaks || self.chain_functioned(head, stop)
+    }
+
+    pub(super) fn chain_functioned(&self, head: u32, stop: u32) -> bool {
+        if !self.policy.chain_simples {
+            return false;
+        }
+
+        let mut found = false;
+        let mut last = None;
+        let mut scan = head;
+
+        while scan <= stop {
+            let kind = self.tokens[scan as usize].kind;
+
+            if is_open(kind) {
+                let close = self.closing_of(scan).unwrap_or(stop);
+
+                if kind == TokenKind::Punctuation(Punctuation::ParenOpen) && self.calling(scan) {
+                    found = found || last.is_some_and(|(open, end)| self.argued_body(open, end));
+                    last = Some((scan, close));
+                }
+
+                scan = close + 1;
+
+                continue;
+            }
+
+            scan += 1;
+        }
+
+        let Some((open, close)) = last else {
+            return false;
+        };
+
+        found && self.chain_hardened(open, close)
+    }
+
+    fn argued_body(&self, open: u32, close: u32) -> bool {
+        let mut depth = 0_u32;
+        let mut scan = open + 1;
+
+        while scan < close {
+            let kind = self.tokens[scan as usize].kind;
+
+            if is_open(kind) {
+                depth += 1;
+            } else if is_close(kind) {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0 {
+                let text = self.tokens[scan as usize].text(self.source);
+
+                if text == b"=>" || text == b"function" {
+                    return true;
+                }
+            }
+
+            scan += 1;
+        }
+
+        false
     }
 
     fn chain_hardened(&self, from: u32, to: u32) -> bool {

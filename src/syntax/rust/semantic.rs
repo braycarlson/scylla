@@ -351,7 +351,7 @@ impl Semantic {
             return Resolution::Bound(bounded);
         }
 
-        if reference.generic {
+        if reference.generic && reference.namespace != Namespace::Macro {
             let (held, _) = self.placed(source, reference, Namespace::Value);
 
             if held != NONE {

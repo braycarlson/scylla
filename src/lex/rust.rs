@@ -1,4 +1,4 @@
-use crate::language::Lexer;
+use crate::language::{Grammar, Lexer};
 use crate::scan::{
     identifier_scan,
     is_identifier_start_at,
@@ -10,6 +10,38 @@ use crate::scan::{
 use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static RUST: RustLexer = RustLexer;
+
+const PRIMITIVE_TYPES: &[&[u8]] = &[
+    b"bool",
+    b"char",
+    b"f32",
+    b"f64",
+    b"i128",
+    b"i16",
+    b"i32",
+    b"i64",
+    b"i8",
+    b"isize",
+    b"str",
+    b"u128",
+    b"u16",
+    b"u32",
+    b"u64",
+    b"u8",
+    b"usize",
+];
+
+static GRAMMAR: Grammar = Grammar {
+    annotation_prefix: b"#[",
+    cast_words: &[b"as"],
+    comment_block_close: b"*/",
+    comment_block_open: b"/*",
+    discard_prefix: b"let _ = ",
+    primitive_types: PRIMITIVE_TYPES,
+    sized_type_names: &[b"isize", b"usize"],
+    statements_end_with_semicolon: true,
+    ..Grammar::DEFAULT
+};
 const ASSERTION_PREFIXES: &[&[u8]] = &[b"assert", b"debug_assert", b"prop_assert"];
 const CHARACTER_BYTES_MAX: usize = 24;
 const HASH_COUNT_MAX: usize = 255;
@@ -17,6 +49,10 @@ const HASH_COUNT_MAX: usize = 255;
 pub struct RustLexer;
 
 impl Lexer for RustLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"rs"]
     }

@@ -156,6 +156,7 @@ fn read(language: Language, source: &[u8]) -> (Structure, usize) {
     let options = Options {
         globals: &[],
         python_version: PythonVersion::Py310,
+        template_imports: &[],
     };
 
     front::lexer_of(language)

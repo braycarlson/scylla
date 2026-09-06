@@ -1,5 +1,10 @@
 [
   {
+    "fixture": "expressions.ts",
+    "category": "biome-line-breaking",
+    "reason": "biome refuses the file: `-value ** 2` puts a unary operator immediately before an exponentiation, which does not parse, so the golden beside it is not the oracle's own output and the fixture is not comparable."
+  },
+  {
     "fixture": "declarations.ts",
     "category": "biome-line-breaking",
     "reason": "biome explodes a multi-declarator statement and a destructuring pattern across lines."

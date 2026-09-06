@@ -7,6 +7,7 @@ use crate::format::ir::{
     INDENT_DEPTH_MAX,
     Source,
 };
+use crate::format::walk::MARK_RANGES;
 
 pub const INDENT_COLUMNS_MAX: u32 = 1 << 10;
 const ALIGN_COLUMNS: u32 = 2;
@@ -568,19 +569,10 @@ const fn code_width(code: u32) -> u32 {
         (0x1f300, 0x1f9ff),
     ];
 
-    const ZERO: [(u32, u32); 6] = [
-        (0x0300, 0x036f),
-        (0x0483, 0x0489),
-        (0x200b, 0x200f),
-        (0x20d0, 0x20f0),
-        (0xfe00, 0xfe0f),
-        (0xfeff, 0xfeff),
-    ];
-
     let mut index = 0;
 
-    while index < ZERO.len() {
-        if code >= ZERO[index].0 && code <= ZERO[index].1 {
+    while index < MARK_RANGES.len() {
+        if code >= MARK_RANGES[index].0 && code <= MARK_RANGES[index].1 {
             return 0;
         }
 

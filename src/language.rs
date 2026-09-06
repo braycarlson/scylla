@@ -1,4 +1,5 @@
 use crate::bounded::{BoundedVec, FixedMap};
+use crate::path::is_separator;
 use crate::token::{Lex, Tokens};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -15,8 +16,26 @@ pub enum Language {
     Zig,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Grammar {
+    pub annotation_prefix: &'static [u8],
+    pub capital_marks_export: bool,
+    pub cast_words: &'static [&'static [u8]],
+    pub comment_block_close: &'static [u8],
+    pub comment_block_open: &'static [u8],
+    pub comment_prefix: &'static [u8],
+    pub decorator_prefix: &'static [u8],
+    pub defer_word: &'static [u8],
+    pub discard_prefix: &'static [u8],
+    pub primitive_types: &'static [&'static [u8]],
+    pub sized_type_names: &'static [&'static [u8]],
+    pub statements_end_with_semicolon: bool,
+    pub type_follows_colon: bool,
+}
+
 pub trait Lexer: Sync {
     fn extensions(&self) -> &'static [&'static [u8]];
+    fn grammar(&self) -> &'static Grammar;
     fn identifier(&self) -> &'static str;
     fn lex(&self, source: &[u8], tokens: &mut Tokens) -> Lex;
 }
@@ -25,6 +44,24 @@ pub struct Languages {
     by_extension: FixedMap<u32>,
     by_identifier: FixedMap<u32>,
     lexers: BoundedVec<&'static dyn Lexer>,
+}
+
+impl Grammar {
+    pub const DEFAULT: Self = Self {
+        annotation_prefix: b"",
+        capital_marks_export: false,
+        cast_words: &[],
+        comment_block_close: b"",
+        comment_block_open: b"",
+        comment_prefix: b"//",
+        decorator_prefix: b"",
+        defer_word: b"",
+        discard_prefix: b"",
+        primitive_types: &[],
+        sized_type_names: &[],
+        statements_end_with_semicolon: false,
+        type_follows_colon: true,
+    };
 }
 
 impl Language {
@@ -115,8 +152,8 @@ impl Languages {
         self.by_identifier.get(identifier)
     }
 
-    pub fn of_path(&self, path: &[u8], separator: fn(u8) -> bool) -> Option<u32> {
-        let extension = extension_of(path, separator)?;
+    pub fn of_path(&self, path: &[u8]) -> Option<u32> {
+        let extension = extension_of(path)?;
 
         self.by_extension.get(extension)
     }
@@ -141,12 +178,12 @@ impl Languages {
     }
 }
 
-pub fn extension_of(path: &[u8], separator: fn(u8) -> bool) -> Option<&[u8]> {
+pub fn extension_of(path: &[u8]) -> Option<&[u8]> {
     let mut dot = None;
     let mut offset = 0;
 
     while offset < path.len() {
-        if separator(path[offset]) {
+        if is_separator(path[offset]) {
             dot = None;
         }
 
@@ -171,37 +208,48 @@ mod tests {
     use super::*;
     use crate::lex::{PYTHON, RUST, ZIG};
 
-    fn is_separator(byte: u8) -> bool {
-        byte == b'/' || byte == b'\\'
-    }
-
-    fn is_slash(byte: u8) -> bool {
-        byte == b'/'
+    #[test]
+    fn an_extension_comes_from_the_last_dot() {
+        assert_eq!(extension_of(b"file:///tmp/main.rs"), Some(&b"rs"[..]));
+        assert_eq!(extension_of(b"/a.b/main.py"), Some(&b"py"[..]));
+        assert_eq!(extension_of(b"/a.b/Makefile"), None);
+        assert_eq!(extension_of(b"main."), None);
+        assert_eq!(extension_of(b""), None);
+        assert_eq!(extension_of(br"C:\v1.2\Makefile").is_none(), cfg!(windows));
+        assert_eq!(extension_of(br"C:\work\main.rs"), Some(&b"rs"[..]));
     }
 
     #[test]
-    fn an_extension_comes_from_the_last_dot() {
-        assert_eq!(
-            extension_of(b"file:///tmp/main.rs", is_slash),
-            Some(&b"rs"[..])
-        );
+    fn every_grammar_word_list_is_sorted() {
+        use crate::lex::{CSS, GO, JAVASCRIPT, ODIN, TYPESCRIPT};
 
-        assert_eq!(extension_of(b"/a.b/main.py", is_slash), Some(&b"py"[..]));
-        assert_eq!(extension_of(b"/a.b/Makefile", is_slash), None);
-        assert_eq!(extension_of(b"main.", is_slash), None);
-        assert_eq!(extension_of(b"", is_slash), None);
+        let lexers: [&dyn Lexer; 8] = [
+            &CSS,
+            &GO,
+            &JAVASCRIPT,
+            &ODIN,
+            &PYTHON,
+            &RUST,
+            &TYPESCRIPT,
+            &ZIG,
+        ];
 
-        assert_eq!(extension_of(br"C:\v1.2\Makefile", is_separator), None);
+        for lexer in lexers {
+            let grammar = lexer.grammar();
 
-        assert_eq!(
-            extension_of(br"C:\v1.2\Makefile", is_slash),
-            Some(&br"2\Makefile"[..])
-        );
+            for list in [
+                grammar.cast_words,
+                grammar.primitive_types,
+                grammar.sized_type_names,
+            ] {
+                assert!(list.is_sorted(), "{}", lexer.identifier());
+            }
+        }
 
-        assert_eq!(
-            extension_of(br"C:\work\main.rs", is_separator),
-            Some(&b"rs"[..])
-        );
+        assert_eq!(CSS.grammar().comment_prefix, b"");
+        assert_eq!(PYTHON.grammar().comment_prefix, b"#");
+        assert!(TYPESCRIPT.grammar().cast_words.contains(&b"as".as_slice()));
+        assert!(JAVASCRIPT.grammar().cast_words.is_empty());
     }
 
     #[test]
@@ -223,14 +271,14 @@ mod tests {
         assert_eq!(languages.count(), 3);
 
         let index = languages
-            .of_path(b"file:///tmp/main.rs", is_slash)
+            .of_path(b"file:///tmp/main.rs")
             .expect("rust is registered");
 
         assert_eq!(languages.lexer(index).identifier(), "rust");
 
         assert!(
             languages
-                .of_path(b"file:///tmp/main.go", is_slash)
+                .of_path(b"file:///tmp/main.go")
                 .is_none()
         );
     }

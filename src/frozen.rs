@@ -27,11 +27,9 @@ use crate::markup::blocks::{self, BlockMap};
 use crate::markup::tree::{self, Tree};
 use crate::markup::{self, Tokens as MarkupTokens};
 use crate::outline::{javascript, python};
-use crate::project::diagnostic::{Budget, Project};
 use crate::project::graph::Graph;
-use crate::project::view::Sink;
 use crate::project::{CLASS_COUNT, Eviction, FileID, Limits, NONE, Store, hash_of};
-use crate::rule::{Fixable, Registry, Rule};
+use crate::rule::NONE as RULE_NONE;
 use crate::structure::{self, Nodes, Shape};
 use crate::suppress::Suppressions;
 use crate::syntax::css::ast::View as CSSView;
@@ -890,7 +888,13 @@ fn the_suppression_scanner_runs_on_a_frozen_thread() {
             }
         }
 
-        suppressions.scan(source, spans.iter().copied(), b"noqa", &index);
+        suppressions.scan(
+            source,
+            spans.iter().copied(),
+            b"noqa",
+            &[b"flake8:", b"ruff:"],
+            &index,
+        );
 
         for directive in 0..suppressions.count() {
             let held = *suppressions
@@ -1836,108 +1840,6 @@ fn the_project_graph_runs_on_a_frozen_thread() {
     }
 }
 
-fn report_limits() -> Limits {
-    let mut slots = [[0_u32; CLASS_COUNT]; Language::COUNT];
-
-    slots[Language::Python.index()][Limits::class_of(1 << 10) as usize] = 3;
-
-    Limits {
-        file_count_max: 3,
-        front: front::Limits {
-            binding_count_max: 1 << 8,
-            error_count_max: 1 << 6,
-            event_count_max: 1 << 12,
-            export_count_max: 1 << 8,
-            fact_count_max: 1 << 8,
-            node_count_max: 1 << 11,
-            reference_count_max: 1 << 8,
-            scope_count_max: 1 << 6,
-            segment_count_max: 1 << 8,
-            token_count_max: 1 << 9,
-        },
-        line_count_max: 1 << 8,
-        slots,
-        source_bytes_max: 1 << 10,
-    }
-}
-
-fn report_budget() -> Budget {
-    Budget {
-        arena_bytes_max: 1 << 12,
-        diagnostic_bytes_max: 1 << 12,
-        diagnostic_count_max: 1 << 6,
-        edge_count_max: 1 << 6,
-        edit_count_max: 1 << 6,
-        fix_count_max: 1 << 5,
-    }
-}
-
-fn report_row(offset: u32) -> Diagnostic {
-    Diagnostic {
-        code: "PRJ900",
-        fix: fix::NONE,
-        message: Message::Static("a recorded finding"),
-        related_count: 0,
-        related_start: 0,
-        rule: crate::rule::NONE,
-        severity: Severity::Warning,
-        span: Span { length: 1, offset },
-    }
-}
-
-#[test]
-fn the_project_report_runs_on_a_frozen_thread() {
-    const SOURCES: [(&[u8], &[u8]); 3] = [
-        (b"a", b"import b\n"),
-        (b"b", b"value = 1\n"),
-        (b"c", b"other = 2\n"),
-    ];
-
-    let limits = report_limits();
-    let mut project = Project::reserve(&limits, Eviction::Reject, &report_budget());
-    let _scope = crate::allocation::freeze_scope();
-
-    for (name, source) in SOURCES {
-        let index = project
-            .store_mut()
-            .insert(hash_of(name), Language::Python, source);
-
-        assert!(index != NONE);
-    }
-
-    assert!(project.build(&project_resolve));
-
-    let mut expected = 0;
-
-    for round in 0..64_u32 {
-        for file in 0..3_u32 {
-            let recorded = project.record(FileID::of(file), report_row(round % 8));
-
-            assert!(recorded);
-
-            expected += 1;
-        }
-
-        project.sort();
-
-        assert_eq!(project.count(), expected);
-
-        if expected < 180 {
-            continue;
-        }
-
-        for file in 0..3_u32 {
-            project.clear_file(FileID::of(file));
-        }
-
-        expected = 0;
-    }
-
-    project.clear();
-
-    assert_eq!(project.count(), 0);
-}
-
 const PARALLEL_SHARD_COUNT: usize = 4;
 
 fn parallel_limits() -> Limits {
@@ -1965,7 +1867,7 @@ fn parallel_limits() -> Limits {
     }
 }
 
-fn parallel_rule(store: &Store, file: FileID, sink: &mut Sink<'_>) {
+fn parallel_rule(store: &Store, file: FileID, out: &mut Diagnostics) {
     for step in store.walk(file) {
         let Step::Enter(node) = step else {
             continue;
@@ -1975,9 +1877,18 @@ fn parallel_rule(store: &Store, file: FileID, sink: &mut Sink<'_>) {
             continue;
         };
 
-        let recorded = sink.record("PRJ901", Severity::Hint, view.span(), "a recorded finding");
+        let pushed = out.push(Diagnostic {
+            code: "PRJ901",
+            fix: fix::NONE,
+            message: Message::Static("a recorded finding"),
+            related_count: 0,
+            related_start: 0,
+            rule: RULE_NONE,
+            severity: Severity::Hint,
+            span: view.span(),
+        });
 
-        assert!(recorded);
+        assert!(pushed);
     }
 }
 
@@ -2010,9 +1921,7 @@ fn a_project_fan_out_runs_on_frozen_threads() {
 
     let files: Vec<FileID> = store.files().collect();
     let held = &store;
-    let registry = Registry::reserve(&PARALLEL_RULES);
-    let rules = &registry;
-    let single = parallel_single(held, &files, rules);
+    let single = parallel_single(held, &files);
 
     let merged: usize = std::thread::scope(|scope| {
         let mut handles = Vec::with_capacity(PARALLEL_SHARD_COUNT);
@@ -2030,12 +1939,9 @@ fn a_project_fan_out_runs_on_frozen_threads() {
                     }
 
                     out.clear();
+                    parallel_rule(held, *file, out);
 
-                    let mut sink = Sink::new(*file, out, rules);
-
-                    parallel_rule(held, *file, &mut sink);
-
-                    found += sink.count() as usize;
+                    found += out.count() as usize;
                 }
 
                 found
@@ -2052,34 +1958,15 @@ fn a_project_fan_out_runs_on_frozen_threads() {
     assert!(merged > 0);
 }
 
-static PARALLEL_RULES: [Rule; 1] = [Rule {
-    citation_nasa: "",
-    citation_tigerstyle: "",
-    default_on: true,
-    description: "",
-    code: "P001",
-    explanation: "The fan-out records one row a file so the shards have something to merge.",
-    fix_title: "",
-    fixable: Fixable::Never,
-    name: "parallel-probe",
-    preview: false,
-    severity: Severity::Warning,
-    summary: "Parallel probe",
-    url: "",
-}];
-
-fn parallel_single(store: &Store, files: &[FileID], registry: &Registry) -> usize {
+fn parallel_single(store: &Store, files: &[FileID]) -> usize {
     let mut out = Diagnostics::reserve(1 << 12, 1 << 16);
     let mut found = 0;
 
     for file in files {
         out.clear();
+        parallel_rule(store, *file, &mut out);
 
-        let mut sink = Sink::new(*file, &mut out, registry);
-
-        parallel_rule(store, *file, &mut sink);
-
-        found += sink.count() as usize;
+        found += out.count() as usize;
     }
 
     found

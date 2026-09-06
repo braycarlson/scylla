@@ -1,7 +1,1 @@
-[
-  {
-    "fixture": "constness.rs",
-    "category": "rustfmt-line-breaking",
-    "reason": "rustfmt indents a `where` clause's bounds one level under the item and breaks an associated type's value onto its own line ahead of the `where`. The emitter keeps the source's line breaks and derives indentation from bracket nesting, and a `where` clause opens no bracket, so its bounds keep the column the source gave them. This is the same divergence `functions.rs` carries, reached through the const-trait syntax rather than through a signature width."
-  }
-]
+[]

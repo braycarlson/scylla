@@ -23,6 +23,122 @@ impl Emitter<'_> {
         self.clause_bodied(position) && self.clause_over(head, previous)
     }
 
+    pub(super) fn clause_bounded(&self, position: u32, kind: TokenKind) -> bool {
+        self.policy.clause_ends
+            && kind == TokenKind::BlockStart
+            && self.claused
+            && self.depth == self.claused_depth
+            && self.brackets.angles_at(position) == 0
+    }
+
+    pub(super) fn clause_within(&self) -> bool {
+        self.policy.clause_lines && self.claused && self.depth == self.claused_depth
+    }
+
+    pub(super) fn clause_base(&self) -> u32 {
+        self.levels + u32::from(self.clause_within())
+    }
+
+    pub(super) fn clause_started(&self) -> bool {
+        self.coded().is_some_and(|held| {
+            matches!(
+                self.tokens[held as usize].kind,
+                TokenKind::BlockEnd
+                    | TokenKind::Punctuation(Punctuation::Colon | Punctuation::Semicolon)
+            )
+        })
+    }
+
+    pub(super) fn value_parted(&self, position: u32, previous: u32) -> bool {
+        self.line_first <= previous && self.value_claused(self.line_first, position)
+    }
+
+    pub(super) fn value_level(&self, position: u32) -> Option<u32> {
+        self.value_claused(self.line_before, position)
+            .then_some(self.printed + 1)
+    }
+
+    fn value_claused(&self, head: u32, equals: u32) -> bool {
+        if self.policy.clause_values.is_empty()
+            || self.tokens[equals as usize].kind != TokenKind::Punctuation(Punctuation::Assign)
+            || head >= equals
+            || self.brackets.angles_at(equals) > 0
+        {
+            return false;
+        }
+
+        self.value_item(head, equals) && self.value_clause(equals)
+    }
+
+    fn value_item(&self, head: u32, equals: u32) -> bool {
+        let mut scan = head;
+
+        for _ in 0..DEFINE_SCAN_MAX {
+            if scan >= equals {
+                return false;
+            }
+
+            if self.word_is(scan, self.policy.clause_values) {
+                return true;
+            }
+
+            let Some(next) = self.next_of(scan) else {
+                return false;
+            };
+
+            scan = next;
+        }
+
+        false
+    }
+
+    fn value_clause(&self, equals: u32) -> bool {
+        let Some(mut scan) = self.next_of(equals) else {
+            return false;
+        };
+
+        let mut depth = 0_u32;
+
+        for _ in 0..DEFINE_SCAN_MAX {
+            let kind = self.tokens[scan as usize].kind;
+
+            if depth == 0 && kind == TokenKind::Punctuation(Punctuation::Semicolon) {
+                return false;
+            }
+
+            if is_open(kind) || kind == TokenKind::BlockStart {
+                depth += 1;
+            } else if is_close(kind) || kind == TokenKind::BlockEnd {
+                let Some(held) = depth.checked_sub(1) else {
+                    return false;
+                };
+
+                depth = held;
+            } else if depth == 0 && self.word_is(scan, self.policy.clause_words) {
+                return self.parted_before(scan);
+            }
+
+            let Some(next) = self.next_of(scan) else {
+                return false;
+            };
+
+            scan = next;
+        }
+
+        false
+    }
+
+    fn parted_before(&self, position: u32) -> bool {
+        let Some(held) = self.back_of(position) else {
+            return false;
+        };
+
+        self.parted_by(
+            self.tokens[held as usize].end(),
+            self.tokens[position as usize].offset,
+        ) > 0
+    }
+
     pub(super) fn clause_seated(&self, open: u32) -> bool {
         if !self.policy.clause_lines || !self.headed(open) {
             return false;

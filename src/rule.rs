@@ -1,15 +1,19 @@
 use crate::bounded::{BoundedVec, FixedMap, Span, count_of};
-use crate::diagnostic::Severity;
-use crate::diagnostic::{Diagnostic, Diagnostics, Message};
+use crate::diagnostic::{Diagnostic, Diagnostics, FileID, Message, Severity};
 use crate::fix::{Applicability, Fixes};
 use crate::lines;
-use crate::project::store::FileID;
-use crate::scan::{DECIMAL_BYTES_MAX, decimal_write};
 use crate::suppress::Regions;
 
 pub const NONE: u32 = u32::MAX;
-pub const CODE_COUNT_MAX: u32 = 128;
-pub const CODE_TEXT_BYTES_MAX: usize = 5;
+pub const CODE_TEXT_BYTES_MAX: usize = 8;
+pub const RULE_COUNT_MAX: u32 = 128;
+const ALL: &[u8] = b"ALL";
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Citation {
+    pub standard: &'static str,
+    pub text: &'static str,
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Fixable {
@@ -19,17 +23,30 @@ pub enum Fixable {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Group {
+    Deprecated,
+    Preview,
+    Removed,
+    Stable,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Preview {
+    pub enabled: bool,
+    pub explicit: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Rule {
-    pub citation_nasa: &'static str,
-    pub citation_tigerstyle: &'static str,
+    pub citations: &'static [Citation],
     pub code: &'static str,
     pub default_on: bool,
     pub description: &'static str,
     pub explanation: &'static str,
     pub fix_title: &'static str,
     pub fixable: Fixable,
+    pub group: Group,
     pub name: &'static str,
-    pub preview: bool,
     pub severity: Severity,
     pub summary: &'static str,
     pub url: &'static str,
@@ -43,7 +60,7 @@ pub struct CodeSet {
 #[derive(Debug)]
 pub struct Registry {
     by_code: FixedMap<u32>,
-    rules: BoundedVec<&'static Rule>,
+    rules: BoundedVec<Rule>,
 }
 
 impl Fixable {
@@ -67,13 +84,30 @@ impl Fixable {
     }
 }
 
+impl Group {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Deprecated => "deprecated",
+            Self::Preview => "preview",
+            Self::Removed => "removed",
+            Self::Stable => "stable",
+        }
+    }
+}
+
+impl Rule {
+    pub const fn is_preview(&self) -> bool {
+        matches!(self.group, Group::Preview)
+    }
+}
+
 impl CodeSet {
     pub const EMPTY: Self = Self { bits: 0 };
 
     pub fn with_all(count: u32) -> Self {
-        assert!(count <= CODE_COUNT_MAX);
+        assert!(count <= RULE_COUNT_MAX);
 
-        if count == CODE_COUNT_MAX {
+        if count == RULE_COUNT_MAX {
             return Self { bits: u128::MAX };
         }
 
@@ -90,22 +124,29 @@ impl CodeSet {
         self.bits
     }
 
-    pub fn contains(self, code: u32) -> bool {
-        assert!(code < CODE_COUNT_MAX);
+    pub fn contains(self, rule: u32) -> bool {
+        assert!(rule < RULE_COUNT_MAX);
 
-        self.bits & (1_u128 << code) != 0
+        self.bits & (1_u128 << rule) != 0
     }
 
-    pub fn insert(&mut self, code: u32) {
-        assert!(code < CODE_COUNT_MAX);
+    pub fn insert(&mut self, rule: u32) {
+        assert!(rule < RULE_COUNT_MAX);
 
-        self.bits |= 1_u128 << code;
+        self.bits |= 1_u128 << rule;
+    }
+
+    pub fn remove(&mut self, rule: u32) {
+        assert!(rule < RULE_COUNT_MAX);
+
+        self.bits &= !(1_u128 << rule);
     }
 }
 
 impl Registry {
-    pub fn reserve_from(rules: &[&'static Rule], count_max: u32) -> Self {
+    pub fn reserve_from(rules: &[&Rule], count_max: u32) -> Self {
         assert!(count_max > 0);
+        assert!(count_max <= RULE_COUNT_MAX);
         assert!(count_of(rules.len()) <= count_max);
         assert!(!crate::allocation::is_frozen());
 
@@ -123,15 +164,15 @@ impl Registry {
         registry
     }
 
-    pub fn reserve(rules: &'static [Rule]) -> Self {
+    pub fn reserve(rules: &[Rule]) -> Self {
         assert!(!rules.is_empty());
 
-        let held: Vec<&'static Rule> = rules.iter().collect();
+        let held: Vec<&Rule> = rules.iter().collect();
 
         Self::reserve_from(&held, count_of(rules.len()))
     }
 
-    pub fn register(&mut self, rule: &'static Rule) {
+    pub fn register(&mut self, rule: &Rule) {
         assert!(!crate::allocation::is_frozen());
 
         let index = self.rules.count();
@@ -140,48 +181,55 @@ impl Registry {
         assert!(self.by_code.get(rule.code.as_bytes()).is_none());
 
         self.by_code.insert_assert(rule.code.as_bytes(), index);
-        self.rules.push_assert(rule);
+        self.rules.push_assert(*rule);
 
         assert_eq!(self.count(), index + 1);
     }
 
-    pub fn at(&self, index: u32) -> &'static Rule {
+    pub fn at(&self, index: u32) -> &Rule {
         assert!(index < self.count());
 
-        self.rules[index as usize]
+        &self.rules[index as usize]
     }
 
     pub fn count(&self) -> u32 {
         self.rules.count()
     }
 
-    pub fn find(&self, code: &[u8]) -> Option<&'static Rule> {
-        if code.is_empty() {
+    pub fn find(&self, code: &[u8]) -> Option<&Rule> {
+        let index = self.index_of_code(code);
+
+        if index == NONE {
             return None;
         }
 
-        let index = self.by_code.get(code)?;
-
-        Some(self.rules[index as usize])
+        Some(&self.rules[index as usize])
     }
 
-    pub fn get(&self, code: &str) -> Option<&'static Rule> {
+    pub fn get(&self, code: &str) -> Option<&Rule> {
         self.find(code.as_bytes())
     }
 
-    pub fn find_name(&self, name: &[u8]) -> Option<&'static Rule> {
-        if name.is_empty() {
+    pub fn find_name(&self, name: &[u8]) -> Option<&Rule> {
+        let index = self.index_of_name(name);
+
+        if index == NONE {
             return None;
         }
 
-        self.rules
-            .iter()
-            .copied()
-            .find(|rule| rule.name.as_bytes() == name)
+        Some(&self.rules[index as usize])
     }
 
     pub fn index_of(&self, code: &str) -> u32 {
-        self.by_code.get(code.as_bytes()).unwrap_or(NONE)
+        self.index_of_code(code.as_bytes())
+    }
+
+    pub fn index_of_code(&self, code: &[u8]) -> u32 {
+        if code.is_empty() {
+            return NONE;
+        }
+
+        self.by_code.get(code).unwrap_or(NONE)
     }
 
     pub fn index_of_name(&self, name: &[u8]) -> u32 {
@@ -198,33 +246,8 @@ impl Registry {
         NONE
     }
 
-    pub fn at_number(&self, code: u32) -> Option<&'static Rule> {
-        let mut text = [0_u8; CODE_TEXT_BYTES_MAX];
-        let prefix = self.prefix()?;
-        let mut digits = [0_u8; DECIMAL_BYTES_MAX];
-        let written = decimal_write(&mut digits, u64::from(code));
-
-        if written > CODE_TEXT_BYTES_MAX - prefix.len() {
-            return None;
-        }
-
-        let start = CODE_TEXT_BYTES_MAX - written;
-
-        text[..prefix.len()].copy_from_slice(prefix);
-        text[start..].copy_from_slice(&digits[..written]);
-
-        for byte in &mut text[prefix.len()..start] {
-            *byte = b'0';
-        }
-
-        self.find(&text)
-    }
-
-    fn prefix(&self) -> Option<&'static [u8]> {
-        let first = self.rules.first()?;
-        let code = first.code.as_bytes();
-
-        code.get(..code.len() - 3)
+    pub fn rules(&self) -> impl Iterator<Item = &Rule> {
+        self.rules.iter()
     }
 }
 
@@ -403,25 +426,19 @@ impl<'run> Sink<'run> {
 }
 
 pub fn code_number_of(code: &[u8]) -> Option<u32> {
-    if code.len() < 3 || code.len() > CODE_TEXT_BYTES_MAX {
+    if code.len() > CODE_TEXT_BYTES_MAX {
         return None;
     }
 
-    let digits = code.len() - 3;
+    let letters = code_prefix_of(code).len();
 
-    if digits == 0 {
+    if letters == 0 || letters == code.len() {
         return None;
-    }
-
-    for byte in &code[..digits] {
-        if byte.is_ascii_digit() {
-            return None;
-        }
     }
 
     let mut value = 0_u32;
 
-    for digit in &code[digits..] {
+    for digit in &code[letters..] {
         if !digit.is_ascii_digit() {
             return None;
         }
@@ -432,23 +449,19 @@ pub fn code_number_of(code: &[u8]) -> Option<u32> {
     Some(value)
 }
 
-#[expect(
-    clippy::arbitrary_source_item_ordering,
-    reason = "the derived `Ord` makes the order the ladder the selector compares on"
-)]
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub enum Specificity {
-    All,
-    Linter,
-    Prefix,
-    Group,
-    Rule,
+pub fn code_prefix_of(code: &[u8]) -> &[u8] {
+    let letters = code
+        .iter()
+        .take_while(|byte| byte.is_ascii_uppercase())
+        .count();
+
+    &code[..letters]
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Selector {
-    pub specificity: Specificity,
-    pub value: u32,
+    length: u8,
+    text: [u8; CODE_TEXT_BYTES_MAX],
 }
 
 #[derive(Debug)]
@@ -458,22 +471,55 @@ pub struct Selection {
     pub fixable: BoundedVec<Selector>,
     pub fixable_replaced: bool,
     pub ignore: BoundedVec<Selector>,
-    pub preview: bool,
+    pub preview: Preview,
     pub select: BoundedVec<Selector>,
     pub selected: bool,
     pub unfixable: BoundedVec<Selector>,
 }
 
 impl Selector {
-    pub fn matches(self, code: u32) -> bool {
-        assert!(code < CODE_COUNT_MAX);
+    pub const ALL: Self = Self {
+        length: 0,
+        text: [0; CODE_TEXT_BYTES_MAX],
+    };
 
-        match self.specificity {
-            Specificity::All | Specificity::Linter => true,
-            Specificity::Prefix => code / 100 == self.value,
-            Specificity::Group => code / 10 == self.value,
-            Specificity::Rule => code == self.value,
+    pub fn of(text: &[u8]) -> Option<Self> {
+        if text == ALL {
+            return Some(Self::ALL);
         }
+
+        if text.is_empty() || text.len() > CODE_TEXT_BYTES_MAX {
+            return None;
+        }
+
+        let mut held = [0_u8; CODE_TEXT_BYTES_MAX];
+
+        held[..text.len()].copy_from_slice(text);
+
+        Some(Self {
+            length: u8::try_from(text.len()).ok()?,
+            text: held,
+        })
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.text[..self.length as usize]
+    }
+
+    pub const fn is_all(&self) -> bool {
+        self.length == 0
+    }
+
+    pub fn is_exact(&self, code: &str) -> bool {
+        self.as_bytes() == code.as_bytes()
+    }
+
+    pub fn matches(&self, code: &str) -> bool {
+        code.as_bytes().starts_with(self.as_bytes())
+    }
+
+    pub const fn specificity(&self) -> u8 {
+        self.length
     }
 }
 
@@ -487,7 +533,7 @@ impl Selection {
             fixable: BoundedVec::reserve(selector_count_max),
             fixable_replaced: false,
             ignore: BoundedVec::reserve(selector_count_max),
-            preview: false,
+            preview: Preview::default(),
             select: BoundedVec::reserve(selector_count_max),
             selected: false,
             unfixable: BoundedVec::reserve(selector_count_max),
@@ -500,7 +546,7 @@ impl Selection {
         self.fixable.clear();
         self.fixable_replaced = false;
         self.ignore.clear();
-        self.preview = false;
+        self.preview = Preview::default();
         self.select.clear();
         self.selected = false;
         self.unfixable.clear();
@@ -511,19 +557,18 @@ impl Selection {
 
         for index in 0..rules.count() {
             let rule = rules.at(index);
-            let code = code_number_of(rule.code.as_bytes()).expect("the code parses");
+            let exact =
+                exact_in(&self.select, rule.code) || exact_in(&self.extend_select, rule.code);
 
-            assert!(code < CODE_COUNT_MAX);
-
-            if rule.preview && !self.preview {
+            if !reachable(rule.group, exact, self.preview) {
                 continue;
             }
 
-            if !self.covers(rule.default_on, code) {
+            if !self.covers(rule.default_on, rule.code) {
                 continue;
             }
 
-            enabled.insert(code);
+            enabled.insert(index);
         }
 
         enabled
@@ -533,16 +578,11 @@ impl Selection {
         let mut allowed = CodeSet::EMPTY;
 
         for index in 0..rules.count() {
-            let rule = rules.at(index);
-            let code = code_number_of(rule.code.as_bytes()).expect("the code parses");
-
-            assert!(code < CODE_COUNT_MAX);
-
-            if !self.fixes(code) {
+            if !self.fixes(rules.at(index).code) {
                 continue;
             }
 
-            allowed.insert(code);
+            allowed.insert(index);
         }
 
         allowed
@@ -553,31 +593,33 @@ impl Selection {
 
         for index in 0..rules.count() {
             let rule = rules.at(index);
-            let code = code_number_of(rule.code.as_bytes()).expect("the code parses");
 
-            assert!(code < CODE_COUNT_MAX);
+            let exact = exact_in(&self.select, rule.code)
+                || exact_in(&self.extend_select, rule.code)
+                || exact_in(&overlay.select, rule.code)
+                || exact_in(&overlay.extend_select, rule.code);
 
-            if rule.preview && !self.preview {
+            if !reachable(rule.group, exact, self.preview) {
                 continue;
             }
 
-            if !self.covers_with(overlay, rule.default_on, code) {
+            if !self.covers_with(overlay, rule.default_on, rule.code) {
                 continue;
             }
 
-            enabled.insert(code);
+            enabled.insert(index);
         }
 
         enabled
     }
 
-    fn covers_with(&self, overlay: &Self, default_on: bool, code: u32) -> bool {
+    fn covers_with(&self, overlay: &Self, default_on: bool, code: &str) -> bool {
         let replaced = overlay.selected;
 
         let mut chosen = if replaced || self.selected || !default_on {
             None
         } else {
-            Some(Specificity::All)
+            Some(0)
         };
 
         if replaced {
@@ -605,12 +647,8 @@ impl Selection {
         }
     }
 
-    fn fixes(&self, code: u32) -> bool {
-        let mut chosen = if self.fixable_replaced {
-            None
-        } else {
-            Some(Specificity::All)
-        };
+    fn fixes(&self, code: &str) -> bool {
+        let mut chosen = if self.fixable_replaced { None } else { Some(0) };
 
         chosen = strongest(chosen, &self.fixable, code);
         chosen = strongest(chosen, &self.extend_fixable, code);
@@ -625,13 +663,11 @@ impl Selection {
         }
     }
 
-    fn covers(&self, default_on: bool, code: u32) -> bool {
-        let mut chosen = if self.selected {
+    fn covers(&self, default_on: bool, code: &str) -> bool {
+        let mut chosen = if self.selected || !default_on {
             None
-        } else if default_on {
-            Some(Specificity::All)
         } else {
-            None
+            Some(0)
         };
 
         chosen = strongest(chosen, &self.select, code);
@@ -648,74 +684,42 @@ impl Selection {
     }
 }
 
+pub const fn reachable(group: Group, exact: bool, preview: Preview) -> bool {
+    match group {
+        Group::Deprecated => !preview.enabled && exact,
+        Group::Preview => exact || (preview.enabled && !preview.explicit),
+        Group::Removed => exact,
+        Group::Stable => true,
+    }
+}
+
 pub fn parse(text: &[u8], rules: &Registry) -> Option<Selector> {
     if text.is_empty() {
         return None;
     }
 
-    if text == b"ALL" {
-        return Some(Selector {
-            specificity: Specificity::All,
-            value: 0,
-        });
+    if text == ALL {
+        return Some(Selector::ALL);
     }
 
-    if text == b"TS" {
-        return Some(Selector {
-            specificity: Specificity::Linter,
-            value: 0,
-        });
-    }
-
-    if let Some(selector) = numeric(text) {
-        return Some(selector);
+    if let Some(selector) = Selector::of(text) {
+        for index in 0..rules.count() {
+            if selector.matches(rules.at(index).code) {
+                return Some(selector);
+            }
+        }
     }
 
     let rule = rules.find_name(text)?;
-    let code = code_number_of(rule.code.as_bytes())?;
 
-    Some(Selector {
-        specificity: Specificity::Rule,
-        value: code,
-    })
+    Selector::of(rule.code.as_bytes())
 }
 
-fn numeric(text: &[u8]) -> Option<Selector> {
-    if text.len() < 3 || &text[..2] != b"TS" {
-        return None;
-    }
-
-    let digits = &text[2..];
-
-    let specificity = match digits.len() {
-        1 => Specificity::Prefix,
-        2 => Specificity::Group,
-        3 => Specificity::Rule,
-        _ => return None,
-    };
-
-    let mut value = 0_u32;
-
-    for digit in digits {
-        if !digit.is_ascii_digit() {
-            return None;
-        }
-
-        value = value * 10 + u32::from(digit - b'0');
-    }
-
-    if specificity == Specificity::Rule && value >= CODE_COUNT_MAX {
-        return None;
-    }
-
-    Some(Selector { specificity, value })
+fn exact_in(selectors: &[Selector], code: &str) -> bool {
+    selectors.iter().any(|selector| selector.is_exact(code))
 }
 
-fn strongest(
-    current: Option<Specificity>,
-    selectors: &[Selector],
-    code: u32,
-) -> Option<Specificity> {
+fn strongest(current: Option<u8>, selectors: &[Selector], code: &str) -> Option<u8> {
     let mut chosen = current;
 
     for selector in selectors {
@@ -724,8 +728,8 @@ fn strongest(
         }
 
         chosen = match chosen {
-            Some(seen) if seen >= selector.specificity => Some(seen),
-            _ => Some(selector.specificity),
+            Some(seen) if seen >= selector.specificity() => Some(seen),
+            _ => Some(selector.specificity()),
         };
     }
 
@@ -736,52 +740,29 @@ fn strongest(
 mod tests {
     use super::*;
 
-    static RULES: [Rule; 3] = [
+    const fn rule(code: &'static str, name: &'static str, default_on: bool, group: Group) -> Rule {
         Rule {
-            citation_nasa: "",
-            citation_tigerstyle: "",
-            code: "TS001",
-            default_on: true,
-            description: "An import the module never reads costs a load and says nothing.",
-            explanation: "An import the module never reads costs a load and says nothing.",
-            fix_title: "Remove the unused import",
-            fixable: Fixable::Always,
-            name: "unused-import",
-            preview: false,
-            severity: Severity::Warning,
-            summary: "Unused import",
-            url: "https://example.invalid/TS001",
-        },
-        Rule {
-            citation_nasa: "",
-            citation_tigerstyle: "",
-            code: "TS004",
-            default_on: true,
-            description: "A late future import is a syntax error the interpreter reports.",
-            explanation: "A late future import is a syntax error the interpreter reports.",
-            fix_title: "Move the import to the head of the file",
+            citations: &[],
+            code,
+            default_on,
+            description: "",
+            explanation: "",
+            fix_title: "",
             fixable: Fixable::Never,
-            name: "late-future-import",
-            preview: false,
-            severity: Severity::Error,
-            summary: "Late future import",
-            url: "https://example.invalid/TS004",
-        },
-        Rule {
-            citation_nasa: "",
-            citation_tigerstyle: "",
-            code: "TS011",
-            default_on: false,
-            description: "A redefinition of an unused name drops the first definition.",
-            explanation: "A redefinition of an unused name drops the first definition.",
-            fix_title: "Remove the earlier definition",
-            fixable: Fixable::Sometimes,
-            name: "redefined-while-unused",
-            preview: true,
+            group,
+            name,
             severity: Severity::Warning,
-            summary: "Redefinition of unused name",
-            url: "https://example.invalid/TS011",
-        },
+            summary: "",
+            url: "",
+        }
+    }
+
+    static RULES: [Rule; 5] = [
+        rule("TS001", "unused-import", true, Group::Stable),
+        rule("TS004", "late-future-import", true, Group::Stable),
+        rule("TS011", "redefined-while-unused", false, Group::Preview),
+        rule("GL001", "registration-args", true, Group::Stable),
+        rule("GL015", "unregistered-name", true, Group::Deprecated),
     ];
 
     fn registry() -> Registry {
@@ -792,7 +773,7 @@ mod tests {
         let held = registry();
         let mut selection = Selection::reserve(8);
 
-        selection.preview = true;
+        selection.preview.enabled = true;
         selection.selected = !text.is_empty();
 
         for spelled in text {
@@ -813,36 +794,8 @@ mod tests {
     #[test]
     fn a_table_with_a_code_twice_is_refused_where_it_is_reserved() {
         static DOUBLED: [Rule; 2] = [
-            Rule {
-                citation_nasa: "",
-                citation_tigerstyle: "",
-                code: "TS001",
-                default_on: true,
-                description: "",
-                explanation: "",
-                fix_title: "",
-                fixable: Fixable::Never,
-                name: "first",
-                preview: false,
-                severity: Severity::Warning,
-                summary: "",
-                url: "",
-            },
-            Rule {
-                citation_nasa: "",
-                citation_tigerstyle: "",
-                code: "TS001",
-                default_on: true,
-                description: "",
-                explanation: "",
-                fix_title: "",
-                fixable: Fixable::Never,
-                name: "second",
-                preview: false,
-                severity: Severity::Warning,
-                summary: "",
-                url: "",
-            },
+            rule("TS001", "first", true, Group::Stable),
+            rule("TS001", "second", true, Group::Stable),
         ];
 
         assert!(std::panic::catch_unwind(|| Registry::reserve(&DOUBLED)).is_err());
@@ -853,9 +806,10 @@ mod tests {
         let held = registry();
         let enabled = selection(&[b"TS"], &[b"TS00"]).resolve(&held);
 
+        assert!(!enabled.contains(0));
         assert!(!enabled.contains(1));
-        assert!(!enabled.contains(4));
-        assert!(enabled.contains(11));
+        assert!(enabled.contains(2));
+        assert!(!enabled.contains(3));
     }
 
     #[test]
@@ -863,9 +817,9 @@ mod tests {
         let held = registry();
         let enabled = selection(&[b"TS00"], &[]).resolve(&held);
 
+        assert!(enabled.contains(0));
         assert!(enabled.contains(1));
-        assert!(enabled.contains(4));
-        assert!(!enabled.contains(11));
+        assert!(!enabled.contains(2));
     }
 
     #[test]
@@ -873,9 +827,10 @@ mod tests {
         let held = registry();
         let enabled = selection(&[b"ALL"], &[]).resolve(&held);
 
+        assert!(enabled.contains(0));
         assert!(enabled.contains(1));
-        assert!(enabled.contains(4));
-        assert!(enabled.contains(11));
+        assert!(enabled.contains(2));
+        assert!(enabled.contains(3));
     }
 
     #[test]
@@ -883,27 +838,64 @@ mod tests {
         let held = registry();
         let enabled = selection(&[b"TS011"], &[]).resolve(&held);
 
-        assert!(!enabled.contains(1));
-        assert!(enabled.contains(11));
+        assert!(!enabled.contains(0));
+        assert!(enabled.contains(2));
     }
 
     #[test]
-    fn a_preview_rule_waits_for_the_preview_flag() {
+    fn a_prefix_stays_inside_its_own_linter() {
+        let held = registry();
+        let enabled = selection(&[b"GL"], &[]).resolve(&held);
+
+        assert!(!enabled.contains(0));
+        assert!(!enabled.contains(1));
+        assert!(enabled.contains(3));
+    }
+
+    #[test]
+    fn a_preview_rule_waits_for_the_preview_flag_unless_named_exactly() {
         let held = registry();
         let mut selection = Selection::reserve(8);
 
-        selection.select.push_assert(Selector {
-            specificity: Specificity::All,
-            value: 0,
-        });
-
+        selection.select.push_assert(Selector::ALL);
         selection.selected = true;
 
-        assert!(!selection.resolve(&held).contains(11));
+        assert!(!selection.resolve(&held).contains(2));
 
-        selection.preview = true;
+        selection.preview.enabled = true;
 
-        assert!(selection.resolve(&held).contains(11));
+        assert!(selection.resolve(&held).contains(2));
+
+        selection.preview.explicit = true;
+
+        assert!(!selection.resolve(&held).contains(2));
+
+        selection
+            .extend_select
+            .push_assert(parse(b"TS011", &held).expect("the code parses"));
+
+        assert!(selection.resolve(&held).contains(2));
+    }
+
+    #[test]
+    fn a_deprecated_rule_is_reached_only_by_name_and_only_outside_preview() {
+        let held = registry();
+        let mut selection = Selection::reserve(8);
+
+        selection.select.push_assert(Selector::ALL);
+        selection.selected = true;
+
+        assert!(!selection.resolve(&held).contains(4));
+
+        selection
+            .select
+            .push_assert(parse(b"GL015", &held).expect("the code parses"));
+
+        assert!(selection.resolve(&held).contains(4));
+
+        selection.preview.enabled = true;
+
+        assert!(!selection.resolve(&held).contains(4));
     }
 
     #[test]
@@ -911,8 +903,8 @@ mod tests {
         let held = registry();
         let selector = parse(b"late-future-import", &held).expect("the name is registered");
 
-        assert_eq!(selector.specificity, Specificity::Rule);
-        assert_eq!(selector.value, 4);
+        assert!(selector.is_exact("TS004"));
+        assert_eq!(selector.specificity(), 5);
     }
 
     #[test]
@@ -922,6 +914,7 @@ mod tests {
         assert_eq!(held.index_of("TS501"), NONE);
         assert!(held.get("TS501").is_none());
         assert!(parse(b"TS501", &held).is_none());
+        assert!(parse(b"XX", &held).is_none());
     }
 
     #[test]
@@ -931,9 +924,9 @@ mod tests {
 
         assert_eq!(rule.name, "late-future-import");
         assert_eq!(rule.fixable, Fixable::Never);
-        assert_eq!(rule.severity, Severity::Error);
-        assert_eq!(held.count(), 3);
-        assert_eq!(held.at_number(4), Some(rule));
+        assert_eq!(rule.severity, Severity::Warning);
+        assert_eq!(held.count(), 5);
+        assert_eq!(held.index_of("TS004"), 1);
         assert_eq!(held.index_of_name(b"late-future-import"), 1);
     }
 
@@ -941,9 +934,18 @@ mod tests {
     fn a_code_number_reads_its_digits_and_refuses_everything_else() {
         assert_eq!(code_number_of(b"TS042"), Some(42));
         assert_eq!(code_number_of(b"F401"), Some(401));
+        assert_eq!(code_number_of(b"E1"), Some(1));
+        assert_eq!(code_number_of(b"PRJ1234"), Some(1234));
         assert_eq!(code_number_of(b""), None);
         assert_eq!(code_number_of(b"042"), None);
+        assert_eq!(code_number_of(b"TS"), None);
         assert_eq!(code_number_of(b"TSxyz"), None);
+        assert_eq!(code_number_of(b"TS04x"), None);
+        assert_eq!(code_number_of(b"ts042"), None);
+        assert_eq!(code_number_of(b"ABCDEF123"), None);
+        assert_eq!(code_prefix_of(b"GL015"), b"GL");
+        assert_eq!(code_prefix_of(b"E1"), b"E");
+        assert_eq!(code_prefix_of(b"01"), b"");
     }
 
     #[test]
@@ -956,9 +958,13 @@ mod tests {
 
         assert!(held.contains(3));
         assert!(!held.contains(4));
+
+        held.remove(3);
+
+        assert!(!held.contains(3));
         assert!(CodeSet::with_all(5).contains(4));
         assert!(!CodeSet::with_all(5).contains(5));
-        assert!(CodeSet::with_all(CODE_COUNT_MAX).contains(CODE_COUNT_MAX - 1));
+        assert!(CodeSet::with_all(RULE_COUNT_MAX).contains(RULE_COUNT_MAX - 1));
     }
 
     #[test]
@@ -966,5 +972,6 @@ mod tests {
         assert_eq!(Fixable::Always.name(), "always");
         assert_eq!(Fixable::Never.name(), "never");
         assert_eq!(Fixable::Sometimes.name(), "sometimes");
+        assert_eq!(Group::Preview.name(), "preview");
     }
 }

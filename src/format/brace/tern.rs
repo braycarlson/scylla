@@ -2,6 +2,8 @@ use super::{Emitter, WRAP_DEPTH_MAX, Wrap, is_close, is_open};
 use crate::format::ir::Element;
 use crate::token::{Punctuation, TokenKind};
 
+const TERNARY_ASSIGNS: bool = true;
+const TERNARY_CHAIN_MAX: u32 = 1 << 8;
 const TERNARY_SCAN_MAX: u32 = 1 << 14;
 
 const BINARY_OPERATORS: [&[u8]; 18] = [
@@ -193,9 +195,14 @@ impl Emitter<'_> {
                 continue;
             }
 
+            if kind == TokenKind::Comment {
+                head = before;
+
+                continue;
+            }
+
             if is_open(kind)
                 || kind == TokenKind::BlockStart
-                || kind == TokenKind::Comment
                 || matches!(
                     kind,
                     TokenKind::Punctuation(
@@ -266,15 +273,33 @@ impl Emitter<'_> {
             return None;
         }
 
-        let colon = self.ternary_branch(question)?;
-        let written = self.parted_by(
-            self.tokens[head as usize].end(),
-            self.tokens[close as usize].offset,
-        );
+        if !TERNARY_ASSIGNS {
+            let colon = self.ternary_branch(question)?;
+            let written = self.parted_by(
+                self.tokens[head as usize].end(),
+                self.tokens[close as usize].offset,
+            );
 
-        let owned = self.ternary_parted_at(question) + self.ternary_parted_at(colon);
+            let owned = self.ternary_parted_around(question) + self.ternary_parted_around(colon);
 
-        (written == owned).then_some((end, end))
+            if written != owned {
+                return None;
+            }
+        }
+
+        Some((end, end))
+    }
+
+    fn ternary_parted_around(&self, position: u32) -> u32 {
+        let after = match self.next_of(position) {
+            Some(held) => self.parted_by(
+                self.tokens[position as usize].end(),
+                self.tokens[held as usize].offset,
+            ),
+            None => 0,
+        };
+
+        self.ternary_parted_at(position) + after
     }
 
     fn ternary_parted_at(&self, position: u32) -> u32 {
@@ -338,10 +363,7 @@ impl Emitter<'_> {
         let colon = self.ternary_branch(question)?;
         let close = self.ternary_end(colon)?;
 
-        if self.ternary_linked(question, colon)
-            || self.ternary_linked(colon, close + 1)
-            || self.ternary_chained(question)
-        {
+        if self.ternary_linked(question, colon) || self.ternary_chained(question) {
             return None;
         }
 
@@ -362,7 +384,12 @@ impl Emitter<'_> {
                 return true;
             }
 
-            if frame.spread.is_none() {
+            let grouped = self.policy.chain_simples
+                && frame.kind == TokenKind::Punctuation(Punctuation::ParenOpen)
+                && !self.calling(frame.open)
+                && !self.headed(frame.open);
+
+            if frame.spread.is_none() && !grouped {
                 return false;
             }
 
@@ -476,39 +503,111 @@ impl Emitter<'_> {
     }
 
     pub(super) fn ternary_leads(&mut self, position: u32) -> bool {
-        if !self.ternary_parted(position) {
+        let Some((held, link)) = self.ternary_linked_at(position) else {
             return true;
-        }
+        };
 
         if self.tokens[position as usize].text(self.source) == b"?" {
-            return self.document.push(Element::IndentBroken);
+            return link > 0 || self.document.push(Element::IndentBroken);
         }
+
+        self.wraps_aligned[held as usize] -= 1;
 
         self.document.push(Element::Dealign)
     }
 
     pub(super) fn ternary_aligns(&mut self, position: u32) -> bool {
-        !self.ternary_parted(position) || self.document.push(Element::Align)
+        let Some((held, _)) = self.ternary_linked_at(position) else {
+            return true;
+        };
+
+        self.wraps_aligned[held as usize] += 1;
+
+        self.document.push(Element::Align)
     }
 
     pub(super) fn ternary_parted(&self, position: u32) -> bool {
+        self.ternary_linked_at(position).is_some()
+    }
+
+    fn ternary_linked_at(&self, position: u32) -> Option<(u32, u32)> {
         if !self.policy.ternary_parts || self.wraps_owed == 0 {
-            return false;
+            return None;
         }
 
         let text = self.tokens[position as usize].text(self.source);
 
         if text != b"?" && text != b":" {
-            return false;
+            return None;
         }
 
-        (0..self.wraps_owed).rev().any(|held| {
+        (0..self.wraps_owed).rev().find_map(|held| {
             let (close, wrap, _, question, _) = self.wrapped[held as usize];
 
-            wrap == Wrap::Ternary
-                && position <= close
-                && (position == question || self.ternary_branch(question) == Some(position))
+            if wrap != Wrap::Ternary || position > close {
+                return None;
+            }
+
+            self.ternary_link(question, close, position)
+                .map(|index| (held, index))
         })
+    }
+
+    fn ternary_link(&self, question: u32, close: u32, position: u32) -> Option<u32> {
+        let mut index = 0;
+        let mut scan = question;
+
+        for _ in 0..TERNARY_CHAIN_MAX {
+            if scan == position {
+                return Some(index);
+            }
+
+            let colon = self.ternary_branch(scan)?;
+
+            if colon == position {
+                return Some(index);
+            }
+
+            scan = self.ternary_next(colon, close)?;
+            index += 1;
+        }
+
+        None
+    }
+
+    fn ternary_next(&self, colon: u32, close: u32) -> Option<u32> {
+        let mut scan = colon + 1;
+
+        while scan <= close && scan < self.count {
+            if let Some(end) = self.spanned_unit(scan) {
+                scan = end + 1;
+
+                continue;
+            }
+
+            let kind = self.tokens[scan as usize].kind;
+
+            if is_open(kind) || kind == TokenKind::BlockStart {
+                scan = self.closing_of(scan)? + 1;
+
+                continue;
+            }
+
+            if is_close(kind) || kind == TokenKind::BlockEnd {
+                return None;
+            }
+
+            if self.tokens[scan as usize].text(self.source) == b"?"
+                && !self.optional(scan)
+                && self.ternary_branch(scan).is_some()
+            {
+                return Some(scan);
+            }
+
+            scan += 1;
+        }
+
+        None
     }
 
     fn ternary_branch(&self, question: u32) -> Option<u32> {

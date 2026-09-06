@@ -1,9 +1,17 @@
-use crate::language::Lexer;
+use crate::language::{Grammar, Lexer};
 use crate::scan::{identifier_scan, is_identifier_start_at, punctuation_of, string_scan_continued};
 use crate::structure::DEPTH_MAX;
 use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static PYTHON: PythonLexer = PythonLexer;
+
+static GRAMMAR: Grammar = Grammar {
+    annotation_prefix: b"@",
+    comment_prefix: b"#",
+    decorator_prefix: b"@",
+    discard_prefix: b"_ = ",
+    ..Grammar::DEFAULT
+};
 const TAB_COLUMNS: u32 = 8;
 const FORM_FEED: u8 = 0x0c;
 const SOFT_WORD: &[u8] = b"match";
@@ -27,6 +35,10 @@ struct Scanner<'source> {
 }
 
 impl Lexer for PythonLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"py", b"pyi"]
     }
@@ -465,10 +477,26 @@ fn number_python_scan(source: &[u8], start: usize) -> usize {
     offset
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the digit scanner takes the predicate in the shape `u8::is_ascii_hexdigit` has"
+)]
+fn is_binary_digit(held: &u8) -> bool {
+    matches!(held, b'0' | b'1')
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "the digit scanner takes the predicate in the shape `u8::is_ascii_hexdigit` has"
+)]
+fn is_octal_digit(held: &u8) -> bool {
+    matches!(held, b'0'..=b'7')
+}
+
 fn number_python_based(source: &[u8], start: usize) -> Option<usize> {
     let digit: fn(&u8) -> bool = match source.get(start + 1)? {
-        b'b' | b'B' => |held| matches!(held, b'0' | b'1'),
-        b'o' | b'O' => |held| matches!(held, b'0'..=b'7'),
+        b'b' | b'B' => is_binary_digit,
+        b'o' | b'O' => is_octal_digit,
         b'x' | b'X' => u8::is_ascii_hexdigit,
         _ => return None,
     };

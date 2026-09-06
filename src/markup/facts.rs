@@ -6,9 +6,13 @@ use crate::markup::view::{TemplateTag, View, unquote};
 use crate::syntax::{Fact, FactKind, Facts};
 use crate::tree::{NONE, Step, Structure, walk};
 
-const NAMES: [&[u8]; 2] = [b"extends", b"include"];
-
-pub fn build(source: &[u8], tokens: &[Token], tree: &Tree, facts: &mut Facts) -> Structure {
+pub fn build(
+    source: &[u8],
+    tokens: &[Token],
+    tree: &Tree,
+    facts: &mut Facts,
+    names: &[&[u8]],
+) -> Structure {
     facts.clear();
 
     assert_eq!(facts.count(), 0);
@@ -26,7 +30,7 @@ pub fn build(source: &[u8], tokens: &[Token], tree: &Tree, facts: &mut Facts) ->
             continue;
         };
 
-        if !names_a_template(tag, view, source) {
+        if !names_a_template(tag, view, source, names) {
             continue;
         }
 
@@ -46,14 +50,19 @@ pub fn build(source: &[u8], tokens: &[Token], tree: &Tree, facts: &mut Facts) ->
     outcome
 }
 
-fn names_a_template(tag: TemplateTag<'_, '_>, view: View<'_, '_>, source: &[u8]) -> bool {
+fn names_a_template(
+    tag: TemplateTag<'_, '_>,
+    view: View<'_, '_>,
+    source: &[u8],
+    names: &[&[u8]],
+) -> bool {
     let Some(index) = tag.name_token() else {
         return false;
     };
 
     let text = view.token_at(index).text(source);
 
-    NAMES.contains(&text)
+    names.contains(&text)
 }
 
 fn specifier_of(tag: TemplateTag<'_, '_>, view: View<'_, '_>, source: &[u8]) -> Option<Span> {
@@ -76,6 +85,8 @@ mod tests {
     use crate::markup::{self, Tokens};
     use crate::syntax::Facts;
 
+    const TEMPLATE_IMPORTS: [&[u8]; 2] = [b"extends", b"include"];
+
     fn built(source: &[u8]) -> (Facts, Structure) {
         let mut tokens = Tokens::reserve(1 << 12);
         let mut tree = Tree::reserve(1 << 12, 1 << 6);
@@ -87,7 +98,13 @@ mod tests {
 
         assert_eq!(structure, Structure::Complete);
 
-        let outcome = build(source, tokens.as_slice(), &tree, &mut facts);
+        let outcome = build(
+            source,
+            tokens.as_slice(),
+            &tree,
+            &mut facts,
+            &TEMPLATE_IMPORTS,
+        );
 
         (facts, outcome)
     }

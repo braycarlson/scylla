@@ -1,5 +1,10 @@
 [
   {
+    "fixture": "expressions.js",
+    "category": "biome-line-breaking",
+    "reason": "biome refuses the file: `-value ** 2` puts a unary operator immediately before an exponentiation, which does not parse, so the golden beside it is not the oracle's own output and the fixture is not comparable."
+  },
+  {
     "fixture": "control_flow.js",
     "category": "biome-line-breaking",
     "reason": "biome indents the body of a braceless `if` and deletes an empty statement. The emitter neither moves a line break nor deletes a token."

@@ -22,6 +22,7 @@ const ERROR_COUNT_MAX: u32 = 1 << 12;
 const EVENT_COUNT_MAX: u32 = 1 << 20;
 const NODE_COUNT_MAX: u32 = 1 << 18;
 const OUT_BYTES_MAX: u32 = 1 << 22;
+const RUSTFMT_WIDTH: u32 = 100;
 const TOKEN_COUNT_MAX: u32 = 1 << 18;
 
 struct Held {
@@ -70,7 +71,10 @@ impl Held {
         );
 
         let input = Input {
-            options: Options::DEFAULT,
+            options: Options {
+                line_width: RUSTFMT_WIDTH,
+                ..Options::DEFAULT
+            },
             outcome,
             raw: &self.raw,
             source,
@@ -106,7 +110,10 @@ impl Held {
         );
 
         let input = Input {
-            options: Options::DEFAULT,
+            options: Options {
+                line_width: RUSTFMT_WIDTH,
+                ..Options::DEFAULT
+            },
             outcome,
             raw: &self.raw,
             source,
@@ -1366,6 +1373,53 @@ fn a_sign_opening_a_line_carries_on_the_value_the_line_above_left() {
 }
 
 #[test]
+fn a_body_the_last_bound_shares_its_line_with_stands_under_the_item() {
+    const SOURCE: &[u8] =
+        b"fn held<T>(value: T) -> T\nwhere\n    T: Copy {\n    value\n}\n\nfn after() {}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn an_item_under_a_clause_a_body_ended_opens_at_the_level_the_clause_left() {
+    const SOURCE: &[u8] = b"impl Held {\n    fn run<T>(&self, value: T) -> T\n    where\n        T: Copy {\n        value\n    }\n\n    fn after(&self) {}\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(SOURCE)
+    );
+}
+
+#[test]
+fn a_type_the_clause_follows_writes_its_value_on_a_line_of_its_own() {
+    const SOURCE: &[u8] =
+        b"impl Aliased for Thing {\n    type Value = u32\n    where\n        Self: Sized;\n}\n";
+
+    const WANTED: &[u8] =
+        b"impl Aliased for Thing {\n    type Value\n        = u32\n    where\n        Self: Sized;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}
+
+#[test]
 fn a_supertrait_list_stands_one_level_under_the_colon_that_opens_it() {
     const SOURCE: &[u8] = b"pub trait Float:\n    Copy + PartialEq + PartialOrd + core::fmt::Debug + core::marker::Send + core::marker::Sync\n{\n}\n";
 
@@ -1437,7 +1491,7 @@ fn a_brace_holding_a_block_remark_alone_takes_the_blank_the_body_owes() {
 
 #[test]
 fn a_filled_list_leaves_the_line_the_separator_its_last_element_owes() {
-    const SOURCE: &[u8] = b"use crate::held::{\n    aaaaaaaaaaaa, bbbbbbbbbbbb, cccccccccccc, dddddddddddd, eeeeeeeeeeee,\n    fffffffffffff, gggggggggggg,\n};\n";
+    const SOURCE: &[u8] = b"use crate::held::{\n    aaaaaaaaaaaaaaa, bbbbbbbbbbbbbbb, ccccccccccccccc, ddddddddddddddd, eeeeeeeeeeeeeee,\n    ffffffffffffffff, ggggggggggggggg,\n};\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
@@ -1649,7 +1703,7 @@ fn a_macro_body_holding_a_builtin_prefix_is_written_from_the_source() {
 #[test]
 fn a_tighter_operator_opening_a_line_steps_in_from_the_looser_one_above() {
     const SOURCE: &[u8] =
-        b"fn f() -> bool {\n    alpha_one_two_three_four(one)\n        && beta_four_five_six_seven(two)\n            != gamma_seven_eight_nine(three)\n}\n";
+        b"fn f() -> bool {\n    alpha_one_two_three_four(one)\n        && beta_four_five_six_seven(two)\n            != gamma_seven_eight_nine_ten(three)\n}\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
@@ -1691,7 +1745,7 @@ fn an_attributes_own_close_ends_no_operand() {
 
 #[test]
 fn a_pattern_alternative_inside_a_bracket_keeps_the_arms_own_level() {
-    const SOURCE: &[u8] = b"fn f(v: E) -> u32 {\n    match v {\n        E::Let(\n            One(_, extracted_value)\n            | Two(_, _, extracted_value)\n            | Three(_, _, extracted_value),\n        ) => extracted_value,\n        _ => 0,\n    }\n}\n";
+    const SOURCE: &[u8] = b"fn f(v: E) -> u32 {\n    match v {\n        E::Let(\n            One(_, extracted_value_held)\n            | Two(_, _, extracted_value_held)\n            | Three(_, _, extracted_value_held),\n        ) => extracted_value_held,\n        _ => 0,\n    }\n}\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
@@ -2021,8 +2075,8 @@ fn a_bracket_holding_one_chain_parts_where_its_callee_is_no_shorter_than_the_ind
 
 #[test]
 fn a_value_the_equals_line_cannot_hold_moves_whole_to_the_line_under_it() {
-    const SOURCE: &[u8] = b"fn f() {\n    let held = aaaaaaaaaaaaa + aaaaaaaaaaaaa + aaaaaaaaaaaaa + aaaaaaaaaaaaa + aaaaaaaaaaaaa;\n}\n";
-    const WANTED: &[u8] = b"fn f() {\n    let held =\n        aaaaaaaaaaaaa + aaaaaaaaaaaaa + aaaaaaaaaaaaa + aaaaaaaaaaaaa + aaaaaaaaaaaaa;\n}\n";
+    const SOURCE: &[u8] = b"fn f() {\n    let held = aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa;\n}\n";
+    const WANTED: &[u8] = b"fn f() {\n    let held =\n        aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa + aaaaaaaaaaaaaaa;\n}\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
@@ -2185,8 +2239,8 @@ fn a_chain_of_two_links_past_the_chain_width_keeps_the_lines_it_was_given() {
 
 #[test]
 fn a_header_that_fits_without_its_brace_joins_and_leaves_the_brace_alone() {
-    const SOURCE: &[u8] = b"fn f() {\n    if aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(x)\n        && bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb(y)\n    {\n        g();\n    }\n}\n";
-    const WANTED: &[u8] = b"fn f() {\n    if aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(x) && bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb(y)\n    {\n        g();\n    }\n}\n";
+    const SOURCE: &[u8] = b"fn f() {\n    if aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(x)\n        && bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb(y)\n    {\n        g();\n    }\n}\n";
+    const WANTED: &[u8] = b"fn f() {\n    if aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa(x) && bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb(y)\n    {\n        g();\n    }\n}\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
@@ -2245,8 +2299,8 @@ fn a_list_holding_a_block_remark_is_still_a_list_the_layout_parts() {
 
 #[test]
 fn a_definition_whose_generics_stand_over_lines_parts_its_parameters_too() {
-    const SOURCE: &[u8] = b"pub unsafe fn held<\n    T: CopyAndCloneAndSendAndSync,\n    const ORDERING: AtomicOrderingKindHeld,\n>(dst: *mut T, old: T, src: T) -> (T, bool);\n";
-    const WANTED: &[u8] = b"pub unsafe fn held<\n    T: CopyAndCloneAndSendAndSync,\n    const ORDERING: AtomicOrderingKindHeld,\n>(\n    dst: *mut T,\n    old: T,\n    src: T,\n) -> (T, bool);\n";
+    const SOURCE: &[u8] = b"pub unsafe fn held<\n    T: CopyAndCloneAndSendAndSyncAndDebug,\n    const ORDERING: AtomicOrderingKindHeldWide,\n>(dst: *mut T, old: T, src: T) -> (T, bool);\n";
+    const WANTED: &[u8] = b"pub unsafe fn held<\n    T: CopyAndCloneAndSendAndSyncAndDebug,\n    const ORDERING: AtomicOrderingKindHeldWide,\n>(\n    dst: *mut T,\n    old: T,\n    src: T,\n) -> (T, bool);\n";
 
     let mut held = Held::reserve();
     let mut out = Buffer::reserve(OUT_BYTES_MAX);

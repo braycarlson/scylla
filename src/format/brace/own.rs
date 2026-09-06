@@ -1,4 +1,8 @@
-use super::{Emitter, Frame, REMARK_COMMAS, VALUE_ARROWS, is_close, is_open};
+use super::call::LOGICAL_LEVEL_MAX;
+
+const ARGUED_VALUES: bool = false;
+const VALUE_WRAPS: bool = true;
+use super::{Emitter, Frame, REMARK_COMMAS, VALUE_ARROWS, Wrap, is_close, is_open};
 use crate::format::ir::Element;
 use crate::format::reach;
 use crate::token::{Punctuation, TokenKind};
@@ -240,10 +244,6 @@ impl Emitter<'_> {
             || !self.tokens[remark as usize]
                 .text(self.source)
                 .starts_with(b"//")
-            || self.parted_by(
-                self.tokens[position as usize].end(),
-                self.tokens[remark as usize].offset,
-            ) > 0
         {
             return false;
         }
@@ -272,8 +272,15 @@ impl Emitter<'_> {
             return false;
         }
 
-        self.word_before(remark)
-            .is_some_and(|held| self.trailed_comma(held))
+        let Some(held) = self.word_before(remark) else {
+            return false;
+        };
+
+        self.trailed_comma(held)
+            || matches!(
+                self.tokens[held as usize].kind,
+                TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
+            )
     }
 
     #[expect(
@@ -283,6 +290,10 @@ impl Emitter<'_> {
     )]
     pub(super) fn assigning(&self, position: u32) -> Option<(u32, u32)> {
         if !self.policy.assign_groups || self.assigned.is_some() || self.owned_assign(position) {
+            return None;
+        }
+
+        if self.typed || self.assign_wrap(position).is_some() {
             return None;
         }
 
@@ -327,7 +338,9 @@ impl Emitter<'_> {
                 continue;
             }
 
-            let broken = previous.is_some_and(|last| self.parts_at(last, scan));
+            let broken = previous.is_some_and(|last| {
+                self.parts_at(last, scan) && !self.semicolon_joined(scan, last)
+            });
 
             if is_close(token.kind) {
                 return None;
@@ -344,7 +357,7 @@ impl Emitter<'_> {
             }
 
             if token.kind == TokenKind::Comment
-                || previous.is_some_and(|last| self.parts_at(last, scan))
+                || broken
                 || token.text(self.source).contains(&b'\n')
                 || !breaks && self.chain_parts(scan, scan)
             {
@@ -457,6 +470,300 @@ impl Emitter<'_> {
         }
 
         None
+    }
+
+    pub(super) fn assign_wrap(&self, position: u32) -> Option<(u32, Wrap)> {
+        if !VALUE_WRAPS || !self.policy.assign_lines || self.assigned.is_some() {
+            return None;
+        }
+
+        if self.tokens[position as usize].kind != TokenKind::Punctuation(Punctuation::Assign) {
+            return None;
+        }
+
+        if self.depth > 0 && self.frame().kind != TokenKind::BlockStart {
+            return None;
+        }
+
+        let head = self.next_of(position)?;
+        let end = self.valued_semicolon(head)?;
+        let stop = self.back_of(end)?;
+
+        if stop <= head || !self.valued_binary(head, stop) {
+            return None;
+        }
+
+        if self.binary_floor(head, stop) <= LOGICAL_LEVEL_MAX && self.binary_inlined(stop) {
+            return None;
+        }
+
+        Some((stop, Wrap::Valued))
+    }
+
+    pub(super) fn value_wrap(&self, position: u32) -> Option<(u32, Wrap)> {
+        if !VALUE_WRAPS || !self.policy.assign_lines || self.depth == 0 {
+            return None;
+        }
+
+        let before = self.back_of(position)?;
+        let kind = self.tokens[before as usize].kind;
+
+        let paired = kind == TokenKind::Punctuation(Punctuation::Colon)
+            && self.policy.colon_continues
+            && self.frame().kind == TokenKind::BlockStart
+            && !self.ternary(before)
+            && self.valued_object();
+
+        let valued = kind == TokenKind::Punctuation(Punctuation::Assign);
+
+        let argued = ARGUED_VALUES
+            && !paired
+            && !valued
+            && self.spreads()
+            && matches!(
+                kind,
+                TokenKind::Punctuation(Punctuation::Comma | Punctuation::ParenOpen)
+            )
+            && self.frame().kind == TokenKind::Punctuation(Punctuation::ParenOpen);
+
+        let grouped = self.policy.spread_owns
+            && !paired
+            && !valued
+            && !argued
+            && kind == TokenKind::Punctuation(Punctuation::ParenOpen)
+            && self.frame().kind == TokenKind::Punctuation(Punctuation::ParenOpen)
+            && self.frame().open == before
+            && !self.calling(before)
+            && !self.headed(before)
+            && self.back_of(before).is_none_or(|held| {
+                !matches!(
+                    self.tokens[held as usize].text(self.source),
+                    b"return" | b"throw"
+                )
+            });
+
+        if !paired && !valued && !argued && !grouped {
+            return None;
+        }
+
+        if grouped {
+            let close = self.frame().close;
+            let stop = self.back_of(close)?;
+
+            if stop <= position || !self.valued_binary(position, stop) {
+                return None;
+            }
+
+            return Some((stop, Wrap::Argued));
+        }
+
+        let end = if paired || argued {
+            self.valued_element(position)?
+        } else {
+            if self.frame().kind != TokenKind::BlockStart {
+                return None;
+            }
+
+            self.valued_semicolon(position)?
+        };
+
+        let stop = self.back_of(end)?;
+
+        if stop <= position {
+            return None;
+        }
+
+        if let Some(question) = self.valued_question(position, stop) {
+            let last = self.back_of(question)?;
+
+            return (last > position && self.valued_binary(position, last))
+                .then_some((last, Wrap::Paired));
+        }
+
+        if !(paired || argued) || !self.valued_binary(position, stop) {
+            return None;
+        }
+
+        if self.binary_floor(position, stop) <= LOGICAL_LEVEL_MAX && self.binary_inlined(stop) {
+            return None;
+        }
+
+        let wrap = if argued { Wrap::Argued } else { Wrap::Paired };
+
+        Some((stop, wrap))
+    }
+
+    pub(super) fn value_joined(&self, position: u32, previous: u32) -> bool {
+        if !self.policy.assign_lines
+            || self.tokens[previous as usize].kind != TokenKind::Punctuation(Punctuation::Assign)
+            || self.line_first > previous
+        {
+            return false;
+        }
+
+        let held = self.value_lead(position);
+
+        let Some(last) = held else {
+            return false;
+        };
+
+        let width = self.printed_columns(self.line_first, last);
+
+        self.printed * self.options.indent_width + width <= self.options.line_width
+    }
+
+    fn value_lead(&self, position: u32) -> Option<u32> {
+        let end = self.valued_semicolon(position)?;
+        let stop = self.back_of(end)?;
+        let question = self.valued_question(position, stop)?;
+        let last = self.back_of(question)?;
+
+        (last >= position && !self.valued_binary(position, last)).then_some(last)
+    }
+
+    fn valued_question(&self, head: u32, stop: u32) -> Option<u32> {
+        let mut depth = 0_u32;
+        let mut scan = head;
+
+        while scan <= stop {
+            if let Some(end) = self.spanned_body(scan).or_else(|| self.spanned_unit(scan)) {
+                scan = end + 1;
+
+                continue;
+            }
+
+            let kind = self.tokens[scan as usize].kind;
+
+            if is_open(kind) || kind == TokenKind::BlockStart {
+                depth += 1;
+            } else if is_close(kind) || kind == TokenKind::BlockEnd {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0
+                && self.tokens[scan as usize].text(self.source) == b"?"
+                && !self.optional(scan)
+            {
+                return Some(scan);
+            }
+
+            scan += 1;
+        }
+
+        None
+    }
+
+    fn valued_object(&self) -> bool {
+        let frame = self.frame();
+
+        if frame.kind != TokenKind::BlockStart {
+            return false;
+        }
+
+        self.word_before(frame.open)
+            .is_some_and(|before| self.objected(before, self.tokens[before as usize]))
+    }
+
+    fn valued_element(&self, head: u32) -> Option<u32> {
+        let close = self.frame().close;
+        let mut depth = 0_u32;
+        let mut scan = head;
+
+        while scan < close {
+            if let Some(end) = self.spanned_unit(scan) {
+                scan = end + 1;
+
+                continue;
+            }
+
+            let kind = self.tokens[scan as usize].kind;
+
+            if is_open(kind) || kind == TokenKind::BlockStart {
+                depth += 1;
+            } else if is_close(kind) || kind == TokenKind::BlockEnd {
+                if depth == 0 {
+                    return None;
+                }
+
+                depth -= 1;
+            } else if depth == 0 && kind == TokenKind::Punctuation(Punctuation::Comma) {
+                return Some(scan);
+            }
+
+            scan += 1;
+        }
+
+        (close > head).then_some(close)
+    }
+
+    fn valued_leveled(&self, head: u32, stop: u32) -> bool {
+        let floor = self.binary_floor(head, stop);
+        let mut depth = 0_u32;
+        let mut scan = head;
+
+        while scan <= stop {
+            if let Some(end) = self.spanned_body(scan).or_else(|| self.spanned_unit(scan)) {
+                scan = end + 1;
+
+                continue;
+            }
+
+            let kind = self.tokens[scan as usize].kind;
+
+            if is_open(kind) || kind == TokenKind::BlockStart {
+                depth += 1;
+            } else if is_close(kind) || kind == TokenKind::BlockEnd {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0
+                && self.wrapping_operator(scan)
+                && !self.binary_floored(scan, floor)
+            {
+                return false;
+            }
+
+            scan += 1;
+        }
+
+        true
+    }
+
+    fn valued_binary(&self, head: u32, stop: u32) -> bool {
+        let mut depth = 0_u32;
+        let mut found = false;
+        let mut scan = head;
+
+        while scan <= stop {
+            if let Some(end) = self.spanned_body(scan).or_else(|| self.spanned_unit(scan)) {
+                scan = end + 1;
+
+                continue;
+            }
+
+            let token = self.tokens[scan as usize];
+            let kind = token.kind;
+
+            if is_open(kind) || kind == TokenKind::BlockStart {
+                depth += 1;
+            } else if is_close(kind) || kind == TokenKind::BlockEnd {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0 {
+                let text = token.text(self.source);
+
+                if text == b"?" && !self.optional(scan)
+                    || text == b"=>"
+                    || text == b","
+                    || text == b"="
+                {
+                    return false;
+                }
+
+                if self.wrapping_operator(scan) {
+                    found = true;
+                }
+            }
+
+            scan += 1;
+        }
+
+        found
     }
 
     fn opened_above(&self, position: u32) -> bool {

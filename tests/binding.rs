@@ -45,6 +45,7 @@ fn built(language: Language, source: &[u8]) -> Front {
     let options = Options {
         globals: &[],
         python_version: PythonVersion::Py310,
+        template_imports: &[],
     };
 
     let outcome = front.build(source, lexed.as_slice(), &mut scratch, &options);
@@ -151,6 +152,28 @@ fn a_rust_function_binding_names_its_node_and_its_callers() {
     });
 
     assert_eq!(callers, 2);
+}
+
+#[test]
+fn a_rust_macro_call_never_binds_the_function_that_shares_its_name() {
+    const SOURCE: &[u8] =
+        b"fn matches(interactive: bool) -> bool {\n    matches!(interactive, true)\n}\n";
+
+    let front = built(Language::Rust, SOURCE);
+    let bindings = front.bindings();
+    let mut callers = 0;
+
+    for index in 0..bindings.count() {
+        let binding = bindings.at(index).expect("a binding");
+
+        if binding.class != BindingClass::Function {
+            continue;
+        }
+
+        bindings.references_of(index, |_| callers += 1);
+    }
+
+    assert_eq!(callers, 0);
 }
 
 #[test]

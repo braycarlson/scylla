@@ -1,4 +1,5 @@
 pub mod binding;
+pub mod calls;
 pub mod css;
 pub mod front;
 pub mod go;

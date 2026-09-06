@@ -9,7 +9,7 @@
 &nbsp;
 
 <p align="center">
-    A statically allocated parser and formatter.
+    A statically allocated parser, formatter, and tooling substrate.
 </p>
 
 <p align="center">
@@ -36,6 +36,15 @@ rather than served by a growing buffer. The memory ceiling is a constant you cho
 - **One semantic shape**: A built `Front` hands back the bindings, scopes, references, and exports of any language through the same `View`.
 - **Oracle tests**: The output is compared against ruff, rustfmt, gofmt, `zig fmt`, biome,
   oxlint, tree-sitter, `syn`, and `go/types`, each pinned to a version under `tools/`.
+- **Tooling modules**: The pieces every linter or language server built on the parsers
+  needs, each reserved once and allocation-free afterwards: a rule registry and selector
+  (`rule`), diagnostics and fixes (`diagnostic`, `fix`), suppression comments (`suppress`),
+  a multi-file store and dependency graph (`project`), a TOML reader (`toml`), config
+  discovery with an `extend` chain (`config`), a JSON codec (`json`), LSP framing
+  (`transport`), byte-path helpers (`path`), a poll watcher (`watch`), an argument parser
+  (`arguments`), a worker pool (`pool`), and a bounded logger (`log`). Nothing in them
+  names a product: rule codes, marker words, config file names, and template tag names are
+  all parameters the caller supplies.
 
 ## Install
 
@@ -89,6 +98,7 @@ fn main() {
     let options = Options {
         globals: &[],
         python_version: PythonVersion::Py310,
+        template_imports: &[],
     };
 
     let lexer = front::lexer_of(Language::Python).expect("a code language has a lexer");

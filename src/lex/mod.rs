@@ -15,7 +15,7 @@ pub use python::{PYTHON, PythonLexer};
 pub(crate) use javascript::token_at as javascript_token_at;
 pub(crate) use python::token_at as python_token_at;
 pub use rust::{RUST, RustLexer};
-pub use zig::{SURVIVING as ZIG_ASSERTIONS_SURVIVING, ZIG, ZigLexer};
+pub use zig::{EXPECTATIONS as ZIG_EXPECTATIONS, ZIG, ZigLexer};
 
 #[cfg(any(test, feature = "tests"))]
 pub mod tests_support {

@@ -25,6 +25,7 @@ mod bind;
 mod call;
 mod clause;
 mod join;
+mod list;
 mod own;
 mod span;
 mod tern;
@@ -37,6 +38,7 @@ const ANGLE_STOPS: bool = true;
 const BOUND_LEVELS: bool = true;
 const OPERAND_FIRST: bool = true;
 const DEFINE_SCAN_MAX: u32 = 512;
+const MODULE_STAR_MAX: u32 = 4;
 const ASSIGN_DEPTH_MAX: u32 = 8;
 const BINDING_DEPTH_MAX: u32 = 16;
 const BRANCH_DEPTH_MAX: u32 = 16;
@@ -155,10 +157,13 @@ pub struct Formatter {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Wrap {
+    Argued,
     Bodied,
     Hugged,
+    Paired,
     Parens,
     Ternary,
+    Valued,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -177,6 +182,7 @@ struct Frame {
     held: u32,
     indents: bool,
     index: bool,
+    inset: u32,
     inside: bool,
     joined: bool,
     kind: TokenKind,
@@ -195,6 +201,7 @@ impl Frame {
         held: 0,
         indents: false,
         index: false,
+        inset: 0,
         inside: false,
         joined: false,
         kind: TokenKind::BlockStart,
@@ -221,6 +228,7 @@ struct Emitter<'held> {
     breaks: &'held Breaks,
     chained: bool,
     claused: bool,
+    claused_body: bool,
     claused_depth: u32,
     closed: Frame,
     closing: Span,
@@ -249,6 +257,7 @@ struct Emitter<'held> {
     origin: &'held [u8],
     origins: &'held [u32],
     owed: u32,
+    owing: u32,
     policy: Policy,
     previous: Option<u32>,
     printed: u32,
@@ -264,6 +273,7 @@ struct Emitter<'held> {
     tokens: &'held [Token],
     typed: bool,
     wrapped: [(u32, Wrap, u32, u32, u32); WRAP_DEPTH_MAX as usize],
+    wraps_aligned: [u32; WRAP_DEPTH_MAX as usize],
     wraps_owed: u32,
 }
 
@@ -364,6 +374,7 @@ impl Formatter {
             branches: [(0, 0, 0); BRANCH_DEPTH_MAX as usize],
             chained: false,
             claused: false,
+            claused_body: false,
             claused_depth: 0,
             closed: Frame::EMPTY,
             closing,
@@ -394,6 +405,7 @@ impl Formatter {
             opening,
             options: input.options,
             owed: 0,
+            owing: 0,
             policy: input.policy,
             origin: input.origin,
             origins: input.origins,
@@ -411,6 +423,7 @@ impl Formatter {
             tokens: input.tokens,
             typed: false,
             wrapped: [(0, Wrap::Parens, 0, 0, 0); WRAP_DEPTH_MAX as usize],
+            wraps_aligned: [0; WRAP_DEPTH_MAX as usize],
             wraps_owed: 0,
         };
 
@@ -623,10 +636,6 @@ impl<'held> Emitter<'held> {
             return true;
         }
 
-        // The three tests below all read the SOURCE's own breaks, and the line this bracket
-        // stands on may have been broken by a rule of ours instead. `line_first` is the token
-        // the current line opened at, so a line that opened past the outer bracket is one we
-        // parted, and the bracket owes its level either way.
         let opened = LIST_RAISED && self.line_first > outer.open;
 
         if !outer.parted
@@ -1103,6 +1112,10 @@ impl<'held> Emitter<'held> {
     }
 
     fn clause_holds(&self, position: u32) -> bool {
+        if self.claused_body {
+            return false;
+        }
+
         if self.depth > self.claused_depth {
             return true;
         }
@@ -1956,6 +1969,8 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
+        self.owing = self.owed;
+
         while self.owed > 0 {
             self.owed -= 1;
 
@@ -1994,7 +2009,11 @@ impl<'held> Emitter<'held> {
                 return false;
             }
 
+            let bounded = self.clause_bounded(position, kind);
             let closes = self.closing_of(position);
+
+            self.claused_body |= bounded;
+
             let parted = closes.is_some_and(|held| {
                 self.spread_source(position, held)
                     || self.spread_forced(position, held)
@@ -2014,6 +2033,7 @@ impl<'held> Emitter<'held> {
                 held: self.levels,
                 indents,
                 index: self.indexes(position),
+                inset: self.indent,
                 inside: kind == TokenKind::BlockStart && self.inside(position),
                 joined: closes.is_some_and(|held| self.joined_args(position, held)),
                 kind,
@@ -2032,7 +2052,8 @@ impl<'held> Emitter<'held> {
             let headed = self.policy.header_words.is_empty()
                 || self.head_word(position, self.policy.header_words).is_some();
 
-            let statement = self.heritage_bodied(position)
+            let statement = bounded
+                || self.heritage_bodied(position)
                 || self.bodied(position) && self.printed > self.levels && !heads && headed;
 
             let carried = if HEADER_LINES && self.policy.header_lines {
@@ -2343,6 +2364,183 @@ impl<'held> Emitter<'held> {
             && !self.parting(position, close)
     }
 
+    fn pattern_brace(&self, open: u32, close: u32) -> bool {
+        if !self.policy.chain_simples || self.tokens[open as usize].kind != TokenKind::BlockStart {
+            return false;
+        }
+
+        if self.pattern_nested(open, close) || !self.pattern_fits(open, close) {
+            return false;
+        }
+
+        if self
+            .next_of(close)
+            .is_some_and(|held| self.tokens[held as usize].text(self.source) == b"=")
+        {
+            return true;
+        }
+
+        let Some(before) = self.back_of(open) else {
+            return false;
+        };
+
+        if matches!(
+            self.tokens[before as usize].text(self.source),
+            b"const" | b"let" | b"var"
+        ) {
+            return true;
+        }
+
+        let paren = if self.tokens[before as usize].kind
+            == TokenKind::Punctuation(Punctuation::ParenOpen)
+        {
+            before
+        } else if self.tokens[before as usize].kind == TokenKind::Punctuation(Punctuation::Comma) {
+            let Some(held) = self.enclosing_open(open) else {
+                return false;
+            };
+
+            held
+        } else {
+            return false;
+        };
+
+        if self.tokens[paren as usize].kind != TokenKind::Punctuation(Punctuation::ParenOpen) {
+            return false;
+        }
+
+        let Some(shut) = self.closing_of(paren) else {
+            return false;
+        };
+
+        self.next_of(shut).is_some_and(|held| {
+            self.tokens[held as usize].kind == TokenKind::BlockStart
+                || self.tokens[held as usize].text(self.source) == b"=>"
+        })
+    }
+
+    pub(super) fn pattern_joined(&self, position: u32) -> bool {
+        if !self.policy.chain_simples || self.depth == 0 {
+            return false;
+        }
+
+        let frame = self.nest[self.depth as usize - 1];
+
+        if frame.kind != TokenKind::BlockStart || frame.open < self.line_first {
+            return false;
+        }
+
+        let Some(close) = self.closing_of(frame.open) else {
+            return false;
+        };
+
+        position <= close && self.pattern_brace(frame.open, close)
+    }
+
+    fn enclosing_open(&self, position: u32) -> Option<u32> {
+        let mut depth = 0_u32;
+        let mut scan = position;
+
+        for _ in 0..DEFINE_SCAN_MAX {
+            let held = self.back_of(scan)?;
+            let kind = self.tokens[held as usize].kind;
+
+            if is_close(kind) || kind == TokenKind::BlockEnd {
+                depth += 1;
+            } else if is_open(kind) || kind == TokenKind::BlockStart {
+                if depth == 0 {
+                    return Some(held);
+                }
+
+                depth -= 1;
+            }
+
+            scan = held;
+        }
+
+        None
+    }
+
+    fn pattern_fits(&self, open: u32, close: u32) -> bool {
+        let (from, level) = self
+            .line_lead(open)
+            .unwrap_or((self.line_first, self.printed));
+
+        if from > open {
+            return false;
+        }
+
+        let width = self.printed_columns(from, self.pattern_end(close));
+
+        level * self.options.indent_width + width <= self.options.line_width
+    }
+
+    fn pattern_end(&self, close: u32) -> u32 {
+        let mut depth = 0_u32;
+        let mut scan = close;
+
+        for _ in 0..DEFINE_SCAN_MAX {
+            let Some(next) = self.next_of(scan) else {
+                return scan;
+            };
+
+            let kind = self.tokens[next as usize].kind;
+
+            if kind == TokenKind::BlockStart {
+                return next;
+            }
+
+            if is_open(kind) {
+                depth += 1;
+            } else if is_close(kind) || kind == TokenKind::BlockEnd {
+                if depth == 0 {
+                    return scan;
+                }
+
+                depth -= 1;
+            } else if depth == 0
+                && matches!(
+                    kind,
+                    TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
+                )
+            {
+                return next;
+            }
+
+            scan = next;
+        }
+
+        scan
+    }
+
+    fn pattern_nested(&self, open: u32, close: u32) -> bool {
+        let mut depth = 0_u32;
+        let mut scan = open + 1;
+
+        while scan < close {
+            let kind = self.tokens[scan as usize].kind;
+
+            if is_open(kind) || kind == TokenKind::BlockStart {
+                if depth == 0
+                    && matches!(
+                        kind,
+                        TokenKind::BlockStart | TokenKind::Punctuation(Punctuation::BracketOpen)
+                    )
+                {
+                    return true;
+                }
+
+                depth += 1;
+            } else if is_close(kind) || kind == TokenKind::BlockEnd {
+                depth = depth.saturating_sub(1);
+            }
+
+            scan += 1;
+        }
+
+        false
+    }
+
     fn bodied_brace(&self, position: u32) -> bool {
         if self.tokens[position as usize].kind != TokenKind::BlockStart {
             return false;
@@ -2617,6 +2815,13 @@ impl<'held> Emitter<'held> {
         self.document.push(Element::HardLine)
     }
 
+    fn remark_ended(&self, previous: u32) -> bool {
+        let token = self.tokens[previous as usize];
+        let text = token.text(self.source);
+
+        token.kind == TokenKind::Comment && text.starts_with(b"//") && !text.ends_with(b"\n")
+    }
+
     fn remark_opened(&self, position: u32, previous: u32) -> bool {
         REMARK_OPENS
             && self.policy.brace_remarks
@@ -2631,6 +2836,8 @@ impl<'held> Emitter<'held> {
         self.remark_opened(position, previous)
             || self.forced(position, previous)
             || self.declare_broken(position, previous)
+            || self.header_broken(position, previous)
+            || self.sequence_broken(position, previous)
             || self.body_broken(position, previous)
             || self.spread_listed(position, previous)
             || self.assign_wrapped(position, previous)
@@ -2655,11 +2862,26 @@ impl<'held> Emitter<'held> {
             return false;
         };
 
-        if self.chain_broken(position) {
+        if self.remark_ended(previous) && !self.spreads() {
+            return true;
+        }
+
+        if self.chain_broken(position) || self.member_parted(position) {
             return true;
         }
 
         if self.clause_parted(position, previous) {
+            return true;
+        }
+
+        if self.value_parted(position, previous) {
+            return true;
+        }
+
+        if self.policy.chain_simples
+            && self.spreads()
+            && (self.binary_spread(position, previous) || self.chain_parts(position, previous))
+        {
             return true;
         }
 
@@ -2674,6 +2896,8 @@ impl<'held> Emitter<'held> {
             || self.operand_joined(position, previous)
             || self.binary_joined(position, previous)
             || self.chain_hugged(position)
+            || self.chain_flatted(position)
+            || self.pattern_joined(position)
             || self.sole_joined(position)
             || self.fields_joined(position)
             || self.attribute_joined(position)
@@ -2682,8 +2906,12 @@ impl<'held> Emitter<'held> {
             || self.owned_join(position)
             || self.operand_snuggled(position, previous)
             || self.wrap_headed()
+            || self.brace_joined(position, previous)
+            || self.header_fitted(position, previous)
+            || self.value_joined(position, previous)
             || self.binary_wrapped()
             || self.ternary_parted(position)
+            || self.ternary_parted(previous)
             || self.tested_joined(position)
             || self.derive_added(position)
         {
@@ -2729,6 +2957,10 @@ impl<'held> Emitter<'held> {
 
         let from = self.tokens[previous as usize].end();
         let to = self.tokens[position as usize].offset;
+
+        if self.semicolon_joined(position, previous) {
+            return false;
+        }
 
         self.parted_by(from, to) > 0
             && !self.assign_joined(position, previous)
@@ -2990,6 +3222,20 @@ impl<'held> Emitter<'held> {
                 kind,
                 TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
             )
+    }
+
+    fn semicolon_joined(&self, position: u32, previous: u32) -> bool {
+        if self.tokens[position as usize].kind != TokenKind::Punctuation(Punctuation::Semicolon) {
+            return false;
+        }
+
+        let token = self.tokens[previous as usize];
+        let text = token.text(self.source);
+
+        token.kind != TokenKind::Punctuation(Punctuation::Semicolon)
+            && !text.starts_with(b"//")
+            && !text.starts_with(br"\\")
+            && !text.contains(&b'\n')
     }
 
     fn statement_head(&self, position: u32) -> Option<u32> {
@@ -3261,7 +3507,7 @@ impl<'held> Emitter<'held> {
         ended && !self.rides_a_line(position, previous)
     }
 
-    fn inside_a_body(&self) -> bool {
+    pub(super) fn inside_a_body(&self) -> bool {
         self.depth == 0 || self.frame().bodied
     }
 
@@ -3368,6 +3614,7 @@ impl<'held> Emitter<'held> {
         let joined = self.parts_at(position, next)
             && (self.flat_joined(next)
                 || self.hug_joined(next)
+                || self.pattern_joined(next)
                 || self.sole_joined(next)
                 || self.fields_joined(next)
                 || self.tested_joined(position))
@@ -3457,10 +3704,6 @@ impl<'held> Emitter<'held> {
         false
     }
 
-    // `write_list` with a Vertical tactic writes a trailing separator whatever put the list
-    // over lines, so a list the SOURCE parted owes the same comma one we parted does. An
-    // attribute's arguments are not a list rustfmt re-lays out, and a SOLE item is overflowed
-    // rather than listed -- the tactic there is Horizontal and its separator is Never.
     fn comma_parted(&self, position: u32, previous: u32) -> bool {
         if !matches!(
             self.tokens[position as usize].kind,
@@ -3511,8 +3754,6 @@ impl<'held> Emitter<'held> {
             return false;
         };
 
-        // `write_list` with a Vertical tactic writes a trailing separator whatever put the
-        // list over lines, so a list the SOURCE parted owes the same comma one we parted does.
         if !self.policy.comma_adds
             && !self.calls(position, previous)
             && !self.literals(position, previous)
@@ -3548,9 +3789,11 @@ impl<'held> Emitter<'held> {
 
         parted
             && (self.listed(position) || membered || self.literals(position, previous))
+            && !self.comma_denied(position)
             && !self.rested(position)
             && !(join::HUG_NESTS && self.hug_joined(position))
             && !self.tested_joined(previous)
+            && !self.pattern_joined(position)
             && !self.invoked()
     }
 
@@ -3583,7 +3826,43 @@ impl<'held> Emitter<'held> {
             || self.tupled(open, position)
     }
 
-    fn headed(&self, position: u32) -> bool {
+    fn comma_denied(&self, position: u32) -> bool {
+        if !self.policy.chain_simples
+            || self.tokens[position as usize].kind
+                != TokenKind::Punctuation(Punctuation::ParenClose)
+        {
+            return false;
+        }
+
+        let Some(open) = reach::opened(self.source, self.tokens, position) else {
+            return false;
+        };
+
+        if self.headed(open) || self.paren_grouped(open, position) {
+            return true;
+        }
+
+        self.word_before(open).is_some_and(|held| {
+            self.tokens[held as usize].kind == TokenKind::BlockEnd && self.declares_a_body(held)
+        })
+    }
+
+    fn declares_a_body(&self, close: u32) -> bool {
+        let Some(open) = self.brackets.open_of(close) else {
+            return false;
+        };
+
+        let Some(head) = self.statement_head(open) else {
+            return false;
+        };
+
+        matches!(
+            self.tokens[head as usize].text(self.source),
+            b"async" | b"class" | b"function"
+        )
+    }
+
+    pub(super) fn headed(&self, position: u32) -> bool {
         self.policy.header_parens
             && self
                 .word_before(position)
@@ -3789,6 +4068,71 @@ impl<'held> Emitter<'held> {
         held
     }
 
+    fn module_star(&self, position: u32, previous: u32) -> bool {
+        if !self.policy.chain_simples {
+            return false;
+        }
+
+        let held = self.tokens[previous as usize].text(self.source);
+
+        if held == b"*" {
+            return self.module_word(previous);
+        }
+
+        self.tokens[position as usize].text(self.source) == b"*" && self.module_word(position)
+    }
+
+    fn module_word(&self, star: u32) -> bool {
+        let mut scan = star;
+
+        for _ in 0..MODULE_STAR_MAX {
+            let Some(held) = self.back_of(scan) else {
+                return false;
+            };
+
+            let token = self.tokens[held as usize];
+            let text = token.text(self.source);
+
+            if matches!(text, b"export" | b"import") {
+                return true;
+            }
+
+            if token.kind != TokenKind::Identifier
+                && token.kind != TokenKind::Punctuation(Punctuation::Comma)
+            {
+                return false;
+            }
+
+            scan = held;
+        }
+
+        false
+    }
+
+    fn generator_star(&self, previous: u32) -> bool {
+        if !self.policy.chain_simples || self.tokens[previous as usize].text(self.source) != b"*" {
+            return false;
+        }
+
+        let Some(before) = self.back_of(previous) else {
+            return false;
+        };
+
+        if self.module_word(previous) {
+            return false;
+        }
+
+        matches!(
+            self.tokens[before as usize].kind,
+            TokenKind::BlockStart
+                | TokenKind::BlockEnd
+                | TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
+        ) || matches!(
+            self.tokens[before as usize].text(self.source),
+            b"async" | b"get" | b"set" | b"static"
+        )
+    }
+
     fn joins(&self, position: u32) -> bool {
         let Some(previous) = self.previous else {
             return false;
@@ -3805,6 +4149,15 @@ impl<'held> Emitter<'held> {
         }
 
         if self.angle_tight(position, previous) {
+            return false;
+        }
+
+        if self.policy.chain_simples
+            && matches!(
+                token.kind,
+                TokenKind::Punctuation(Punctuation::BracketClose | Punctuation::ParenClose)
+            )
+        {
             return false;
         }
 
@@ -3985,6 +4338,14 @@ impl<'held> Emitter<'held> {
             return false;
         };
 
+        if self.generator_star(previous) {
+            return false;
+        }
+
+        if self.module_star(position, previous) {
+            return true;
+        }
+
         if let Some(held) = self.sourced(position, previous) {
             return held;
         }
@@ -4061,6 +4422,15 @@ impl<'held> Emitter<'held> {
             TokenKind::Punctuation(Punctuation::BracketOpen | Punctuation::ParenOpen)
         ) {
             return self.bracketed(position, previous);
+        }
+
+        if self.policy.chain_simples
+            && matches!(
+                kind,
+                TokenKind::Punctuation(Punctuation::BracketClose | Punctuation::ParenClose)
+            )
+        {
+            return false;
         }
 
         if self.arrow(position) && self.word_is(previous, self.policy.hug_words) {
@@ -4406,10 +4776,21 @@ impl<'held> Emitter<'held> {
             return Some(false);
         }
 
+        let parted = matches!(
+            held,
+            TokenKind::Punctuation(Punctuation::Colon | Punctuation::Comma)
+        ) || self.tokens[previous as usize].text(self.source) == b"return";
+
+        let angled = matches!(
+            self.tokens[position as usize].text(self.source),
+            b"<" | b">"
+        );
+
         if (self.word_is(position, self.policy.tight_from_source)
             || self.word_is(previous, self.policy.tight_from_source))
             && !gap
             && !braced
+            && !(self.policy.chain_simples && parted && !angled)
         {
             return Some(false);
         }
@@ -4972,10 +5353,6 @@ impl<'held> Emitter<'held> {
         }
 
         let named = self.word_before(previous)?;
-
-        // The lexer reads `assert_partial_eq_valid!` as `Keyword(Assert)` -- any word starting
-        // with an assertion prefix and welded to a `!` -- and `panic!`, `write!` and `vec!` land
-        // the same way. `parse_macro_args` cares about the ARGUMENTS, never about the name.
         let kind = self.tokens[named as usize].kind;
 
         let kinded = if MACRO_NAMES {
@@ -5538,7 +5915,7 @@ impl<'held> Emitter<'held> {
             .flatten()
     }
 
-    fn template_body(&self, position: u32) -> Option<u32> {
+    pub(super) fn template_body(&self, position: u32) -> Option<u32> {
         let token = self.tokens[position as usize];
 
         if !self.policy.template_spans
@@ -5705,679 +6082,6 @@ impl<'held> Emitter<'held> {
         }
 
         false
-    }
-
-    fn membered(&self, position: u32) -> bool {
-        self.typed
-            && self.depth > 0
-            && self.tokens[position as usize].kind == TokenKind::Punctuation(Punctuation::Comma)
-            && self.frame().kind == TokenKind::BlockStart
-            && !self.angled(position)
-    }
-
-    fn angled(&self, position: u32) -> bool {
-        self.depth > 0 && self.brackets.angles_at(position) > 0
-    }
-
-    fn importing(&self, position: u32) -> Option<u32> {
-        let led = self
-            .word_before(position)
-            .is_some_and(|lead| self.word_is(lead, self.policy.list_leads));
-
-        let headed =
-            self.word_is(self.line_first, self.policy.list_words) || self.policy.list_sorts && led;
-
-        if !self.policy.list_groups
-            || self.tokens[position as usize].kind != TokenKind::BlockStart
-            || !headed
-        {
-            return None;
-        }
-
-        if !led {
-            return None;
-        }
-
-        let close = self.closing(position)?;
-        let mut names = 0;
-        let mut scan = position + 1;
-
-        while scan < close {
-            let kind = self.tokens[scan as usize].kind;
-
-            let nested =
-                wide::LIST_NESTS && matches!(kind, TokenKind::BlockStart | TokenKind::BlockEnd);
-
-            if !nested
-                && !matches!(
-                    kind,
-                    TokenKind::Identifier
-                        | TokenKind::Keyword(_)
-                        | TokenKind::Newline
-                        | TokenKind::Punctuation(Punctuation::Comma)
-                )
-                && !self.word_is(scan, self.policy.list_tight)
-            {
-                return None;
-            }
-
-            names += u32::from(matches!(
-                kind,
-                TokenKind::Identifier | TokenKind::Keyword(_)
-            ));
-            scan += 1;
-        }
-
-        if names == 0 {
-            return None;
-        }
-
-        let room = self
-            .options
-            .line_width
-            .saturating_sub(self.indent_of(position) + self.options.indent_width);
-
-        let mut item = position + 1;
-
-        while item < close {
-            let stop = self.parted_at(item, close);
-            let held = self.list_depth(item, stop);
-
-            let opaque = if wide::LIST_WIDES {
-                held > 1 || held == 1 && self.flat_columns(item, stop) > room
-            } else {
-                held > 1 || self.flat_columns(item, stop) > room
-            };
-
-            if item < stop && opaque {
-                return None;
-            }
-
-            item = stop + 1;
-        }
-
-        Some(close)
-    }
-
-    fn spreading(&self, position: u32, close: u32) -> Option<Spread> {
-        let listed = self.policy.width_lists && self.listed(close);
-
-        if !(listed || self.define_parted(position) && self.define_settled(position, close)) {
-            return None;
-        }
-
-        if self.joined_args(position, close) {
-            return None;
-        }
-
-        if wide::RETURN_BLOCKS && self.returned_parted(close) {
-            return None;
-        }
-
-        let mut inside = false;
-
-        for held in 0..self.depth {
-            let frame = self.nest[held as usize];
-
-            if frame.spread.is_some() {
-                inside = true;
-
-                continue;
-            }
-
-            let owned = self.policy.body_owns && (frame.bodied || self.wrapper_paren(frame))
-                || frame.joined;
-
-            if inside && !owned {
-                return None;
-            }
-
-            if owned {
-                continue;
-            }
-
-            let broken = (held..self.depth).any(|at| self.nest[at as usize].parted);
-
-            if !broken
-                && !self.parts_at(frame.open, position)
-                && !self.parting(frame.open, position)
-            {
-                return None;
-            }
-        }
-
-        if !self.guarded(position, close)
-            || !self.settled(position, close)
-            || !self.elements(position, close)
-        {
-            return None;
-        }
-
-        if self.headed(position) {
-            return Some(if self.claused_header(position, close) {
-                Spread::Clauses
-            } else {
-                Spread::Chain
-            });
-        }
-
-        let bracketed =
-            self.tokens[position as usize].kind == TokenKind::Punctuation(Punctuation::BracketOpen);
-
-        if bracketed && self.numeric(position, close) {
-            return Some(Spread::Fill);
-        }
-
-        Some(Spread::Members)
-    }
-
-    fn guarded(&self, position: u32, close: u32) -> bool {
-        let kind = self.tokens[position as usize].kind;
-
-        if kind == TokenKind::Punctuation(Punctuation::ParenOpen) {
-            if self.clause_seated(position) {
-                return false;
-            }
-
-            return self.calling(position)
-                || self.headed(position)
-                || self.define_parted(position)
-                || self.spread_arrows(position);
-        }
-
-        if kind != TokenKind::Punctuation(Punctuation::BracketOpen) {
-            return true;
-        }
-
-        let keyed = !self.branched_list(position)
-            && self.next_of(close).is_some_and(|held| {
-                matches!(
-                    self.tokens[held as usize].kind,
-                    TokenKind::Punctuation(Punctuation::Colon | Punctuation::ParenOpen)
-                )
-            });
-
-        let typed = self
-            .word_before(position)
-            .is_none_or(|held| self.tokens[held as usize].text(self.source) != b">");
-
-        !keyed && typed
-    }
-
-    fn settled(&self, position: u32, close: u32) -> bool {
-        let mut depth = 0_u32;
-        let mut opens = [0_u32; NEST_DEPTH_MAX as usize];
-        let mut scan = position + 1;
-
-        while scan < close {
-            if let Some(held) = self.templated_unit(scan) {
-                scan = held + 1;
-
-                continue;
-            }
-
-            let kind = self.tokens[scan as usize].kind;
-
-            if is_open(kind) {
-                if depth == NEST_DEPTH_MAX {
-                    return false;
-                }
-
-                opens[depth as usize] = scan;
-                depth += 1;
-                scan += 1;
-
-                continue;
-            }
-
-            if is_close(kind) {
-                if depth == 0 {
-                    return false;
-                }
-
-                depth -= 1;
-
-                let open = opens[depth as usize];
-                let void = self.next_of(open) == Some(scan);
-                let emptied = void && self.emptied(scan, open) == Some(false);
-                let bodied = self.policy.body_parts && !void && self.bodied_brace(open);
-                let broken = bodied || self.parts_at(open, scan) && !emptied;
-
-                let held = self.policy.body_owns
-                    && (bodied || self.bodied_value(open, scan))
-                    && !self.declared_body(open);
-
-                if broken && !held && !self.ownable(open, scan) {
-                    return false;
-                }
-            }
-
-            scan += 1;
-        }
-
-        depth == 0
-    }
-
-    fn ownable(&self, open: u32, close: u32) -> bool {
-        if self.policy.body_owns && (self.wrapped_paren(open) || self.wrapper_parens(open, close)) {
-            return true;
-        }
-
-        self.listed(close) && self.guarded(open, close) && self.elements(open, close)
-    }
-
-    fn numeric(&self, position: u32, close: u32) -> bool {
-        let mut scan = position + 1;
-
-        while scan < close {
-            let token = self.tokens[scan as usize];
-            let text = token.text(self.source);
-            let numbered = token.kind == TokenKind::Number && !text.ends_with(b"n");
-
-            let held = token.kind == TokenKind::Newline
-                || token.length == 0
-                || numbered
-                || matches!(text, b"," | b"-" | b"+");
-
-            if !held {
-                return false;
-            }
-
-            scan += 1;
-        }
-
-        true
-    }
-
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the walk names every token a list's element may hold, and splitting it would \
-                  hide the one loop the rule is"
-    )]
-    fn elements(&self, position: u32, close: u32) -> bool {
-        let edged = self.policy.blank_edges
-            && (self.tokens[position as usize].kind == TokenKind::BlockStart
-                || BRACKET_BLANKS && is_open(self.tokens[position as usize].kind));
-
-        let mut angles = 0_u32;
-        let mut commas = 0;
-        let mut found = false;
-        let mut templates = false;
-        let mut previous = position;
-        let mut scan = position + 1;
-
-        while scan < close {
-            let token = self.tokens[scan as usize];
-
-            if token.kind == TokenKind::Newline || token.length == 0 {
-                scan += 1;
-
-                continue;
-            }
-
-            if let Some(held) = self.parened(scan) {
-                previous = held;
-                scan = held + 1;
-                found = true;
-
-                continue;
-            }
-
-            if let Some(held) = self.templated_unit(scan) {
-                if !edged && !self.policy.spread_blanks && self.blanked(previous, scan) {
-                    return false;
-                }
-
-                templates |= self.parted_by(token.offset, self.tokens[held as usize].end()) > 0;
-                previous = held;
-                scan = held + 1;
-                found = true;
-
-                continue;
-            }
-
-            if is_open(token.kind) {
-                let Some(held) = self.closing_of(scan).filter(|held| *held < close) else {
-                    return false;
-                };
-
-                if !edged && !self.policy.spread_blanks && self.blanked(previous, scan) {
-                    return false;
-                }
-
-                found = true;
-                previous = held;
-                scan = held + 1;
-
-                continue;
-            }
-
-            if is_close(token.kind)
-                || token.kind == TokenKind::Comment && !self.inline_remark(scan, close)
-            {
-                return false;
-            }
-
-            if !edged && !self.policy.spread_blanks && self.blanked(previous, scan) {
-                return false;
-            }
-
-            if !self.elemental(scan, position, previous) {
-                return false;
-            }
-
-            Self::opened_type(token.text(self.source), &mut angles, &mut 0);
-
-            let parts = angles == 0 && token.kind == TokenKind::Punctuation(Punctuation::Comma);
-
-            commas += u32::from(parts);
-            found = true;
-            previous = scan;
-            templates |= !self.policy.template_units
-                && token.kind == TokenKind::String
-                && token.text(self.source) == b"`";
-            scan += 1;
-        }
-
-        if !found || !edged && !self.policy.spread_blanks && self.blanked(previous, close) {
-            return false;
-        }
-
-        let trailing = u32::from(
-            self.tokens[previous as usize].kind == TokenKind::Punctuation(Punctuation::Comma),
-        );
-
-        commas > trailing || !templates
-    }
-
-    pub(super) fn inline_remark(&self, position: u32, close: u32) -> bool {
-        let token = self.tokens[position as usize];
-
-        token.kind == TokenKind::Comment
-            && self.policy.inline_remarks
-            && token.text(self.source).starts_with(b"/*")
-            && !token.text(self.source).contains(&b'\n')
-            && self
-                .next_of(position)
-                .is_some_and(|held| held == close || !self.parts_at(position, held))
-    }
-
-    fn elemental(&self, scan: u32, position: u32, previous: u32) -> bool {
-        let token = self.tokens[scan as usize];
-        let membered = self.typed_open(position);
-
-        let semicolon = token.kind == TokenKind::Punctuation(Punctuation::Semicolon)
-            && !self.typed
-            && !membered
-            && !self.headed(position);
-
-        let ranged = token.text(self.source) == b"..."
-            && !self.policy.prefix_words.contains(&b"...".as_slice());
-
-        if semicolon || ranged {
-            return false;
-        }
-
-        let elided = token.kind == TokenKind::Punctuation(Punctuation::Comma)
-            && (previous == position
-                || self.tokens[previous as usize].kind
-                    == TokenKind::Punctuation(Punctuation::Comma));
-
-        !elided
-    }
-
-    pub(super) fn calling(&self, position: u32) -> bool {
-        let Some(held) = self.word_before(position) else {
-            return false;
-        };
-
-        let text = self.tokens[held as usize].text(self.source);
-
-        if self.policy.angle_calls && !text.is_empty() && text.iter().all(|byte| *byte == b'>') {
-            return self
-                .opening(held, count_of(text.len()))
-                .is_some_and(|name| self.named(name));
-        }
-
-        self.named(held) || self.word_is(held, self.policy.callee_words) || self.marked_callee(held)
-    }
-
-    fn opening(&self, position: u32, depth: u32) -> Option<u32> {
-        let mut held = position;
-        let mut owed = depth;
-
-        for _ in 0..ANGLE_SCAN_MAX {
-            let scan = self.word_before(held)?;
-
-            held = scan;
-
-            let text = self.tokens[held as usize].text(self.source);
-
-            if matches!(text, b";" | b"{" | b"}" | b"&&" | b"||" | b"?") {
-                return None;
-            }
-
-            if text == b"<" {
-                owed -= 1;
-
-                if owed == 0 {
-                    return self.word_before(held);
-                }
-            } else if !text.is_empty() && text.iter().all(|byte| *byte == b'>') {
-                owed += count_of(text.len());
-            }
-        }
-
-        None
-    }
-
-    fn assign_holds(&self, open: u32, breaks: bool, counted: bool) -> Option<u32> {
-        let close = self.closing_of(open)?;
-
-        if breaks && self.next_of(open) == Some(close) {
-            return Some(close);
-        }
-
-        self.holding(open, counted && !breaks)
-    }
-
-    pub(super) fn arrowed(&self, position: u32) -> bool {
-        let held = self.policy.arrow_parens
-            && self.tokens[position as usize].kind == TokenKind::Identifier
-            && self
-                .next_of(position)
-                .is_some_and(|next| self.tokens[next as usize].text(self.source) == b"=>");
-
-        if !held {
-            return false;
-        }
-
-        let Some(before) = self.word_before(position) else {
-            return true;
-        };
-
-        let text = self.tokens[before as usize].text(self.source);
-
-        if matches!(text, b"|" | b"&" | b"." | b">" | b"]" | b")") {
-            return false;
-        }
-
-        if text != b":" {
-            return true;
-        }
-
-        let Some(key) = self.word_before(before) else {
-            return false;
-        };
-
-        if !matches!(
-            self.tokens[key as usize].kind,
-            TokenKind::Identifier | TokenKind::Number | TokenKind::String
-        ) {
-            return false;
-        }
-
-        self.word_before(key).is_some_and(|first| {
-            matches!(
-                self.tokens[first as usize].text(self.source),
-                b"{" | b"," | b";"
-            )
-        })
-    }
-
-    fn holding(&self, position: u32, held: bool) -> Option<u32> {
-        let close = self.closing_of(position)?;
-
-        if held || self.spreading(position, close).is_none() {
-            return None;
-        }
-
-        Some(close)
-    }
-
-    fn slight(&self, position: u32, close: u32) -> bool {
-        let mut found = None;
-        let mut scan = position + 1;
-
-        while scan < close {
-            let token = self.tokens[scan as usize];
-
-            let carried = token.kind == TokenKind::Punctuation(Punctuation::Comma)
-                && self.next_of(scan) == Some(close);
-
-            if token.kind != TokenKind::Newline && token.length > 0 && !carried {
-                if found.is_some() {
-                    return false;
-                }
-
-                found = Some(token);
-            }
-
-            scan += 1;
-        }
-
-        let Some(held) = found else {
-            return false;
-        };
-
-        matches!(
-            held.kind,
-            TokenKind::Identifier | TokenKind::Number | TokenKind::String
-        ) && held.length <= self.options.line_width / 4
-    }
-
-    fn blanked(&self, previous: u32, position: u32) -> bool {
-        self.parted_by(
-            self.tokens[previous as usize].end(),
-            self.tokens[position as usize].offset,
-        ) > 1
-    }
-
-    const fn edged(kind: TokenKind) -> Element {
-        if matches!(kind, TokenKind::BlockStart) {
-            Element::Line
-        } else {
-            Element::SoftLine
-        }
-    }
-
-    pub(super) fn assign_owed(&self) -> bool {
-        self.assigned.is_some() || self.owed > 0
-    }
-
-    fn spreads(&self) -> bool {
-        self.depth > 0 && self.nest[self.depth as usize - 1].spread.is_some()
-    }
-
-    fn chains_a_header(&self) -> bool {
-        matches!(self.frame().spread, Some(Spread::Chain | Spread::Clauses)) && self.depth > 0
-    }
-
-    fn operating(&self, position: u32) -> bool {
-        let held = self.tokens[position as usize];
-
-        let parted = if self.frame().spread == Some(Spread::Clauses) {
-            held.kind == TokenKind::Punctuation(Punctuation::Semicolon)
-        } else {
-            self.word_is(position, self.policy.operator_words)
-        };
-
-        parted && !self.angled(position) && !self.nested_at(position)
-    }
-
-    fn claused_header(&self, position: u32, close: u32) -> bool {
-        let mut depth = 0_u32;
-        let mut scan = position + 1;
-
-        while scan < close {
-            let kind = self.tokens[scan as usize].kind;
-
-            if is_open(kind) {
-                depth += 1;
-            } else if is_close(kind) {
-                depth = depth.saturating_sub(1);
-            } else if depth == 0 && kind == TokenKind::Punctuation(Punctuation::Semicolon) {
-                return true;
-            }
-
-            scan += 1;
-        }
-
-        false
-    }
-
-    fn nested_at(&self, position: u32) -> bool {
-        let mut depth = 0_u32;
-        let mut scan = self.frame().open + 1;
-
-        while scan < position {
-            let kind = self.tokens[scan as usize].kind;
-
-            if is_open(kind) {
-                depth += 1;
-            } else if is_close(kind) {
-                depth = depth.saturating_sub(1);
-            }
-
-            scan += 1;
-        }
-
-        depth > 0
-    }
-
-    fn separating(&self) -> bool {
-        if self.chains_a_header() {
-            return self.previous.is_some_and(|held| self.operating(held));
-        }
-
-        self.spreads()
-            && self.previous.is_some_and(|held| {
-                matches!(
-                    self.tokens[held as usize].kind,
-                    TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
-                ) && !self.angled(held)
-            })
-    }
-
-    fn parted_at(&self, from: u32, close: u32) -> u32 {
-        let mut depth = 0_u32;
-        let mut scan = from;
-
-        while scan < close {
-            let kind = self.tokens[scan as usize].kind;
-
-            if wide::LIST_NESTS && (is_open(kind) || kind == TokenKind::BlockStart) {
-                depth += 1;
-            } else if wide::LIST_NESTS && (is_close(kind) || kind == TokenKind::BlockEnd) {
-                depth = depth.saturating_sub(1);
-            } else if depth == 0 && kind == TokenKind::Punctuation(Punctuation::Comma) {
-                return scan;
-            }
-
-            scan += 1;
-        }
-
-        close
     }
 
     fn specified(&mut self, from: u32, to: u32) -> bool {
@@ -6749,6 +6453,10 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
+        if !self.inset() {
+            return false;
+        }
+
         if !broken {
             return self.document.push(Element::Line);
         }
@@ -6759,8 +6467,22 @@ impl<'held> Emitter<'held> {
             && self.document.push(Element::Filled)
     }
 
+    fn remark_trailing(&self, position: u32) -> bool {
+        let token = self.tokens[position as usize];
+
+        token.kind == TokenKind::Comment
+            && token.text(self.source).starts_with(b"//")
+            && self
+                .previous
+                .is_some_and(|first| !self.parts_at(first, position))
+    }
+
     fn preceded(&mut self, position: u32, body: bool, template: bool, held: bool) -> bool {
         let closing = self.spreads() && position == self.nest[self.depth as usize - 1].close;
+
+        if self.spreads() && self.remark_trailing(position) {
+            return self.document.push(Element::Space);
+        }
         let token = self.tokens[position as usize];
 
         let tagged = template
@@ -6787,11 +6509,45 @@ impl<'held> Emitter<'held> {
 
         if !closing && (self.separating() || self.binary_wrapped() || self.ternary_parted(position))
             || !held
+            || self.previous.is_some_and(|held| self.valued_colon(held))
         {
+            if self.policy.chain_simples
+                && self.ternary_parted(position)
+                && let Some(level) = self.ternary_level(position)
+                && !self.level(level.saturating_sub(1))
+            {
+                return false;
+            }
+
+            if !closing && self.separating() && !self.inset() {
+                return false;
+            }
+
             return self.parts(position);
         }
 
         !spaced || closing || self.document.push(Element::Space)
+    }
+
+    fn valued_colon(&self, previous: u32) -> bool {
+        if !self.policy.chain_simples || !self.policy.assign_groups || self.depth == 0 {
+            return false;
+        }
+
+        let frame = self.nest[self.depth as usize - 1];
+
+        frame.valued.0 != 0 && frame.valued.0 == previous
+    }
+
+    fn brace_joined(&self, position: u32, previous: u32) -> bool {
+        if !self.policy.chain_simples
+            || self.tokens[position as usize].kind != TokenKind::BlockStart
+            || self.tokens[previous as usize].kind != TokenKind::Punctuation(Punctuation::Colon)
+        {
+            return false;
+        }
+
+        self.clauses(previous)
     }
 
     fn wrap_headed(&self) -> bool {
@@ -6807,7 +6563,11 @@ impl<'held> Emitter<'held> {
 
         let (close, wrap, depth, floor, _) = self.wrapped[self.wraps_owed as usize - 1];
 
-        if wrap != Wrap::Parens || depth != self.depth {
+        if !matches!(
+            wrap,
+            Wrap::Argued | Wrap::Paired | Wrap::Parens | Wrap::Valued
+        ) || depth != self.depth
+        {
             return false;
         }
 
@@ -7070,10 +6830,6 @@ impl<'held> Emitter<'held> {
             self.comma
         };
 
-        if self.spreads() {
-            return self.document.push(Element::IfBroken(held));
-        }
-
         self.document.push(Element::Text(Source::Literal, held))
     }
 
@@ -7139,6 +6895,14 @@ impl<'held> Emitter<'held> {
             return self.linked();
         }
 
+        if self.clause_within() {
+            if self.clause_started() {
+                return self.clause_base();
+            }
+
+            return self.clause_base().min(self.printed) + 1;
+        }
+
         if self.continued {
             if self.policy.nested_levels {
                 return self.levels.max(self.based + 1);
@@ -7161,7 +6925,8 @@ impl<'held> Emitter<'held> {
         branch: Option<u32>,
         popped: Option<u32>,
     ) -> Option<u32> {
-        self.arm_barred(leading)
+        self.value_level(leading)
+            .or_else(|| self.arm_barred(leading))
             .or(branch)
             .or_else(|| self.clause_level(leading))
             .or(popped)
@@ -7173,7 +6938,10 @@ impl<'held> Emitter<'held> {
                 self.dedents(position)
                     .then(|| self.levels.saturating_sub(1))
             })
+            .or_else(|| self.sequence_level(leading))
+            .or_else(|| self.header_bodied(leading))
             .or_else(|| self.binary_level(leading))
+            .or_else(|| self.binary_carried(leading))
             .or_else(|| self.heritage_level(leading))
             .or_else(|| self.union_level(leading))
             .or_else(|| self.ternary_level(leading))
@@ -7197,6 +6965,14 @@ impl<'held> Emitter<'held> {
         }
 
         found.map(|(_, level)| level)
+    }
+
+    fn owing_operand(&self) -> bool {
+        self.policy.chain_simples
+            && self.spreads()
+            && self
+                .coded()
+                .is_some_and(|held| self.wrapping_operator(held))
     }
 
     fn leads(&mut self, position: u32) -> bool {
@@ -7244,9 +7020,17 @@ impl<'held> Emitter<'held> {
             self.printed
         } else {
             bound
+        } + if (self.chained || self.owing_operand()) && !self.member_parted(position)
+        {
+            core::mem::take(&mut self.owing)
+        } else {
+            self.owing = 0;
+
+            0
         };
 
         if self.opens_a_clause(position) {
+            self.claused_body = false;
             self.claused_depth = self.depth;
         }
 
@@ -7293,13 +7077,18 @@ impl<'held> Emitter<'held> {
         let held = self
             .wrapping(position)
             .map(|close| (close, Wrap::Parens))
-            .or_else(|| self.arrow_wrapped(position));
+            .or_else(|| self.arrow_wrapped(position))
+            .or_else(|| self.assign_wrap(position))
+            .or_else(|| self.value_wrap(position));
 
         let Some((close, wrap)) = held else {
             return true;
         };
 
-        let floor = if wrap == Wrap::Parens {
+        let floor = if matches!(
+            wrap,
+            Wrap::Argued | Wrap::Paired | Wrap::Parens | Wrap::Valued
+        ) {
             let floored = self.binary_floor(position, close);
 
             let heavy = BINARY_HEAVIES
@@ -7321,6 +7110,10 @@ impl<'held> Emitter<'held> {
         self.wrapped[self.wraps_owed as usize] = (close, wrap, self.depth, floor, position);
         self.wraps_owed += 1;
 
+        if wrap == Wrap::Paired {
+            return self.document.push(Element::GroupOpen);
+        }
+
         let marked = wrap != Wrap::Hugged || self.document.push(Element::Hugged);
 
         let opened = marked
@@ -7332,12 +7125,40 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
-        if wrap != Wrap::Parens {
+        if wrap == Wrap::Argued {
+            return floor == BINARY_LEVEL_MAX || self.document.push(Element::GroupOpen);
+        }
+
+        if !matches!(wrap, Wrap::Parens | Wrap::Valued) {
             return self.document.push(Element::Line);
         }
 
-        self.document.push(Element::SoftLine)
+        let broken = if wrap == Wrap::Valued {
+            Element::Line
+        } else {
+            Element::SoftLine
+        };
+
+        self.document.push(broken)
             && (floor == BINARY_LEVEL_MAX || self.document.push(Element::GroupOpen))
+    }
+
+    fn ternary_dealigned(&mut self, wrap: Wrap) -> bool {
+        if wrap != Wrap::Ternary {
+            return true;
+        }
+
+        let owed = self.wraps_aligned[self.wraps_owed as usize];
+
+        self.wraps_aligned[self.wraps_owed as usize] = 0;
+
+        for _ in 0..owed {
+            if !self.document.push(Element::Dealign) {
+                return false;
+            }
+        }
+
+        true
     }
 
     fn wrapped_close(&mut self, position: u32) -> bool {
@@ -7346,14 +7167,22 @@ impl<'held> Emitter<'held> {
 
             let (_, wrap, _, floor, _) = self.wrapped[self.wraps_owed as usize];
 
-            if wrap == Wrap::Parens
+            if wrap == Wrap::Paired {
+                if !self.document.push(Element::GroupClose) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if matches!(wrap, Wrap::Argued | Wrap::Parens | Wrap::Valued)
                 && floor != BINARY_LEVEL_MAX
                 && !self.document.push(Element::GroupClose)
             {
                 return false;
             }
 
-            let closed = (wrap != Wrap::Ternary || self.document.push(Element::Dealign))
+            let closed = self.ternary_dealigned(wrap)
                 && self.document.push(Element::DedentBroken)
                 && (wrap != Wrap::Hugged || self.document.push(Element::Hugging(self.comma)))
                 && (wrap != Wrap::Parens || self.document.push(Element::SoftLine))
@@ -7420,7 +7249,7 @@ impl<'held> Emitter<'held> {
             return None;
         }
 
-        if self.typed || self.slight_key(position) {
+        if self.typed || self.slight_key(position) && !self.paired_binary(position) {
             return None;
         }
 
@@ -7471,7 +7300,16 @@ impl<'held> Emitter<'held> {
             return Some((position, arrow, end));
         }
 
+        if self.paired_binary(position) {
+            return Some((position, end, end));
+        }
+
         Some((position, close.unwrap_or(end), end))
+    }
+
+    fn paired_binary(&self, colon: u32) -> bool {
+        self.next_of(colon)
+            .is_some_and(|head| self.value_wrap(head).is_some())
     }
 
     fn slight_key(&self, position: u32) -> bool {
@@ -7630,7 +7468,11 @@ impl<'held> Emitter<'held> {
             || self.composed_args(position)
             || self
                 .closing_of(position)
-                .is_some_and(|close| self.spread_matrix(position, close));
+                .is_some_and(|close| self.spread_matrix(position, close))
+            || spread.is_some()
+                && self
+                    .closing_of(position)
+                    .is_some_and(|close| self.spread_remarked(position, close));
 
         let edge = if parted {
             Element::HardLine
@@ -7642,6 +7484,33 @@ impl<'held> Emitter<'held> {
             && (!filled || self.document.push(Element::Filled))
             && self.document.push(Element::IndentBroken)
             && self.document.push(edge)
+    }
+
+    fn spread_remarked(&self, open: u32, close: u32) -> bool {
+        let mut depth = 0_u32;
+        let mut scan = open + 1;
+
+        while scan < close {
+            let token = self.tokens[scan as usize];
+
+            if is_open(token.kind) || token.kind == TokenKind::BlockStart {
+                depth += 1;
+            } else if is_close(token.kind) || token.kind == TokenKind::BlockEnd {
+                depth = depth.saturating_sub(1);
+            } else if depth == 0
+                && token.kind == TokenKind::Comment
+                && token.text(self.source).starts_with(b"//")
+                && self
+                    .word_before(scan)
+                    .is_some_and(|held| held > open && !self.parts_at(held, scan))
+            {
+                return true;
+            }
+
+            scan += 1;
+        }
+
+        false
     }
 
     fn parted_generics(&self, position: u32) -> bool {
@@ -7702,7 +7571,21 @@ impl<'held> Emitter<'held> {
         held && commas > 0
     }
 
+    fn inset(&mut self) -> bool {
+        if !self.policy.chain_simples || self.depth == 0 {
+            return true;
+        }
+
+        let wanted = self.nest[self.depth as usize - 1].inset;
+
+        self.level(wanted)
+    }
+
     fn closes(&mut self, position: u32) -> bool {
+        if !self.inset() {
+            return false;
+        }
+
         let frame = self.nest[self.depth as usize - 1];
         let typed = self.typed || self.typed_brace(position);
 
@@ -7720,6 +7603,8 @@ impl<'held> Emitter<'held> {
 
         (self.spread_rest(position)
             || self.trailed_already(position)
+            || self.paren_grouped(frame.open, position)
+            || self.bracket_grouped(frame.open, position)
             || self.document.push(Element::IfBroken(separator)))
             && self.document.push(Element::DedentBroken)
             && self.document.push(edge)

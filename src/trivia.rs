@@ -1,7 +1,7 @@
 use crate::bounded::{Span, count_of};
+use crate::scan::BYTE_ORDER_MARK;
 use crate::tree::Positioned;
 
-pub const BOM: [u8; 3] = [0xEF, 0xBB, 0xBF];
 pub const CONTINUATION_NONE: u8 = 0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -77,8 +77,8 @@ pub fn gap_is_blank(source: &[u8], gap: Span, continuation: u8) -> bool {
 
     let mut offset = gap.offset;
 
-    if offset == 0 && source.len() >= BOM.len() && source[..BOM.len()] == BOM {
-        offset += count_of(BOM.len()).min(gap.length);
+    if offset == 0 && source.starts_with(BYTE_ORDER_MARK) {
+        offset += count_of(BYTE_ORDER_MARK.len()).min(gap.length);
     }
 
     while offset < gap.end() {

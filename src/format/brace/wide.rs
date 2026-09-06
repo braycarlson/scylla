@@ -3147,9 +3147,6 @@ impl Emitter<'_> {
 
         if (SOLE_CHAIN_ALWAYS || self.linked_parted(open, close)) && self.chained_sole(open, close)
         {
-            // `format_last_child`'s `one_line_budget` is the SHAPE for a chain of one child and
-            // `min(shape, chain_width)` for every longer one, so a sole item holding a single
-            // link is measured against the line and not against fn_call_width.
             if SOLE_LINKS && self.chained_soled(open) {
                 return self.chained_lined(open, close).then_some(held);
             }
@@ -3838,9 +3835,6 @@ impl Emitter<'_> {
         links < 2
     }
 
-    // rustfmt's `ident` for the bracket is the callee PATH and nothing in front of it, so the
-    // walk takes name segments welded by `::` and a macro's `!`, and stops at anything else --
-    // `return Err(..)` measures `Err` and not `return Err`.
     fn callee_pathed(&self, open: u32) -> u32 {
         let mut head = open;
         let mut scan = open;
@@ -3887,8 +3881,6 @@ impl Emitter<'_> {
         )
     }
 
-    // `format_last_child` keeps the hug where the last child's own rewrite runs to five lines or
-    // more and its first line fits, and the source's own break inside that child is the tell.
     fn chained_tailed(&self, open: u32, close: u32) -> bool {
         let Some(last) = self.back_of(close) else {
             return false;
@@ -4215,6 +4207,10 @@ impl Emitter<'_> {
             return true;
         }
 
+        if self.word_is(before, self.policy.object_words) {
+            return true;
+        }
+
         if self.policy.body_owns && BINDING_PATTERNS.contains(&held.text(self.source)) {
             return true;
         }
@@ -4241,7 +4237,6 @@ impl Emitter<'_> {
         let kind = self.tokens[position as usize].kind;
         let text = self.tokens[position as usize].text(self.source);
 
-        // `ChainItemKind::Await` is a link like any other, so a chain does not end at `.await`.
         if matches!(kind, TokenKind::Keyword(_)) {
             return matches!(text, b"self" | b"Self" | b"super" | b"crate")
                 || CHAIN_AWAITS && text == b"await";
@@ -4426,13 +4421,6 @@ impl Emitter<'_> {
         held
     }
 
-    /// The operand a bracket's sole item stands as, with the unary run in front of it stepped
-    /// over.
-    ///
-    /// `is_nested_call` reads THROUGH an `AddrOf`, a `Try`, a `Unary` and a `Cast` to the call
-    /// underneath, and an `AddrOf` carries its mutability inside it -- `&mut *g(..)` is one node,
-    /// not a reference in front of a `mut` in front of a dereference. Without the `mut` the walk
-    /// stops there and the whole `last_item_shape` cascade below it never runs.
     fn operand_of(&self, open: u32) -> Option<u32> {
         let mut scan = self.next_of(open)?;
 
@@ -4620,9 +4608,6 @@ impl Emitter<'_> {
                 return true;
             }
 
-            // The `=` that tells `parse_macro_args` apart is one standing DIRECTLY inside a
-            // brace -- `dw!(DwSect(u32) { DW_SECT_INFO = 1, .. })`. A named argument inside a
-            // call the brace holds, `foo("b", path = 1)`, is an assignment expression and parses.
             let braced = if MACRO_LEVELS {
                 depth > 0 && depth <= MACRO_LEVEL_MAX && blocked & (1_u64 << (depth - 1)) != 0
             } else {

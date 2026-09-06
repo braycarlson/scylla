@@ -1,4 +1,4 @@
-use crate::language::Lexer;
+use crate::language::{Grammar, Lexer};
 use crate::scan::{
     identifier_scan,
     is_identifier_start_at,
@@ -12,7 +12,79 @@ use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static ZIG: ZigLexer = ZigLexer;
 
-pub const SURVIVING: &[&[u8]] = &[
+const CAST_WORDS: &[&[u8]] = &[
+    b"@alignCast",
+    b"@as",
+    b"@bitCast",
+    b"@enumFromInt",
+    b"@floatFromInt",
+    b"@intCast",
+    b"@intFromEnum",
+    b"@intFromFloat",
+    b"@intFromPtr",
+    b"@ptrCast",
+    b"@ptrFromInt",
+    b"@truncate",
+];
+
+const PRIMITIVE_TYPES: &[&[u8]] = &[
+    b"anyerror",
+    b"anyframe",
+    b"anyopaque",
+    b"bool",
+    b"c_char",
+    b"c_int",
+    b"c_long",
+    b"c_longdouble",
+    b"c_longlong",
+    b"c_short",
+    b"c_uint",
+    b"c_ulong",
+    b"c_ulonglong",
+    b"c_ushort",
+    b"comptime_float",
+    b"comptime_int",
+    b"f128",
+    b"f16",
+    b"f32",
+    b"f64",
+    b"f80",
+    b"i1*",
+    b"i2*",
+    b"i3*",
+    b"i4*",
+    b"i5*",
+    b"i6*",
+    b"i7*",
+    b"i8*",
+    b"i9*",
+    b"isize",
+    b"noreturn",
+    b"type",
+    b"u1*",
+    b"u2*",
+    b"u3*",
+    b"u4*",
+    b"u5*",
+    b"u6*",
+    b"u7*",
+    b"u8*",
+    b"u9*",
+    b"usize",
+    b"void",
+];
+
+static GRAMMAR: Grammar = Grammar {
+    cast_words: CAST_WORDS,
+    defer_word: b"defer",
+    discard_prefix: b"_ = ",
+    primitive_types: PRIMITIVE_TYPES,
+    sized_type_names: &[b"isize", b"usize"],
+    statements_end_with_semicolon: true,
+    ..Grammar::DEFAULT
+};
+
+pub const EXPECTATIONS: &[&[u8]] = &[
     b"expect",
     b"expectApproxEqAbs",
     b"expectApproxEqRel",
@@ -25,15 +97,15 @@ pub const SURVIVING: &[&[u8]] = &[
     b"expectFmt",
     b"expectStringEndsWith",
     b"expectStringStartsWith",
-    b"unreachable",
 ];
-
-const EXPECTATION_COUNT: usize = 12;
-const EXPECTATIONS: &[&[u8]] = SURVIVING.split_at(EXPECTATION_COUNT).0;
 
 pub struct ZigLexer;
 
 impl Lexer for ZigLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"zig"]
     }
@@ -865,17 +937,8 @@ mod tests {
     }
 
     #[test]
-    fn every_expectation_survives_release() {
-        assert_eq!(EXPECTATIONS.len(), EXPECTATION_COUNT);
-        assert_eq!(SURVIVING.len(), EXPECTATION_COUNT + 1);
-
+    fn every_expectation_starts_with_expect() {
         for name in EXPECTATIONS {
-            assert!(
-                SURVIVING.contains(name),
-                "{}",
-                String::from_utf8_lossy(name)
-            );
-
             assert!(
                 name.starts_with(b"expect"),
                 "{}",

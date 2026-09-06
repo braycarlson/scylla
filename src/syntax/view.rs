@@ -322,6 +322,89 @@ impl<'run> View<'run> {
         held.is_some_and(|outer| outer.category() == Category::Parameters)
     }
 
+    pub fn is_inside_signature(self) -> bool {
+        if self.is_inside_parameters() {
+            return true;
+        }
+
+        let offset = self.span().offset;
+        let mut current = self.parent();
+
+        for _ in 0..crate::tree::FRAME_DEPTH_MAX {
+            let Some(held) = current else {
+                return false;
+            };
+
+            let covered = held
+                .as_function()
+                .and_then(Function::parameters_span)
+                .is_some_and(|span| span.offset <= offset && offset < span.end());
+
+            if covered {
+                return true;
+            }
+
+            current = held.parent();
+        }
+
+        false
+    }
+
+    pub fn enclosing_function(self) -> Option<Self> {
+        let mut current = self.parent();
+
+        for _ in 0..crate::tree::FRAME_DEPTH_MAX {
+            let held = current?;
+
+            if matches!(held.category(), Category::Function | Category::Lambda) {
+                return Some(held);
+            }
+
+            current = held.parent();
+        }
+
+        None
+    }
+
+    pub fn is_an_arm(self) -> bool {
+        let Some(parent) = self.parent() else {
+            return false;
+        };
+
+        if parent.category() == Category::Match {
+            return true;
+        }
+
+        parent.category() == Category::Block
+            && parent
+                .parent()
+                .is_some_and(|held| held.category() == Category::Match)
+    }
+
+    pub fn signature_covers(self, offset: u32) -> bool {
+        let Some(function) = self.as_function() else {
+            return false;
+        };
+
+        let span = self.span();
+
+        if span.offset > offset || offset >= span.end() {
+            return false;
+        }
+
+        if let Some(body) = function.body() {
+            return offset < body.span().offset;
+        }
+
+        if self.category() == Category::Lambda {
+            return function
+                .parameters_span()
+                .is_some_and(|held| offset < held.end());
+        }
+
+        true
+    }
+
     pub fn declares_a_container(self) -> bool {
         self.as_declaration()
             .and_then(|declaration| declaration.value())

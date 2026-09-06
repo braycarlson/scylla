@@ -1,9 +1,5 @@
-use crate::bounded::Span;
-use crate::diagnostic::{Diagnostic, Diagnostics, Message, Severity};
-use crate::fix::NONE as FIX_NONE;
 use crate::markup;
 use crate::project::store::{FileID, Store};
-use crate::rule::Registry;
 use crate::syntax::front::{Front, Tables};
 use crate::syntax::{css, go, javascript, odin, python, rust, typescript, zig};
 use crate::tree::{Walk, walk, walk_from};
@@ -14,109 +10,16 @@ pub struct Node {
     pub node: u32,
 }
 
-pub struct Sink<'run> {
-    diagnostics: &'run mut Diagnostics,
-    file: FileID,
-    registry: &'run Registry,
-}
-
 impl Node {
     pub const fn new(file: FileID, node: u32) -> Self {
         Self { file, node }
     }
 }
 
-impl<'run> Sink<'run> {
-    pub fn new(file: FileID, diagnostics: &'run mut Diagnostics, registry: &'run Registry) -> Self {
-        Self {
-            diagnostics,
-            file,
-            registry,
-        }
-    }
-
-    pub fn rule_of(&self, code: &str) -> u32 {
-        self.registry.index_of(code)
-    }
-
-    pub fn count(&self) -> u32 {
-        self.diagnostics.count()
-    }
-
-    pub const fn file(&self) -> FileID {
-        self.file
-    }
-
-    #[must_use]
-    pub fn record(
-        &mut self,
-        code: &'static str,
-        severity: Severity,
-        span: Span,
-        text: &'static str,
-    ) -> bool {
-        assert!(!code.is_empty());
-
-        let rule = self.registry.index_of(code);
-
-        self.diagnostics.push(Diagnostic {
-            code,
-            fix: FIX_NONE,
-            message: Message::Static(text),
-            related_count: 0,
-            related_start: 0,
-            rule,
-            severity,
-            span,
-        })
-    }
-
-    #[must_use]
-    pub fn record_formatted(
-        &mut self,
-        code: &'static str,
-        severity: Severity,
-        span: Span,
-        arguments: core::fmt::Arguments<'_>,
-    ) -> bool {
-        assert!(!code.is_empty());
-
-        let rule = self.registry.index_of(code);
-
-        self.diagnostics
-            .push_formatted_for(code, rule, severity, span, FIX_NONE, arguments)
-    }
-
-    #[must_use]
-    pub fn record_fixed(
-        &mut self,
-        code: &'static str,
-        severity: Severity,
-        span: Span,
-        text: &'static str,
-        fix: u32,
-    ) -> bool {
-        assert!(!code.is_empty());
-
-        let rule = self.registry.index_of(code);
-
-        self.diagnostics.push(Diagnostic {
-            code,
-            fix,
-            message: Message::Static(text),
-            related_count: 0,
-            related_start: 0,
-            rule,
-            severity,
-            span,
-        })
-    }
-}
-
 #[expect(
     clippy::multiple_inherent_impl,
-    reason = "the view accessors live in `view.rs`, beside the `Node` and `Sink` they exist for, \
-              rather than in `store.rs`"
+    reason = "the view accessors live in `view.rs`, beside the `Node` they exist for, rather than \
+              in `store.rs`"
 )]
 impl Store {
     pub fn css_view(&self, file: FileID, node: u32) -> Option<css::ast::View<'_>> {

@@ -3,8 +3,8 @@ use core::mem::MaybeUninit;
 
 use crate::bounded::Span;
 
-const HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-const HASH_PRIME: u64 = 0x0000_0100_0000_01b3;
+pub const HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+pub const HASH_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 #[derive(Clone, Copy, Debug)]
 struct Entry<V> {
@@ -177,9 +177,11 @@ impl<V: Copy> Table<V> {
 }
 
 pub fn hash_of(bytes: &[u8]) -> u64 {
-    assert!(!bytes.is_empty());
+    hash_seeded(HASH_OFFSET, bytes)
+}
 
-    let mut hash = HASH_OFFSET;
+pub fn hash_seeded(seed: u64, bytes: &[u8]) -> u64 {
+    let mut hash = seed;
 
     for byte in bytes {
         hash ^= u64::from(*byte);

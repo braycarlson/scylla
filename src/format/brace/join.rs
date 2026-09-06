@@ -224,11 +224,11 @@ impl Emitter<'_> {
             None
         };
 
-        let stop = self
+        let parted = self
             .parted_bracket(position, end)
-            .or(elsed)
-            .or(opened)
-            .unwrap_or(end);
+            .filter(|held| opened.is_none_or(|brace| *held < brace));
+
+        let stop = parted.or(elsed).or(opened).unwrap_or(end);
 
         let tried = match self.hugged_tail(position, end).filter(|hug| hug.0 == stop) {
             Some((_, tries)) => HUG_ROOM + HUG_TRIES * tries,
@@ -1529,7 +1529,7 @@ impl Emitter<'_> {
         false
     }
 
-    fn flat_end(&self, close: u32) -> u32 {
+    pub(super) fn flat_end(&self, close: u32) -> u32 {
         let mut scan = close;
 
         for _ in 0..DEFINE_SCAN_MAX {
@@ -1981,7 +1981,7 @@ impl Emitter<'_> {
         named && token.end() == self.tokens[open as usize].offset
     }
 
-    fn angle_close(&self, open: u32) -> Option<u32> {
+    pub(super) fn angle_close(&self, open: u32) -> Option<u32> {
         let depth = self.brackets.angles_at(open);
         let mut held = open;
         let mut scan = open;
@@ -4809,6 +4809,7 @@ impl Emitter<'_> {
             && !self.ranges(position)
             && (self.chain_hugged(position)
                 || self.root_joined(position, previous)
+                || self.chain_flatted(position)
                 || self.chain_flat(position, previous))
     }
 
@@ -4827,7 +4828,11 @@ impl Emitter<'_> {
             let after = self.tokens[scan as usize].end();
             let broken = self.parted_by(after, token.offset) > 0;
             let elsed = ASSIGN_ELSES && token.text(self.source) == b"else";
-            let kept = broken && scan != parted && !elsed && !self.chain_flat(next, scan);
+            let kept = broken
+                && scan != parted
+                && !elsed
+                && !self.chain_flat(next, scan)
+                && !self.semicolon_joined(next, scan);
 
             if token.kind == TokenKind::Comment || kept {
                 return None;

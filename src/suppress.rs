@@ -1,10 +1,10 @@
 use crate::bounded::{BoundedVec, Span, count_of};
 use crate::lines;
+use crate::rule::Registry;
 use crate::token::{Token, TokenKind};
 
 pub const NONE: u32 = u32::MAX;
 pub const FILE_LINE: u32 = u32::MAX - 1;
-const FILE_PREFIXES: [&[u8]; 2] = [b"flake8:", b"ruff:"];
 const OFFSET_NONE: u32 = u32::MAX;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -321,6 +321,7 @@ impl Suppressions {
         source: &[u8],
         comments: impl Iterator<Item = Span>,
         word: &[u8],
+        file_prefixes: &[&[u8]],
         index: &lines::Index,
     ) {
         assert!(!word.is_empty());
@@ -330,7 +331,7 @@ impl Suppressions {
         for comment in comments {
             assert!(comment.end() as usize <= source.len());
 
-            let start = word_in(source, comment, word);
+            let start = word_in(source, comment, word, file_prefixes);
 
             if start == OFFSET_NONE {
                 continue;
@@ -346,7 +347,7 @@ impl Suppressions {
                 continue;
             }
 
-            let file_wide = file_prefixed(source, comment, start);
+            let file_wide = file_prefixed(source, comment, start, file_prefixes);
             let recorded = self.record(source, comment, start, reading, index, file_wide);
 
             assert!(recorded);
@@ -614,17 +615,17 @@ fn text_start_of(source: &[u8], comment: Span) -> u32 {
     start
 }
 
-fn file_prefixed(source: &[u8], comment: Span, start: u32) -> bool {
+fn file_prefixed(source: &[u8], comment: Span, start: u32, prefixes: &[&[u8]]) -> bool {
     let text = text_start_of(source, comment);
 
-    for prefix in FILE_PREFIXES {
+    for prefix in prefixes {
         let width = count_of(prefix.len());
 
         if start < text + width {
             continue;
         }
 
-        if &source[text as usize..(text + width) as usize] != prefix {
+        if &source[text as usize..(text + width) as usize] != *prefix {
             continue;
         }
 
@@ -713,7 +714,7 @@ fn continuation_width(source: &[u8], offset: usize) -> usize {
     1
 }
 
-fn word_in(source: &[u8], comment: Span, word: &[u8]) -> u32 {
+fn word_in(source: &[u8], comment: Span, word: &[u8], prefixes: &[&[u8]]) -> u32 {
     let width = count_of(word.len());
 
     if comment.length < width {
@@ -727,7 +728,7 @@ fn word_in(source: &[u8], comment: Span, word: &[u8]) -> u32 {
             continue;
         }
 
-        if !opens_at(source, comment, start) && !file_prefixed(source, comment, start) {
+        if !opens_at(source, comment, start) && !file_prefixed(source, comment, start, prefixes) {
             continue;
         }
 
@@ -1057,7 +1058,7 @@ impl Regions {
     }
 
     pub fn claim(&mut self, line: u32, code: u32) -> bool {
-        assert!(code < crate::rule::CODE_COUNT_MAX);
+        assert!(code < crate::rule::RULE_COUNT_MAX);
 
         let mask = 1_u128 << code;
 
@@ -1157,13 +1158,11 @@ pub fn directive_removed(source: &[u8], index: &lines::Index, found: &Unused) ->
     Span::between(start, line.end())
 }
 
-pub fn codes_written(codes: u128, prefix: &[u8], width: usize, target: &mut [u8]) -> Option<usize> {
-    assert!(width >= 1);
-
+pub fn codes_written(codes: u128, rules: &Registry, target: &mut [u8]) -> Option<usize> {
     let mut length = 0;
 
-    for code in 0..crate::rule::CODE_COUNT_MAX {
-        if codes & (1_u128 << code) == 0 {
+    for index in 0..rules.count() {
+        if codes & (1_u128 << index) == 0 {
             continue;
         }
 
@@ -1173,17 +1172,9 @@ pub fn codes_written(codes: u128, prefix: &[u8], width: usize, target: &mut [u8]
             length += 2;
         }
 
-        for byte in prefix {
+        for byte in rules.at(index).code.as_bytes() {
             *target.get_mut(length)? = *byte;
             length += 1;
-        }
-
-        let mut scale = 10_u32.checked_pow(u32::try_from(width).ok()? - 1)?;
-
-        while scale > 0 {
-            *target.get_mut(length)? = b'0' + u8::try_from(code / scale % 10).ok()?;
-            length += 1;
-            scale /= 10;
         }
     }
 
@@ -1336,7 +1327,7 @@ fn codes_of(text: &[u8], code_of: &impl Fn(&[u8]) -> Option<u32>) -> (u128, bool
 
     for span in codes_at(text) {
         match code_of(&text[span.range()]) {
-            Some(index) if index < crate::rule::CODE_COUNT_MAX => {
+            Some(index) if index < crate::rule::RULE_COUNT_MAX => {
                 codes |= 1_u128 << index;
                 found = true;
             }
@@ -1367,6 +1358,7 @@ mod tests {
     use crate::token::{TokenKind, Tokens};
 
     const WORD: &[u8] = b"noqa";
+    const FILE_PREFIXES: [&[u8]; 2] = [b"flake8:", b"ruff:"];
 
     fn indexed(source: &[u8]) -> lines::Index {
         let mut index = lines::Index::reserve(64);
@@ -1387,7 +1379,7 @@ mod tests {
         let index = indexed(source);
         let mut suppressions = Suppressions::reserve(8, 16);
 
-        suppressions.scan(source, spans.iter().copied(), WORD, &index);
+        suppressions.scan(source, spans.iter().copied(), WORD, &FILE_PREFIXES, &index);
 
         suppressions
     }
@@ -1646,7 +1638,7 @@ mod tests {
             },
         ];
 
-        suppressions.scan(source, spans.iter().copied(), WORD, &index);
+        suppressions.scan(source, spans.iter().copied(), WORD, &FILE_PREFIXES, &index);
 
         assert_eq!(suppressions.count(), 2);
         assert_eq!(suppressions.matches(1, b"E501", source), 1);
@@ -1659,7 +1651,13 @@ mod tests {
         let index = indexed(source);
         let mut suppressions = Suppressions::reserve(4, 2);
 
-        suppressions.scan(source, core::iter::once(comment_of(source)), WORD, &index);
+        suppressions.scan(
+            source,
+            core::iter::once(comment_of(source)),
+            WORD,
+            &FILE_PREFIXES,
+            &index,
+        );
 
         assert_eq!(suppressions.count(), 1);
 
@@ -1720,7 +1718,7 @@ mod tests {
             },
         ];
 
-        suppressions.scan(source, spans.iter().copied(), WORD, &index);
+        suppressions.scan(source, spans.iter().copied(), WORD, &FILE_PREFIXES, &index);
 
         assert_eq!(suppressions.unconsumed().count(), 2);
 
@@ -1754,6 +1752,7 @@ mod tests {
             source,
             spans_of(&lexed, TokenKind::Comment).into_iter(),
             WORD,
+            &FILE_PREFIXES,
             &index,
         );
 
@@ -2030,7 +2029,7 @@ mod tests {
 
         let _scope = crate::allocation::freeze_scope();
 
-        suppressions.scan(source, spans.iter().copied(), WORD, &index);
+        suppressions.scan(source, spans.iter().copied(), WORD, &FILE_PREFIXES, &index);
 
         assert_eq!(suppressions.count(), 2);
         assert_eq!(suppressions.matches(0, b"E501", source), 0);
@@ -2135,13 +2134,40 @@ mod tests {
 
     #[test]
     fn a_written_list_spells_every_code_it_holds() {
+        use crate::diagnostic::Severity;
+        use crate::rule::{Fixable, Group, Rule};
+
+        const fn rule(code: &'static str, name: &'static str) -> Rule {
+            Rule {
+                citations: &[],
+                code,
+                default_on: true,
+                description: "",
+                explanation: "",
+                fix_title: "",
+                fixable: Fixable::Never,
+                group: Group::Stable,
+                name,
+                severity: Severity::Warning,
+                summary: "",
+                url: "",
+            }
+        }
+
+        static RULES: [Rule; 3] = [
+            rule("TS002", "second"),
+            rule("GL007", "seventh"),
+            rule("TS012", "twelfth"),
+        ];
+
+        let registry = Registry::reserve(&RULES);
         let mut target = [0_u8; 64];
 
-        let length = codes_written((1 << 2) | (1 << 12), b"TS", 3, &mut target)
+        let length = codes_written((1 << 0) | (1 << 2), &registry, &mut target)
             .expect("the mask holds two codes");
 
         assert_eq!(&target[..length], b"TS002, TS012");
-        assert!(codes_written(0, b"TS", 3, &mut target).is_none());
+        assert!(codes_written(0, &registry, &mut target).is_none());
     }
 
     fn regions_of(source: &[u8], spans: &[Span]) -> Regions {
@@ -2204,8 +2230,8 @@ mod tests {
 
     #[test]
     fn a_template_comment_the_lexer_never_tokenised_suppresses() {
-        const SOURCE: &[u8] =
-            b"{# tigerstyle-ignore: TS002 #}\n{% extends 'base.html' %}\n<p>{# tigerstyle-ignore: TS003 #}</p>\n";
+        const SOURCE: &[u8] = b"{# tigerstyle-ignore: TS002 #}\n{% extends 'base.html' %}\n\
+                                <p>{# tigerstyle-ignore: TS003 #}</p>\n";
 
         let spans = fenced_of(SOURCE, b"{#", b"#}");
         let mut regions = regions_of(SOURCE, &spans);

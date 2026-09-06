@@ -118,6 +118,7 @@ pub fn shrunk_of(count: u32, shift: u32) -> u32 {
 pub struct Options<'run> {
     pub globals: &'run [&'run [u8]],
     pub python_version: PythonVersion,
+    pub template_imports: &'run [&'run [u8]],
 }
 
 pub struct Front {
@@ -449,6 +450,30 @@ impl Front {
 
     pub fn index_of(&self, category: Category) -> &[u32] {
         self.tables.index_of(category)
+    }
+
+    pub fn function_at(&self, offset: u32) -> Option<View<'_>> {
+        let mut found: Option<View<'_>> = None;
+
+        for category in [Category::Function, Category::Lambda] {
+            for position in self.index_of(category) {
+                let Some(held) = self.view(*position) else {
+                    continue;
+                };
+
+                let span = held.span();
+
+                if span.offset > offset || span.end() <= offset {
+                    continue;
+                }
+
+                if found.is_none_or(|inner| inner.span().offset <= span.offset) {
+                    found = Some(held);
+                }
+            }
+        }
+
+        found
     }
 
     pub fn root(&self) -> Option<View<'_>> {
@@ -991,7 +1016,7 @@ fn build_of(
             facts,
             tokens,
             tree,
-        } => build_markup(source, facts, tokens, tree),
+        } => build_markup(source, facts, tokens, tree, options.template_imports),
         Tables::Odin { semantic, syntax } => {
             build_odin(source, semantic, syntax, lexed, events, globals)
         }
@@ -1160,6 +1185,7 @@ fn build_markup(
     facts: &mut Facts,
     tokens: &mut markup::Tokens,
     tree: &mut Tree<MarkupKind>,
+    template_imports: &[&[u8]],
 ) -> Structure {
     tokens.clear();
 
@@ -1175,7 +1201,7 @@ fn build_markup(
         return built;
     }
 
-    markup::facts::build(source, tokens.as_slice(), tree, facts)
+    markup::facts::build(source, tokens.as_slice(), tree, facts, template_imports)
 }
 
 fn build_odin(

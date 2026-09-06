@@ -1,4 +1,4 @@
-use crate::language::Lexer;
+use crate::language::{Grammar, Lexer};
 use crate::scan::{
     escape_end,
     escape_holds,
@@ -15,9 +15,20 @@ use crate::token::{Lex, TokenKind, Tokens};
 pub const NESTING_DEPTH_MAX: u32 = 64;
 pub static CSS: CSSLexer = CSSLexer;
 
+static GRAMMAR: Grammar = Grammar {
+    comment_block_close: b"*/",
+    comment_block_open: b"/*",
+    comment_prefix: b"",
+    ..Grammar::DEFAULT
+};
+
 pub struct CSSLexer;
 
 impl Lexer for CSSLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"css"]
     }

@@ -23,6 +23,7 @@ pub const POLICY: Policy = Policy {
     assign_lines: true,
     assign_values: true,
     assign_wraps: false,
+    chain_simples: true,
     chain_soles: false,
     chain_hugs: false,
     chain_joins: false,
@@ -73,12 +74,13 @@ pub const POLICY: Policy = Policy {
     build_blocks: false,
     carriage_breaks: true,
     callee_marks: &[b"?", b"?."],
-    callee_words: &[b"super", b"this"],
+    callee_words: &[b"function", b"super", b"this"],
     cast_joins: false,
     cast_words: &[],
     clause_bases: false,
     clause_ends: false,
     clause_lines: true,
+    clause_values: &[],
     clause_words: &[b"case", b"default"],
     close_hugs: false,
     colon_continues: true,
@@ -161,6 +163,7 @@ pub const POLICY: Policy = Policy {
     member_words: &[b"?."],
     nested_levels: false,
     number_forms: true,
+    object_words: &[b"default"],
     operand_joins: false,
     operand_levels: false,
     operand_words: &[b"import", b"super", b"this"],
@@ -182,6 +185,20 @@ pub const POLICY: Policy = Policy {
     remark_carries: false,
     remark_dedents: false,
     sentinel_colons: false,
+    sequence_lines: true,
+    sequence_stops: &[
+        b"abstract",
+        b"class",
+        b"declare",
+        b"enum",
+        b"export",
+        b"function",
+        b"import",
+        b"interface",
+        b"module",
+        b"namespace",
+        b"type",
+    ],
     remark_gaps: false,
     remark_levels: false,
     remark_suffix: true,
@@ -202,6 +219,7 @@ pub const POLICY: Policy = Policy {
     spaced_words: &[],
     span_levels: false,
     spread_blanks: true,
+    spread_owns: false,
     tight_from_source: &[
         b"!",
         b"*",
@@ -302,6 +320,7 @@ pub const RULES: brace::Rules<Kind> = brace::Rules {
     braced,
     denies,
     drops,
+    mixes,
     names,
     opens,
     operators,
@@ -316,7 +335,7 @@ fn braced(parent: Kind) -> bool {
     parent == Kind::ArrowFunction
 }
 
-fn drops(inner: Kind, parent: Kind) -> bool {
+fn drops(inner: Kind, parent: Kind, head: Option<Kind>) -> bool {
     if !DROPS_PARENS {
         return false;
     }
@@ -334,6 +353,29 @@ fn drops(inner: Kind, parent: Kind) -> bool {
 
     if inner == Kind::TernaryExpression && parent == Kind::TernaryExpression {
         return false;
+    }
+
+    if parent == Kind::ExpressionStatement {
+        return inner == Kind::CallExpression && called(head);
+    }
+
+    if matches!(
+        parent,
+        Kind::AwaitExpression
+            | Kind::MemberExpression
+            | Kind::SpreadElement
+            | Kind::SubscriptExpression
+            | Kind::UnaryExpression
+    ) {
+        return matches!(
+            inner,
+            Kind::CallExpression
+                | Kind::IdentifierNode
+                | Kind::MemberExpression
+                | Kind::NewExpression
+                | Kind::SubscriptExpression
+                | Kind::TemplateString
+        );
     }
 
     matches!(
@@ -356,13 +398,85 @@ fn drops(inner: Kind, parent: Kind) -> bool {
     )
 }
 
-fn spans(kind: Kind) -> bool {
-    matches!(kind, Kind::Array | Kind::Object)
+fn called(head: Option<Kind>) -> bool {
+    matches!(
+        head,
+        Some(
+            Kind::ArrowFunction | Kind::Class | Kind::FunctionExpression | Kind::GeneratorFunction
+        )
+    )
 }
 
-fn wraps(inner: Kind, parent: Kind) -> bool {
-    matches!(inner, Kind::FunctionExpression | Kind::GeneratorFunction)
-        && matches!(parent, Kind::CallExpression | Kind::NewExpression)
+fn spans(inner: Kind, parent: Kind, head: Option<Kind>) -> bool {
+    if parent == Kind::ExpressionStatement {
+        return called(head);
+    }
+
+    if parent == Kind::Arguments {
+        return matches!(
+            inner,
+            Kind::ArrowFunction
+                | Kind::Array
+                | Kind::Class
+                | Kind::FunctionExpression
+                | Kind::GeneratorFunction
+                | Kind::Object
+        );
+    }
+
+    matches!(inner, Kind::Array | Kind::Object)
+}
+
+fn wraps(inner: Kind, parent: Kind, ancestor: Option<Kind>, first: bool) -> bool {
+    if matches!(
+        inner,
+        Kind::ArrowFunction | Kind::FunctionExpression | Kind::GeneratorFunction
+    ) {
+        return first && matches!(parent, Kind::CallExpression | Kind::NewExpression);
+    }
+
+    if matches!(
+        inner,
+        Kind::AssignmentExpression | Kind::AugmentedAssignmentExpression
+    ) {
+        return assigns(parent, ancestor);
+    }
+
+    false
+}
+
+fn assigns(parent: Kind, ancestor: Option<Kind>) -> bool {
+    if parent == Kind::ParenthesizedExpression {
+        return matches!(
+            ancestor,
+            Some(
+                Kind::DoStatement
+                    | Kind::IfStatement
+                    | Kind::SwitchStatement
+                    | Kind::WhileStatement
+            )
+        );
+    }
+
+    if matches!(
+        parent,
+        Kind::AssignmentExpression
+            | Kind::AugmentedAssignmentExpression
+            | Kind::ExpressionStatement
+            | Kind::ForStatement
+    ) {
+        return false;
+    }
+
+    if parent == Kind::SequenceExpression {
+        return ancestor != Some(Kind::ForStatement);
+    }
+
+    true
+}
+
+fn mixes(kind: Kind) -> bool {
+    kind == Kind::BinaryExpression
 }
 
 fn queries(kind: Kind) -> bool {

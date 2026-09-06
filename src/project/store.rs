@@ -21,7 +21,9 @@ use crate::syntax::{Fact, SyntaxError};
 use crate::token::{Lex, Token, Tokens};
 use crate::tree::Structure;
 
-pub const NONE: u32 = u32::MAX;
+pub use crate::bounded::{HASH_OFFSET, HASH_PRIME, hash_of, hash_seeded};
+pub use crate::diagnostic::{FileID, NONE};
+
 pub const CLASS_BYTES_MIN: u32 = 1 << 10;
 pub const CLASS_COUNT: usize = 13;
 
@@ -30,9 +32,6 @@ pub enum Eviction {
     LeastRecentlyUsed,
     Reject,
 }
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub struct FileID(u32);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Limits {
@@ -58,6 +57,7 @@ pub struct Store {
     resident: u32,
     slots: Vec<Slot>,
     starts: [[u32; CLASS_COUNT]; Language::COUNT],
+    template_imports: &'static [&'static [u8]],
 }
 
 struct Slot {
@@ -90,23 +90,6 @@ struct Table {
     keys: Vec<u64>,
     states: Vec<State>,
     values: Vec<u32>,
-}
-
-pub const HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-pub const HASH_PRIME: u64 = 0x0000_0100_0000_01b3;
-
-impl FileID {
-    pub const fn of(index: u32) -> Self {
-        assert!(index != NONE);
-
-        Self(index)
-    }
-
-    pub const fn index(self) -> u32 {
-        assert!(self.0 != NONE);
-
-        self.0
-    }
 }
 
 impl Limits {
@@ -361,6 +344,7 @@ impl Store {
             resident: 0,
             slots,
             starts,
+            template_imports: &[],
         }
     }
 
@@ -566,6 +550,12 @@ impl Store {
         assert_eq!(self.python_version, version);
     }
 
+    pub fn template_imports_set(&mut self, names: &'static [&'static [u8]]) {
+        self.template_imports = names;
+
+        assert_eq!(self.template_imports.len(), names.len());
+    }
+
     pub fn generation_of(&self, file: FileID) -> u32 {
         let index = file.index();
 
@@ -668,6 +658,7 @@ impl Store {
             pending,
             python_version,
             slots,
+            template_imports,
             ..
         } = self;
 
@@ -681,6 +672,7 @@ impl Store {
             python_version: *python_version,
             slot_count: count_of(slots.len()),
             slots: base,
+            template_imports,
         }
     }
 
@@ -875,12 +867,20 @@ impl Store {
             lexed,
             python_version,
             slots,
+            template_imports,
             ..
         } = self;
 
         let slot = &mut slots[index as usize];
 
-        build_slot(slot, events, lexed, globals, *python_version);
+        build_slot(
+            slot,
+            events,
+            lexed,
+            globals,
+            *python_version,
+            template_imports,
+        );
     }
 
     fn settled(&mut self, index: u32, path_hash: u64, hash: u64, source: &[u8], deferred: bool) {
@@ -1012,6 +1012,7 @@ pub struct PendingBuilds<'store> {
     python_version: PythonVersion,
     slot_count: u32,
     slots: NonNull<Slot>,
+    template_imports: &'static [&'static [u8]],
 }
 
 unsafe impl Send for PendingBuilds<'_> {}
@@ -1038,6 +1039,7 @@ impl PendingBuilds<'_> {
             &mut scratch.lexed,
             &self.globals,
             self.python_version,
+            self.template_imports,
         );
     }
 
@@ -1076,6 +1078,7 @@ fn build_slot(
     lexed: &mut Tokens,
     globals: &[&'static [&'static [u8]]; Language::COUNT],
     python_version: PythonVersion,
+    template_imports: &[&[u8]],
 ) {
     let held = slot.source.as_bytes();
     let indexed = slot.lines.build(held);
@@ -1083,6 +1086,7 @@ fn build_slot(
     let options = Options {
         globals: globals[slot.language.index()],
         python_version,
+        template_imports,
     };
 
     let built = if lexed_of(slot.language, held, lexed) {
@@ -1106,21 +1110,6 @@ fn lexed_of(language: Language, source: &[u8], out: &mut Tokens) -> bool {
     };
 
     lexer.lex(source, out) == Lex::Complete
-}
-
-pub fn hash_of(bytes: &[u8]) -> u64 {
-    hash_seeded(HASH_OFFSET, bytes)
-}
-
-pub fn hash_seeded(seed: u64, bytes: &[u8]) -> u64 {
-    let mut hash = seed;
-
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(HASH_PRIME);
-    }
-
-    hash
 }
 
 fn mix_of(key: u64) -> u64 {

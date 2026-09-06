@@ -52,6 +52,7 @@ impl Built {
         let options = Options {
             globals: &[],
             python_version: PythonVersion::Py310,
+            template_imports: &[],
         };
 
         let outcome = front.build(source, lexed.as_slice(), &mut scratch, &options);
@@ -610,6 +611,14 @@ fn a_javascript_function_call_and_class_read_through_the_view() {
     );
 
     assert_eq!(call.arguments().count(), 1);
+}
+
+#[test]
+fn a_javascript_class_import_and_declaration_read_through_the_view() {
+    const SOURCE: &[u8] = b"import { join } from \"path\";\n\nclass Held {\
+        \n  constructor(one, two = 2, ...rest) {\n    this.items.push(one);\n  }\n}\n\
+        \nconst value = 1;\n";
+    let built = Built::of(Language::JavaScript, SOURCE);
 
     let class = built
         .first(Category::Struct)
@@ -908,4 +917,112 @@ fn every_fixture_answers_the_typed_questions_without_panicking() {
             every_node_answers(&name, &source, &built.front);
         }
     }
+}
+
+const NESTED_RUST: &[u8] = b"fn outer(a: u32) -> u32 {\n    let held = |b: u32| b + a;\n\n\
+    \x20   match a {\n        0 => 1,\n        _ => held(2),\n    }\n}\n";
+
+fn offset_of(source: &[u8], needle: &[u8]) -> u32 {
+    let at = source
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .expect("the needle is in the source");
+
+    u32::try_from(at).expect("the offset fits")
+}
+
+#[test]
+fn the_enclosing_function_is_the_nearest_function_or_lambda() {
+    let built = Built::of(Language::Rust, NESTED_RUST);
+    let outer = built.first(Category::Function);
+    let lambda = built.first(Category::Lambda);
+
+    assert_eq!(
+        lambda.enclosing_function().map(View::index),
+        Some(outer.index())
+    );
+
+    let call = built.first(Category::Call);
+
+    assert_eq!(call.enclosing_function().map(View::index), Some(outer.index()));
+
+    let inner = lambda.children().last().expect("the lambda holds its body");
+
+    assert_eq!(
+        inner.enclosing_function().map(View::index),
+        Some(lambda.index())
+    );
+
+    assert!(outer.enclosing_function().is_none());
+}
+
+#[test]
+fn an_arm_sits_under_a_match_in_rust_and_zig() {
+    const ZIG: &[u8] = b"fn run(value: u32) u32 {\n    return switch (value) {\n\
+        \x20       0 => 1,\n        else => 2,\n    };\n}\n";
+
+    for (language, source) in [(Language::Rust, NESTED_RUST), (Language::Zig, ZIG)] {
+        let built = Built::of(language, source);
+        let held = built.first(Category::Match);
+        let arms = held.children().filter(|child| child.is_an_arm()).count();
+
+        assert!(arms >= 2, "{}", language.name());
+        assert!(!held.is_an_arm(), "{}", language.name());
+        assert!(!built.first(Category::Function).is_an_arm(), "{}", language.name());
+    }
+}
+
+#[test]
+fn a_parameter_sits_inside_a_signature_and_a_local_does_not() {
+    let built = Built::of(Language::Rust, NESTED_RUST);
+
+    let parameter = built
+        .first(Category::Parameters)
+        .children()
+        .find(|held| held.span().offset == offset_of(NESTED_RUST, b"a: u32"))
+        .expect("the function names a parameter");
+
+    assert!(parameter.is_inside_signature());
+
+    let local = built
+        .front
+        .index_of(Category::Declaration)
+        .iter()
+        .map(|position| built.front.view(*position).expect("a view"))
+        .find(|held| held.span().offset == offset_of(NESTED_RUST, b"let held"))
+        .expect("the body declares a local");
+
+    assert!(!local.is_inside_signature());
+}
+
+#[test]
+fn a_signature_covers_the_offsets_before_the_body_opens() {
+    let built = Built::of(Language::Rust, NESTED_RUST);
+    let outer = built.first(Category::Function);
+
+    assert!(outer.signature_covers(offset_of(NESTED_RUST, b"a: u32")));
+    assert!(outer.signature_covers(offset_of(NESTED_RUST, b"-> u32")));
+    assert!(!outer.signature_covers(offset_of(NESTED_RUST, b"let held")));
+    assert!(!outer.signature_covers(u32::try_from(NESTED_RUST.len()).expect("it fits")));
+    assert!(!built.first(Category::Match).signature_covers(0));
+}
+
+#[test]
+fn function_at_names_the_innermost_function_covering_an_offset() {
+    let built = Built::of(Language::Rust, NESTED_RUST);
+    let outer = built.first(Category::Function);
+    let lambda = built.first(Category::Lambda);
+
+    assert_eq!(
+        built.front.function_at(offset_of(NESTED_RUST, b"b + a")).map(View::index),
+        Some(lambda.index())
+    );
+
+    assert_eq!(
+        built.front.function_at(offset_of(NESTED_RUST, b"match a")).map(View::index),
+        Some(outer.index())
+    );
+
+    assert_eq!(built.front.function_at(0).map(View::index), Some(outer.index()));
+    assert!(built.front.function_at(u32::MAX).is_none());
 }

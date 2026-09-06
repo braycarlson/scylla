@@ -1,5 +1,5 @@
-const HASH_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
-const HASH_PRIME: u64 = 0x0000_0100_0000_01b3;
+use crate::bounded::hash_of;
+
 const KEY_BYTES_MAX: usize = 256;
 
 #[derive(Clone, Copy, Debug)]
@@ -111,6 +111,9 @@ impl<V: Copy> FixedMap<V> {
     }
 
     fn index_of(&self, key: &[u8]) -> usize {
+        assert!(!key.is_empty());
+        assert!(key.len() <= KEY_BYTES_MAX);
+
         let mask = self.slots.len() as u64 - 1;
         let index = usize::try_from(hash_of(key) & mask).expect("the masked hash fits in usize");
 
@@ -118,20 +121,6 @@ impl<V: Copy> FixedMap<V> {
 
         index
     }
-}
-
-fn hash_of(key: &[u8]) -> u64 {
-    assert!(!key.is_empty());
-    assert!(key.len() <= KEY_BYTES_MAX);
-
-    let mut hash = HASH_OFFSET;
-
-    for byte in key {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(HASH_PRIME);
-    }
-
-    hash
 }
 
 #[cfg(test)]

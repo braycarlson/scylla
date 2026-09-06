@@ -1,4 +1,4 @@
-use crate::language::Lexer;
+use crate::language::{Grammar, Lexer};
 use crate::scan::Numbers;
 use crate::scan::{
     identifier_scan,
@@ -13,6 +13,17 @@ use crate::scan::{
 use crate::token::{Keyword, Lex, Punctuation, TokenKind, Tokens};
 
 pub static GO: GoLexer = GoLexer;
+
+static GRAMMAR: Grammar = Grammar {
+    capital_marks_export: true,
+    comment_block_close: b"*/",
+    comment_block_open: b"/*",
+    defer_word: b"defer",
+    discard_prefix: b"_ = ",
+    sized_type_names: &[b"int", b"uint", b"uintptr"],
+    type_follows_colon: false,
+    ..Grammar::DEFAULT
+};
 
 const ASSERT_METHODS: &[&[u8]] = &[
     b"Contains",
@@ -49,6 +60,10 @@ const DECLARE_WORD: &[u8] = b"func";
 pub struct GoLexer;
 
 impl Lexer for GoLexer {
+    fn grammar(&self) -> &'static Grammar {
+        &GRAMMAR
+    }
+
     fn extensions(&self) -> &'static [&'static [u8]] {
         &[b"go"]
     }
@@ -455,28 +470,7 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
     }
 
     if is_identifier_start_at(source, offset) {
-        let end = identifier_scan(source, offset);
-        let text = &source[offset..end];
-
-        if text == b"func" {
-            return (TokenKind::Keyword(function_keyword(source, end)), end);
-        }
-
-        if text == b"for" {
-            return (TokenKind::Keyword(loop_keyword(source, end)), end);
-        }
-
-        if is_assert_name(text, source, end)
-            && !declares_a_name(source, offset)
-            && !binds_a_name(source, end)
-        {
-            return (TokenKind::Keyword(Keyword::Assert), end);
-        }
-
-        return match word_of(text) {
-            Some(kind) => (kind, end),
-            None => (TokenKind::Identifier, end),
-        };
+        return word_token_of(source, offset);
     }
 
     let leads = byte == b'.' && source.get(offset + 1).is_some_and(u8::is_ascii_digit);
@@ -491,6 +485,33 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
     let (punctuation, length) = punctuation_of(source, offset);
 
     (TokenKind::Punctuation(punctuation), offset + length)
+}
+
+fn word_token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
+    assert!(is_identifier_start_at(source, offset));
+
+    let end = identifier_scan(source, offset);
+    let text = &source[offset..end];
+
+    if text == b"func" {
+        return (TokenKind::Keyword(function_keyword(source, end)), end);
+    }
+
+    if text == b"for" {
+        return (TokenKind::Keyword(loop_keyword(source, end)), end);
+    }
+
+    if is_assert_name(text, source, end)
+        && !declares_a_name(source, offset)
+        && !binds_a_name(source, end)
+    {
+        return (TokenKind::Keyword(Keyword::Assert), end);
+    }
+
+    match word_of(text) {
+        Some(kind) => (kind, end),
+        None => (TokenKind::Identifier, end),
+    }
 }
 
 #[cfg(test)]

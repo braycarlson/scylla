@@ -11,7 +11,7 @@ pub use buffer::Buffer;
 pub use map::FixedMap;
 pub use pool::{Handle, Pool};
 pub use string::BoundedString;
-pub use table::{Table, hash_of};
+pub use table::{HASH_OFFSET, HASH_PRIME, Table, hash_of, hash_seeded};
 pub use vector::BoundedVec;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

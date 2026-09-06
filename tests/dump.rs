@@ -10,6 +10,12 @@ use scylla::syntax::python::stdlib::PythonVersion;
 use scylla::syntax::view::View;
 use scylla::token::Tokens;
 
+const OPTIONS: Options<'static> = Options {
+    globals: &[],
+    python_version: PythonVersion::Py310,
+    template_imports: &[],
+};
+
 const LIMITS: Limits = Limits {
     binding_count_max: 1 << 12,
     error_count_max: 1 << 8,
@@ -82,16 +88,11 @@ fn dump() {
     let mut scratch = Scratch::reserve(&LIMITS, wanted);
     let mut lexed = Tokens::reserve(LIMITS.token_count_max);
 
-    let options = Options {
-        globals: &[],
-        python_version: PythonVersion::Py310,
-    };
-
     front::lexer_of(language)
         .expect("a lexer")
         .lex(source, &mut lexed);
 
-    let outcome = front.build(source, lexed.as_slice(), &mut scratch, &options);
+    let outcome = front.build(source, lexed.as_slice(), &mut scratch, &OPTIONS);
 
     println!("outcome {outcome:?}");
 
