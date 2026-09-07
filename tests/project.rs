@@ -137,6 +137,7 @@ fn limits_of(mix: &[(Language, u32)]) -> Limits {
             reference_count_max: 512,
             scope_count_max: 128,
             segment_count_max: 512,
+            tag_count_max: 512,
             token_count_max: 2_048,
         },
         line_count_max: 512,

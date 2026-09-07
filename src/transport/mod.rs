@@ -1,9 +1,12 @@
 pub mod relay;
+pub mod sender;
 
 use std::io::{Error, ErrorKind, Read, Result, Write};
 
 use crate::bounded::{BoundedVec, Buffer};
 use crate::scan::{DECIMAL_BYTES_MAX, decimal_read, decimal_write, starts_with_folded};
+
+pub use sender::Sender;
 
 pub const HEADER_BYTES_MAX: u32 = 256;
 pub const HEADER_COUNT_MAX: u32 = 16;

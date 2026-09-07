@@ -6,7 +6,7 @@ use crate::language::Language;
 use crate::lines;
 use crate::markup;
 use crate::markup::tree::TreeError;
-use crate::parallel::striped;
+use crate::parallel::{COUNT_SERIAL_MAX, striped};
 use crate::syntax::css::semantic::Semantic as CSSSemantic;
 use crate::syntax::front::{self, Front, Options, Scratch, Tables, shrunk_of};
 use crate::syntax::go::semantic::Semantic as GoSemantic;
@@ -321,7 +321,7 @@ impl Store {
 
         assert_eq!(count_of(specs.len()), limits.file_count_max);
 
-        let slots = striped(limits.file_count_max, |index| {
+        let slots = striped(limits.file_count_max, COUNT_SERIAL_MAX, |index| {
             let (language, class) = specs[index as usize];
 
             slot_of(language, class, top, limits)
@@ -554,6 +554,16 @@ impl Store {
         self.template_imports = names;
 
         assert_eq!(self.template_imports.len(), names.len());
+    }
+
+    pub fn vocabulary_set(&mut self, vocabulary: markup::Vocabulary<'static>) {
+        assert_eq!(count_of(self.slots.len()), self.limits.file_count_max);
+
+        for slot in &mut self.slots {
+            slot.tables.vocabulary_set(vocabulary);
+        }
+
+        assert!(self.slots.len() <= self.limits.file_count_max as usize);
     }
 
     pub fn generation_of(&self, file: FileID) -> u32 {
@@ -1125,6 +1135,7 @@ fn mix_of(key: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax::FactKind;
 
     const CSS: &[u8] = b"a { color: red; }\n";
     const PYTHON: &[u8] = b"import os\n\n\ndef run():\n    return os\n";
@@ -1153,6 +1164,7 @@ mod tests {
                 reference_count_max: 256,
                 scope_count_max: 64,
                 segment_count_max: 256,
+                tag_count_max: 256,
                 token_count_max: 1_024,
             },
             line_count_max: 256,
@@ -1443,6 +1455,33 @@ mod tests {
 
         assert!(again != NONE);
         assert_eq!(store.rebuilds_of(FileID::of(again)), 1);
+    }
+
+    #[test]
+    fn a_vocabulary_reaches_every_markup_slot() {
+        const SOURCE: &[u8] = b"{% extends 'b.html' %}{% include 'c.html' only %}\n";
+        const VOCABULARY: markup::Vocabulary<'static> = markup::Vocabulary {
+            extends_tags: &[b"extends"],
+            only_word: b"only",
+            ..markup::Vocabulary::EMPTY
+        };
+
+        let limits = limits_of(&[(Language::Markup, 2)]);
+        let mut store = Store::reserve(&limits, Eviction::Reject);
+
+        store.template_imports_set(&[b"extends", b"include"]);
+
+        let plain = store.insert(hash_of(b"a.html"), Language::Markup, SOURCE);
+
+        assert_eq!(store.facts_of(FileID::of(plain))[0].kind, FactKind::Include { only: false });
+        assert_eq!(store.facts_of(FileID::of(plain))[1].kind, FactKind::Include { only: false });
+
+        store.vocabulary_set(VOCABULARY);
+
+        let worded = store.insert(hash_of(b"b.html"), Language::Markup, SOURCE);
+
+        assert_eq!(store.facts_of(FileID::of(worded))[0].kind, FactKind::Extends);
+        assert_eq!(store.facts_of(FileID::of(worded))[1].kind, FactKind::Include { only: true });
     }
 
     #[test]

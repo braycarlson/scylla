@@ -509,6 +509,113 @@ where
     true
 }
 
+pub struct Pen<'run, W>
+where
+    W: Bytes,
+{
+    out: &'run mut W,
+    room: bool,
+    writer: &'run mut Writer,
+}
+
+impl<'run, W> Pen<'run, W>
+where
+    W: Bytes,
+{
+    pub fn array_close(&mut self) {
+        self.step(Writer::array_close);
+    }
+
+    pub fn array_open(&mut self) {
+        self.step(Writer::array_open);
+    }
+
+    pub fn boolean(&mut self, value: bool) {
+        self.step(|writer, out| writer.boolean(out, value));
+    }
+
+    pub fn bound(writer: &'run mut Writer, out: &'run mut W) -> Self {
+        writer.start();
+
+        Self {
+            out,
+            room: true,
+            writer,
+        }
+    }
+
+    pub fn finish(self) -> bool {
+        self.room && self.writer.finish()
+    }
+
+    pub fn key(&mut self, name: &[u8]) {
+        self.step(|writer, out| writer.key(out, name));
+    }
+
+    pub fn null(&mut self) {
+        self.step(Writer::null);
+    }
+
+    pub fn number(&mut self, value: i64) {
+        self.step(|writer, out| writer.number(out, value));
+    }
+
+    pub fn object_close(&mut self) {
+        self.step(Writer::object_close);
+    }
+
+    pub fn object_open(&mut self) {
+        self.step(Writer::object_open);
+    }
+
+    pub fn out(&mut self) -> &mut W {
+        self.out
+    }
+
+    pub fn raw(&mut self, value: &[u8]) {
+        self.step(|writer, out| writer.raw(out, value));
+    }
+
+    pub const fn room(&self) -> bool {
+        self.room
+    }
+
+    fn step<Step>(&mut self, step: Step)
+    where
+        Step: FnOnce(&mut Writer, &mut W) -> bool,
+    {
+        if !self.room {
+            return;
+        }
+
+        self.room = step(self.writer, self.out);
+    }
+
+    pub fn string(&mut self, text: &[u8]) {
+        self.step(|writer, out| writer.string(out, text));
+    }
+
+    pub fn string_close(&mut self) {
+        self.step(Writer::string_close);
+    }
+
+    pub fn string_escaped(&mut self, escaped: &[u8]) {
+        self.step(|writer, out| writer.string_escaped(out, escaped));
+    }
+
+    pub fn string_open(&mut self) {
+        self.step(Writer::string_open);
+    }
+
+    pub fn string_part(&mut self, text: &[u8]) {
+        self.step(|writer, out| writer.string_part(out, text));
+    }
+
+    pub fn string_parts(&mut self, parts: &[&[u8]]) {
+        self.step(|writer, out| writer.string_parts(out, parts));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::str::from_utf8;
@@ -744,5 +851,33 @@ mod tests {
             "[\n  {\n    \"code\": \"DG002\",\n    \"line\": 3,\n    \"related\": [],\n    \
              \"location\": {\n      \"path\": \"a.html\"\n    }\n  }\n]"
         );
+    }
+    #[test]
+    fn a_pen_latches_shut_on_the_first_overflow_and_finish_reports_it() {
+        let mut writer = Writer::reserve(DEPTH_MAX);
+        let mut out = BoundedString::reserve(8);
+        let mut pen = Pen::bound(&mut writer, &mut out);
+
+        pen.object_open();
+        pen.key(b"k");
+        pen.string(b"a long value");
+
+        assert!(!pen.room());
+
+        pen.object_close();
+
+        assert!(!pen.finish());
+
+        let mut roomy_writer = Writer::reserve(DEPTH_MAX);
+        let mut roomy = BoundedString::reserve(64);
+        let mut roomy_pen = Pen::bound(&mut roomy_writer, &mut roomy);
+
+        roomy_pen.object_open();
+        roomy_pen.key(b"k");
+        roomy_pen.number(7);
+        roomy_pen.object_close();
+
+        assert!(roomy_pen.finish());
+        assert_eq!(roomy.as_str(), r#"{"k":7}"#);
     }
 }

@@ -1,5 +1,6 @@
 mod arena;
 mod buffer;
+mod list;
 mod map;
 mod pool;
 mod string;
@@ -8,6 +9,7 @@ mod vector;
 
 pub use arena::Arena;
 pub use buffer::Buffer;
+pub use list::InternedList;
 pub use map::FixedMap;
 pub use pool::{Handle, Pool};
 pub use string::BoundedString;
@@ -49,6 +51,10 @@ impl Span {
         }
     }
 
+    pub const fn contains(self, offset: u32) -> bool {
+        self.offset <= offset && offset < self.end()
+    }
+
     pub const fn end(self) -> u32 {
         assert!(u32::MAX - self.offset >= self.length);
 
@@ -70,6 +76,21 @@ impl Span {
 
 pub fn count_of(length: usize) -> u32 {
     u32::try_from(length).expect("a bounded length fits in u32")
+}
+
+pub fn written(target: &mut [u8], parts: &[&[u8]]) -> Option<usize> {
+    let mut length = 0_usize;
+
+    for part in parts {
+        let end = length.checked_add(part.len())?;
+
+        target.get_mut(length..end)?.copy_from_slice(part);
+        length = end;
+    }
+
+    assert!(length <= target.len());
+
+    Some(length)
 }
 
 pub struct Random {
@@ -142,5 +163,30 @@ mod tests {
     #[should_panic(expected = "end >= start")]
     fn a_span_between_a_reversed_pair_is_refused() {
         let _span = Span::between(10, 4);
+    }
+
+    #[test]
+    fn a_span_contains_its_offsets_and_not_its_end() {
+        let span = Span::new(4, 6);
+
+        assert!(span.contains(4));
+        assert!(span.contains(9));
+        assert!(!span.contains(3));
+        assert!(!span.contains(10));
+        assert!(!Span::new(4, 0).contains(4));
+        assert!(!Span::EMPTY.contains(0));
+    }
+
+    #[test]
+    fn written_parts_land_end_to_end_or_not_at_all() {
+        let mut target = [0_u8; 8];
+
+        assert_eq!(written(&mut target, &[b"ab", b"", b"cd"]), Some(4));
+        assert_eq!(&target[..4], b"abcd");
+        assert_eq!(written(&mut target, &[]), Some(0));
+        assert_eq!(written(&mut target, &[b"12345678"]), Some(8));
+        assert_eq!(written(&mut target, &[b"12345678", b"9"]), None);
+        assert_eq!(written(&mut [], &[b"a"]), None);
+        assert_eq!(written(&mut [], &[b""]), Some(0));
     }
 }

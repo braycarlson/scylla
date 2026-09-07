@@ -7,6 +7,7 @@ use crate::scan::{
     identifier_scan,
     is_identifier_part,
     is_identifier_start_at,
+    is_javascript_identifier_part,
     line_scan_trimmed,
     number_scan_bounded,
     punctuation_of,
@@ -212,10 +213,6 @@ fn escape_end(source: &[u8], offset: usize) -> usize {
     cursor
 }
 
-const fn is_identifier_part_dollar(byte: u8) -> bool {
-    byte == b'$' || is_identifier_part(byte)
-}
-
 fn is_identifier_start_dollar_at(source: &[u8], offset: usize) -> bool {
     assert!(offset <= source.len());
 
@@ -245,7 +242,7 @@ fn identifier_escaped_scan(source: &[u8], start: usize) -> usize {
                 continue;
             }
 
-            if !is_identifier_part_dollar(byte) {
+            if !is_javascript_identifier_part(byte) {
                 break;
             }
 
@@ -398,13 +395,13 @@ fn heads_a_statement(source: &[u8], start: usize) -> bool {
 }
 
 fn word_before(source: &[u8], end: usize) -> bool {
-    if end == 0 || !is_identifier_part_dollar(source[end - 1]) {
+    if end == 0 || !is_javascript_identifier_part(source[end - 1]) {
         return false;
     }
 
     let mut start = end;
 
-    while start > 0 && is_identifier_part_dollar(source[start - 1]) {
+    while start > 0 && is_javascript_identifier_part(source[start - 1]) {
         start -= 1;
     }
 
@@ -517,13 +514,13 @@ fn divides_before(source: &[u8], offset: usize) -> bool {
         return true;
     }
 
-    if !is_identifier_part_dollar(byte) {
+    if !is_javascript_identifier_part(byte) {
         return false;
     }
 
     let mut start = end;
 
-    while start > 0 && is_identifier_part_dollar(source[start - 1]) {
+    while start > 0 && is_javascript_identifier_part(source[start - 1]) {
         start -= 1;
     }
 

@@ -96,3 +96,43 @@ mutants-of language:
     cargo mutants --in-place --timeout 60 \
         --file "src/syntax/{{language}}/**/*.rs" \
         --file "src/lex/{{language}}.rs"
+
+oracle_lex_corpora := "bat bootstrap django go odin ols python ripgrep rust tigerbeetle vscode zod"
+
+oracle-lex language="all" *args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo build --release --manifest-path {{tool_dir}}/runner/Cargo.toml --bin runner
+    (cd {{tool_dir}}/oracle-lex-rust && cargo build --release)
+    if command -v go > /dev/null; then
+        (cd {{tool_dir}}/oracle-lex-go && go build -o target/oracle-lex-go .)
+    else
+        echo "go is not installed; the go lexer oracle is skipped"
+    fi
+    if command -v zig > /dev/null; then
+        (cd {{tool_dir}}/oracle-lex-zig && zig build -Doptimize=ReleaseFast)
+    else
+        echo "zig is not installed; the zig lexer oracle is skipped"
+    fi
+    if command -v odin > /dev/null; then
+        (cd {{tool_dir}}/oracle-lex-odin && mkdir -p target && odin build . -out:target/oracle-lex-odin)
+    else
+        echo "odin is not installed; the odin lexer oracle is skipped"
+    fi
+    if command -v npm > /dev/null; then
+        npm install --silent --no-fund --no-audit --prefix {{tool_dir}}/oracle-lex-js \
+            typescript@"$(cat {{tool_dir}}/oracle-lex-js/PIN)"
+    else
+        echo "node is not installed; the javascript and typescript lexer oracles are skipped"
+    fi
+    corpora=()
+    for name in {{oracle_lex_corpora}}; do
+        corpora+=(--corpus "$name")
+    done
+    python3 {{tool_dir}}/oracle-lex/main.py --language {{language}} "${corpora[@]}" {{args}}
+
+oracle-lex-check:
+    just oracle-lex all --check tests/residue-lex.json
+
+oracle-lex-ledger:
+    just oracle-lex all --ledger tests/residue-lex.json

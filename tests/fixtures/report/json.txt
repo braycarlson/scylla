@@ -1,0 +1,104 @@
+[
+  {
+    "code": "DG009",
+    "column": 4,
+    "end_column": 15,
+    "end_line": 6,
+    "file": "./templates/django/child.html",
+    "fixable": false,
+    "line": 6,
+    "message": "`{{ block.super }}` outside any `{% block %}` renders nothing",
+    "related": [],
+    "rule": "django/block-super-outside-block",
+    "severity": "warning",
+    "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG009.md"
+  },
+  {
+    "code": "DG008",
+    "column": 1,
+    "end_column": 50,
+    "end_line": 12,
+    "file": "./templates/django/child.html",
+    "fixable": false,
+    "line": 12,
+    "message": "`script` is not a block `django/base.html` or its parents define",
+    "related": [],
+    "rule": "django/unknown-block",
+    "severity": "warning",
+    "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG008.md"
+  },
+  {
+    "code": "DG013",
+    "column": 41,
+    "end_column": 56,
+    "end_line": 18,
+    "file": "./templates/django/child.html",
+    "fixable": false,
+    "line": 18,
+    "message": "`location/ap.css` is not a file under any `static/` directory this project has",
+    "related": [],
+    "rule": "django/unknown-static",
+    "severity": "warning",
+    "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG013.md"
+  },
+  {
+    "code": "DG004",
+    "column": 18,
+    "end_column": 27,
+    "end_line": 6,
+    "file": "./templates/django/context.html",
+    "fixable": false,
+    "line": 6,
+    "message": "`locations` is not in the context of any view that renders this template. Rendered by `detail_view` in `./app/location/views.py`, `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py`",
+    "related": [
+      {
+        "column": 28,
+        "file": "./app/location/views.py",
+        "line": 21,
+        "message": "rendered here by `detail_view` without `locations`"
+      },
+      {
+        "column": 28,
+        "file": "./app/location/views.py",
+        "line": 25,
+        "message": "rendered here by `list_view` without `locations`"
+      },
+      {
+        "column": 28,
+        "file": "./app/location/views.py",
+        "line": 30,
+        "message": "rendered here by `stale_view` without `locations`"
+      }
+    ],
+    "rule": "django/unknown-context-variable",
+    "severity": "warning",
+    "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG004.md"
+  },
+  {
+    "code": "DG004",
+    "column": 12,
+    "end_column": 17,
+    "end_line": 8,
+    "file": "./templates/django/context.html",
+    "fixable": false,
+    "line": 8,
+    "message": "`title` is read here, but `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py` render this template without it",
+    "related": [
+      {
+        "column": 28,
+        "file": "./app/location/views.py",
+        "line": 25,
+        "message": "rendered here by `list_view` without `title`"
+      },
+      {
+        "column": 28,
+        "file": "./app/location/views.py",
+        "line": 30,
+        "message": "rendered here by `stale_view` without `title`"
+      }
+    ],
+    "rule": "django/unknown-context-variable",
+    "severity": "warning",
+    "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG004.md"
+  }
+]

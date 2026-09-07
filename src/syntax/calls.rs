@@ -1303,6 +1303,7 @@ mod tests {
         reference_count_max: 1 << 10,
         scope_count_max: 1 << 8,
         segment_count_max: 1 << 8,
+        tag_count_max: 1 << 8,
         token_count_max: 1 << 12,
     };
 

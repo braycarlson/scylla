@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="parhelion" tests="5" failures="5">
+  <testsuite name="./templates/django/child.html" tests="3" failures="3">
+    <testcase name="DG009 6:4" classname="./templates/django/child.html">
+      <failure type="DG009" message="`{{ block.super }}` outside any `{% block %}` renders nothing">warning at 6:4</failure>
+    </testcase>
+    <testcase name="DG008 12:1" classname="./templates/django/child.html">
+      <failure type="DG008" message="`script` is not a block `django/base.html` or its parents define">warning at 12:1</failure>
+    </testcase>
+    <testcase name="DG013 18:41" classname="./templates/django/child.html">
+      <failure type="DG013" message="`location/ap.css` is not a file under any `static/` directory this project has">warning at 18:41</failure>
+    </testcase>
+  </testsuite>
+  <testsuite name="./templates/django/context.html" tests="2" failures="2">
+    <testcase name="DG004 6:18" classname="./templates/django/context.html">
+      <failure type="DG004" message="`locations` is not in the context of any view that renders this template. Rendered by `detail_view` in `./app/location/views.py`, `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py`">warning at 6:18</failure>
+    </testcase>
+    <testcase name="DG004 8:12" classname="./templates/django/context.html">
+      <failure type="DG004" message="`title` is read here, but `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py` render this template without it">warning at 8:12</failure>
+    </testcase>
+  </testsuite>
+</testsuites>

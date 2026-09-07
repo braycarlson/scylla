@@ -3,7 +3,7 @@ pub mod rpc;
 pub mod write;
 
 pub use read::{Cursor, Document, Node, Outcome};
-pub use write::Writer;
+pub use write::{Pen, Writer};
 
 pub const DEPTH_MAX: u32 = 64;
 

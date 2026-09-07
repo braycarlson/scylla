@@ -729,6 +729,7 @@ mod tests {
             &tree,
             SPECIFICATIONS,
             WORDS,
+            b"end",
             &mut map,
         );
 

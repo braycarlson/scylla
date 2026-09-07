@@ -22,6 +22,7 @@ pub struct Options {
 }
 
 const LINE_SUFFIXES: bool = true;
+const SUFFIX_COUNT_MAX: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Width {
@@ -36,6 +37,8 @@ struct Printer {
     indent: u32,
     line_start: bool,
     pending_space: bool,
+    suffixed: u32,
+    suffixes: [(Source, Span); SUFFIX_COUNT_MAX as usize],
     verbatim: bool,
 }
 
@@ -297,7 +300,7 @@ impl State {
             }
         }
 
-        self.printer.newline(out)
+        self.printer.newline(held, out)
     }
 
     fn open(&mut self, held: &Measure<'_>, options: Options, index: u32) -> bool {
@@ -357,9 +360,9 @@ impl State {
         true
     }
 
-    fn soft(&mut self, out: &mut Buffer) -> bool {
+    fn soft(&mut self, held: &Measure<'_>, out: &mut Buffer) -> bool {
         if self.broken() {
-            return self.printer.newline(out);
+            return self.printer.newline(held, out);
         }
 
         true
@@ -388,6 +391,14 @@ impl Printer {
             indent: 0,
             line_start: true,
             pending_space: false,
+            suffixed: 0,
+            suffixes: [(
+                Source::Literal,
+                Span {
+                    length: 0,
+                    offset: 0,
+                },
+            ); SUFFIX_COUNT_MAX as usize],
             verbatim: false,
         }
     }
@@ -466,7 +477,40 @@ impl Printer {
         true
     }
 
-    fn newline(&mut self, out: &mut Buffer) -> bool {
+    fn defer(&mut self, held: Source, span: Span) -> bool {
+        if self.suffixed == SUFFIX_COUNT_MAX {
+            return false;
+        }
+
+        self.suffixes[self.suffixed as usize] = (held, span);
+        self.suffixed += 1;
+        self.pending_space = false;
+
+        true
+    }
+
+    fn flush(&mut self, held: &Measure<'_>, out: &mut Buffer) -> bool {
+        for index in 0..self.suffixed {
+            let (source, span) = self.suffixes[index as usize];
+            let bytes = bytes_of(held.document, held.source, held.arena, source, span);
+
+            if !out.push_bytes(&SPACES[..1]) || !out.push_bytes(bytes) {
+                return false;
+            }
+
+            self.verbatim = true;
+        }
+
+        self.suffixed = 0;
+
+        true
+    }
+
+    fn newline(&mut self, held: &Measure<'_>, out: &mut Buffer) -> bool {
+        if !self.flush(held, out) {
+            return false;
+        }
+
         debug_assert!(
             line_ends_clean(out, self.verbatim),
             "a printed line ends in whitespace"
@@ -652,6 +696,57 @@ impl Measure<'_> {
 
         columns_of(bytes)
     }
+
+    fn glues(&self, from: u32, depth: u32) -> bool {
+        let elements = self.document.elements();
+        let count = count_of(elements.len());
+        let mut held = depth;
+        let mut index = from;
+
+        while index < count {
+            let element = elements[index as usize];
+
+            index += 1;
+
+            match element {
+                Element::BlankLine(_) | Element::HardLine => return false,
+                Element::GroupClose => {
+                    if held <= 1 {
+                        return false;
+                    }
+
+                    held -= 1;
+                }
+                Element::GroupOpen => held += 1,
+                Element::Joined(_)
+                | Element::Text(..)
+                | Element::Verbatim(_)
+                | Element::VerbatimArena(_)
+                    if self.columns(element).0 > 0 =>
+                {
+                    return true;
+                }
+                _ => (),
+            }
+        }
+
+        false
+    }
+
+    fn suffix(&self, element: Element) -> bool {
+        if !LINE_SUFFIXES || !self.document.suffixed() {
+            return false;
+        }
+
+        let (held, span) = match element {
+            Element::Joined(span) | Element::VerbatimArena(span) => (Source::Arena, span),
+            Element::Text(held, span) => (held, span),
+            Element::Verbatim(span) => (Source::Document, span),
+            _ => return false,
+        };
+
+        bytes_of(self.document, self.source, self.arena, held, span).starts_with(b"//")
+    }
 }
 
 fn bytes_of<'held>(
@@ -749,7 +844,7 @@ fn fill_width(held: &Measure<'_>, start: u32, budget: u32) -> u32 {
 
         let (columns, _, spans) = held.columns(element);
 
-        if spans {
+        if spans || held.suffix(element) && held.glues(index, depth + 1) {
             return budget + 1;
         }
 
@@ -879,7 +974,7 @@ fn prefix_width(held: &Measure<'_>, from: u32, to: u32, budget: u32, owed: bool)
             Element::Text(..) | Element::Verbatim(_) | Element::VerbatimArena(_) => {
                 let (leading, _, broken) = held.columns(element);
 
-                if broken {
+                if broken || held.suffix(element) && held.glues(index, 1) {
                     return None;
                 }
 
@@ -982,7 +1077,7 @@ fn body_width(held: &Measure<'_>, elements: &[Element], start: u32, budget: u32)
             Element::Text(..) | Element::Verbatim(_) | Element::VerbatimArena(_) => {
                 let (leading, _, broken) = held.columns(element);
 
-                if broken {
+                if broken || held.suffix(element) && held.glues(index, depth) {
                     return None;
                 }
 
@@ -1123,6 +1218,10 @@ fn spanning(held: &Measure<'_>, from: u32, budget: u32, mut width: u32, kind: He
             }
             Element::Space => width += u32::from(!blank),
             Element::Text(..) | Element::Verbatim(_) | Element::VerbatimArena(_) => {
+                if held.suffix(element) && held.glues(index, depth + 1) {
+                    return Width::Broken;
+                }
+
                 let Some(found) = written(held, element, width, budget) else {
                     return Width::Broken;
                 };
@@ -1337,7 +1436,7 @@ fn width_of(held: &Measure<'_>, start: u32, budget: u32, owed: bool) -> Width {
             continue;
         }
 
-        if held.columns(element).2 {
+        if held.columns(element).2 || held.suffix(element) && held.glues(index, depth) {
             return Width::Broken;
         }
 
@@ -1428,6 +1527,18 @@ pub fn printing(
         }
     }
 
+    let measure = Measure {
+        arena,
+        document,
+        source,
+    };
+
+    if !state.printer.flush(&measure, out) {
+        out.clear();
+
+        return false;
+    }
+
     assert_eq!(state.choices, 0);
     assert_eq!(state.depth, 0);
     assert_eq!(state.printer.indent, 0);
@@ -1478,8 +1589,14 @@ fn step(
         return held;
     }
 
+    let measure = Measure {
+        arena,
+        document,
+        source,
+    };
+
     match element {
-        Element::BlankLine(lines) => blank(&mut state.printer, out, lines),
+        Element::BlankLine(lines) => blank(&mut state.printer, &measure, out, lines),
         Element::Choice(_) | Element::ChoiceClose | Element::Variant => true,
         Element::Dedent => state.dedent(),
         Element::GroupClose => state.close(),
@@ -1492,8 +1609,8 @@ fn step(
             options,
             index,
         ),
-        Element::HardLine => state.printer.newline(out),
-        Element::Hugging(span) => hugs(state, document, source, arena, options, out, span),
+        Element::HardLine => state.printer.newline(&measure, out),
+        Element::Hugging(span) => hugs(state, &measure, options, out, span),
         Element::IfBroken(span) => {
             if !state.broken() {
                 return true;
@@ -1526,24 +1643,39 @@ fn step(
             out,
             index,
         ),
-        Element::SoftLine => state.soft(out),
+        Element::SoftLine => state.soft(&measure, out),
         Element::Space => state.space(),
-        Element::Text(held, span) => {
-            let bytes = bytes_of(document, source, arena, held, span);
-
-            state.printer.text(out, bytes, options)
-        }
-        Element::Verbatim(span) => {
-            let bytes = bytes_of(document, source, arena, Source::Document, span);
-
-            state.printer.verbatim(out, bytes, options)
-        }
-        Element::VerbatimArena(span) => {
-            let bytes = bytes_of(document, source, arena, Source::Arena, span);
-
-            state.printer.verbatim(out, bytes, options)
+        Element::Text(..) | Element::Verbatim(_) | Element::VerbatimArena(_) => {
+            texted(state, &measure, options, out, element)
         }
     }
+}
+
+fn texted(
+    state: &mut State,
+    held: &Measure<'_>,
+    options: Options,
+    out: &mut Buffer,
+    element: Element,
+) -> bool {
+    let (source, span, verbatim) = match element {
+        Element::Text(source, span) => (source, span, false),
+        Element::Verbatim(span) => (Source::Document, span, true),
+        Element::VerbatimArena(span) => (Source::Arena, span, true),
+        _ => return false,
+    };
+
+    if held.suffix(element) && !state.printer.line_start && state.printer.defer(source, span) {
+        return true;
+    }
+
+    let bytes = bytes_of(held.document, held.source, held.arena, source, span);
+
+    if verbatim {
+        return state.printer.verbatim(out, bytes, options);
+    }
+
+    state.printer.text(out, bytes, options)
 }
 
 fn chosen(
@@ -1571,9 +1703,7 @@ fn chosen(
 
 fn hugs(
     state: &mut State,
-    document: &Document,
-    source: &[u8],
-    arena: &[u8],
+    held: &Measure<'_>,
     options: Options,
     out: &mut Buffer,
     span: Span,
@@ -1582,9 +1712,15 @@ fn hugs(
         return true;
     }
 
-    let bytes = bytes_of(document, source, arena, Source::Literal, span);
+    let bytes = bytes_of(
+        held.document,
+        held.source,
+        held.arena,
+        Source::Literal,
+        span,
+    );
 
-    state.printer.text(out, bytes, options) && state.printer.newline(out)
+    state.printer.text(out, bytes, options) && state.printer.newline(held, out)
 }
 
 fn joins(
@@ -1608,17 +1744,17 @@ fn joins(
     state.printer.text(out, bytes, options)
 }
 
-fn blank(printer: &mut Printer, out: &mut Buffer, lines: u32) -> bool {
+fn blank(printer: &mut Printer, held: &Measure<'_>, out: &mut Buffer, lines: u32) -> bool {
     if lines == 0 {
         return true;
     }
 
-    if !printer.line_start && !printer.newline(out) {
+    if !printer.line_start && !printer.newline(held, out) {
         return false;
     }
 
     for _ in 0..lines {
-        if !printer.newline(out) {
+        if !printer.newline(held, out) {
             return false;
         }
     }

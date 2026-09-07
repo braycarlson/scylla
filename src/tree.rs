@@ -1,4 +1,5 @@
-use crate::bounded::{BoundedVec, Span, count_of};
+use crate::bounded::{BoundedVec, Bytes, Span, count_of};
+use crate::scan::{DECIMAL_BYTES_MAX, decimal_write};
 use crate::syntax::{CATEGORY_COUNT, Category};
 
 pub const FRAME_DEPTH_MAX: u32 = 1_024;
@@ -20,6 +21,8 @@ pub trait Kind: Copy + Eq {
     fn is_node(self) -> bool;
 
     fn is_token(self) -> bool;
+
+    fn name(self) -> &'static str;
 }
 
 pub trait Links {
@@ -165,6 +168,26 @@ impl<K: Kind> Tree<K> {
         }
     }
 
+    pub fn ancestor_of(&self, node: u32, kind: K) -> u32 {
+        assert!(node < self.count());
+
+        let mut at = node;
+
+        for _ in 0..self.count() {
+            at = self.at(at).parent;
+
+            if at == NONE {
+                return NONE;
+            }
+
+            if self.at(at).kind == kind {
+                return at;
+            }
+        }
+
+        NONE
+    }
+
     pub fn as_slice(&self) -> &[Node<K>] {
         &self.nodes
     }
@@ -188,6 +211,29 @@ impl<K: Kind> Tree<K> {
 
     pub fn errors(&self) -> &[K::Error] {
         &self.errors
+    }
+
+    pub fn innermost_at<T>(&self, tokens: &[T], offset: u32) -> u32
+    where
+        T: Positioned,
+    {
+        let mut found = NONE;
+        let mut narrowest = u32::MAX;
+
+        for index in 0..self.count() {
+            let span = self.at(index).span(tokens);
+
+            if span.offset > offset || offset > span.end() {
+                continue;
+            }
+
+            if span.length < narrowest {
+                found = index;
+                narrowest = span.length;
+            }
+        }
+
+        found
     }
 
     #[must_use]
@@ -248,6 +294,205 @@ where
             .field("nodes", &&*self.nodes)
             .finish()
     }
+}
+
+struct Dumper<'run, T, W> {
+    depth: u32,
+    out: &'run mut W,
+    position: u32,
+    skipped: u32,
+    source: &'run [u8],
+    token_name: fn(&T) -> &'static str,
+    tokens: &'run [T],
+}
+
+impl<T, W> Dumper<'_, T, W>
+where
+    T: Positioned,
+    W: Bytes,
+{
+    fn entered<K>(&mut self, node: Node<K>, root: bool) -> bool
+    where
+        K: Kind,
+    {
+        if self.skipped > 0 || (!root && node.token_start == node.token_end) {
+            self.skipped += 1;
+
+            return true;
+        }
+
+        if !self.tokens_dumped(node.token_start) {
+            return false;
+        }
+
+        let span = node.span(self.tokens);
+
+        let written = indent_dumped(self.out, self.depth)
+            && self.out.push_bytes(node.kind.name().as_bytes())
+            && span_dumped(self.out, span)
+            && self.out.push_bytes(b"\n");
+
+        self.depth += 1;
+
+        written
+    }
+
+    fn left(&mut self, token_end: u32) -> bool {
+        if self.skipped > 0 {
+            self.skipped -= 1;
+
+            return true;
+        }
+
+        let written = self.tokens_dumped(token_end);
+
+        self.depth = self.depth.saturating_sub(1);
+
+        written
+    }
+
+    fn tokens_dumped(&mut self, end: u32) -> bool {
+        while self.position < end {
+            let Some(token) = self.tokens.get(self.position as usize) else {
+                return false;
+            };
+
+            let span = Span::between(token.offset(), token.end());
+
+            assert!(span.end() as usize <= self.source.len());
+
+            let written = indent_dumped(self.out, self.depth)
+                && self.out.push_bytes((self.token_name)(token).as_bytes())
+                && span_dumped(self.out, span)
+                && self.out.push_bytes(b" \"")
+                && escaped_dumped(self.out, &self.source[span.range()])
+                && self.out.push_bytes(b"\"\n");
+
+            if !written {
+                return false;
+            }
+
+            self.position += 1;
+        }
+
+        true
+    }
+}
+
+fn decimal_dumped<W>(out: &mut W, value: u32) -> bool
+where
+    W: Bytes,
+{
+    let mut digits = [0_u8; DECIMAL_BYTES_MAX];
+    let length = decimal_write(&mut digits, u64::from(value));
+
+    out.push_bytes(&digits[..length])
+}
+
+pub fn dump<K, T, W>(
+    out: &mut W,
+    tree: &Tree<K>,
+    tokens: &[T],
+    source: &[u8],
+    token_name: fn(&T) -> &'static str,
+) -> bool
+where
+    K: Kind,
+    T: Positioned,
+    W: Bytes,
+{
+    assert!(u32::try_from(source.len()).is_ok());
+
+    let mut dumper = Dumper {
+        depth: 0,
+        out,
+        position: 0,
+        skipped: 0,
+        source,
+        token_name,
+        tokens,
+    };
+
+    for step in walk(tree) {
+        let written = match step {
+            Step::Enter(node) => dumper.entered(tree.at(node), node == 0),
+            Step::Leave(node) => dumper.left(tree.at(node).token_end),
+        };
+
+        if !written {
+            return false;
+        }
+    }
+
+    assert_eq!(dumper.depth, 0);
+
+    true
+}
+
+fn escaped_dumped<W>(out: &mut W, text: &[u8]) -> bool
+where
+    W: Bytes,
+{
+    let Ok(held) = core::str::from_utf8(text) else {
+        return text
+            .iter()
+            .all(|byte| out.push_bytes(b"\\x") && hex_dumped(out, *byte));
+    };
+
+    for character in held.chars() {
+        if character == '\'' {
+            if !out.push_bytes(b"'") {
+                return false;
+            }
+
+            continue;
+        }
+
+        for escaped in character.escape_debug() {
+            let mut buffer = [0_u8; 4];
+
+            if !out.push_bytes(escaped.encode_utf8(&mut buffer).as_bytes()) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
+fn hex_dumped<W>(out: &mut W, byte: u8) -> bool
+where
+    W: Bytes,
+{
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+    let high = DIGITS[usize::from(byte >> 4)];
+    let low = DIGITS[usize::from(byte & 0x0f)];
+
+    out.push_bytes(&[high, low])
+}
+
+fn indent_dumped<W>(out: &mut W, depth: u32) -> bool
+where
+    W: Bytes,
+{
+    for _ in 0..depth {
+        if !out.push_bytes(b"  ") {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn span_dumped<W>(out: &mut W, span: Span) -> bool
+where
+    W: Bytes,
+{
+    out.push_bytes(b"@")
+        && decimal_dumped(out, span.offset)
+        && out.push_bytes(b"..")
+        && decimal_dumped(out, span.end())
 }
 
 impl<K: core::fmt::Debug> core::fmt::Debug for Events<K> {
@@ -908,6 +1153,16 @@ mod tests {
         fn is_token(self) -> bool {
             matches!(self, Self::Word)
         }
+
+        fn name(self) -> &'static str {
+            match self {
+                Self::Attribute => "Attribute",
+                Self::BinOp => "BinOp",
+                Self::Error => "Error",
+                Self::Name => "Name",
+                Self::Word => "Word",
+            }
+        }
     }
 
     impl Positioned for Spot {
@@ -1290,6 +1545,57 @@ mod tests {
         assert_eq!(tree.count(), 6);
         assert_eq!(entered, vec![0, 1, 2, 3, 4, 5]);
         assert_eq!(walk(&tree).count(), 12);
+    }
+
+    #[test]
+    fn an_ancestor_search_climbs_to_the_kind_it_names() {
+        let tree = nested();
+
+        assert_eq!(tree.ancestor_of(3, TestKind::Attribute), 2);
+        assert_eq!(tree.ancestor_of(3, TestKind::BinOp), 0);
+        assert_eq!(tree.ancestor_of(3, TestKind::Name), NONE);
+        assert_eq!(tree.ancestor_of(0, TestKind::BinOp), NONE);
+    }
+
+    #[test]
+    fn the_innermost_node_at_an_offset_is_the_narrowest_cover() {
+        let tree = nested();
+        let tokens = spots(3);
+
+        assert_eq!(tree.innermost_at(&tokens, 1), 1);
+        assert_eq!(tree.innermost_at(&tokens, 3), 2);
+        assert_eq!(tree.innermost_at(&tokens, 5), NONE);
+    }
+
+    #[test]
+    fn a_dump_writes_nodes_and_tokens_in_walk_order() {
+        let tree = nested();
+        let tokens = spots(3);
+        let mut out = crate::bounded::BoundedString::reserve(1 << 10);
+
+        assert!(dump(&mut out, &tree, &tokens, b"a'c", |_| "Word"));
+
+        assert_eq!(
+            out.as_str(),
+            "BinOp@0..3\n  Word@0..1 \"a\"\n  Name@1..2\n    Word@1..2 \"'\"\n  Attribute@2..3\n    Name@2..3\n      Word@2..3 \"c\"\n"
+        );
+    }
+
+    #[test]
+    fn a_dump_escapes_bytes_that_are_not_text() {
+        let mut events = Events::<TestKind>::reserve(8);
+        let mut tree = Tree::<TestKind>::reserve(8, 2);
+        let mut out = crate::bounded::BoundedString::reserve(1 << 8);
+        let mut starved = crate::bounded::BoundedString::reserve(4);
+
+        events.start(TestKind::Name);
+        events.token(0);
+        events.finish();
+
+        assert_eq!(replay(&mut events, &mut tree), Structure::Complete);
+        assert!(dump(&mut out, &tree, &spots(1), &[0xff], |_| "Word"));
+        assert_eq!(out.as_str(), "Name@0..1\n  Word@0..1 \"\\xff\"\n");
+        assert!(!dump(&mut starved, &tree, &spots(1), b"\n", |_| "Word"));
     }
 
     #[test]

@@ -306,7 +306,7 @@ fn template(generator: Generator) {
 
         tiles(source, tokens.as_slice(), outcome, &label);
         markup_tree::build(source, tokens.as_slice(), &mut tree);
-        blocks::build(source, tokens.as_slice(), &tree, &[], &[], &mut map);
+        blocks::build(source, tokens.as_slice(), &tree, &[], &[], b"end", &mut map);
         links_hold(&tree, &label);
 
         let walked = walk(&tree).count();

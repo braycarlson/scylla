@@ -116,11 +116,13 @@ pub enum FactKind {
     ExportAll,
     ExportDefault,
     ExportNamed,
+    Extends,
     ImportDefault,
     ImportNamed,
     ImportNamespace,
     ImportSideEffect,
     ImportType,
+    Include { only: bool },
     Reexport,
 }
 
@@ -166,11 +168,13 @@ impl FactKind {
             Self::ExportAll => "ExportAll",
             Self::ExportDefault => "ExportDefault",
             Self::ExportNamed => "ExportNamed",
+            Self::Extends => "Extends",
             Self::ImportDefault => "ImportDefault",
             Self::ImportNamed => "ImportNamed",
             Self::ImportNamespace => "ImportNamespace",
             Self::ImportSideEffect => "ImportSideEffect",
             Self::ImportType => "ImportType",
+            Self::Include { .. } => "Include",
             Self::Reexport => "Reexport",
         }
     }
@@ -266,5 +270,19 @@ impl SyntaxErrorKind {
             Self::UnexpectedToken => "UnexpectedToken",
             Self::UnmatchedBracket => "UnmatchedBracket",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_template_fact_imports() {
+        assert!(FactKind::Extends.imports());
+        assert!(FactKind::Include { only: true }.imports());
+        assert!(!FactKind::Include { only: false }.exports());
+        assert_eq!(FactKind::Extends.name(), "Extends");
+        assert_eq!(FactKind::Include { only: true }.name(), "Include");
     }
 }

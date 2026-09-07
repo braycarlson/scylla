@@ -1,3 +1,4 @@
+use core::cmp::Ordering;
 use core::fmt::{self, Write as _};
 
 use crate::bounded::{BoundedString, BoundedVec, Span, count_of};
@@ -55,6 +56,24 @@ pub struct Diagnostics {
     related: BoundedVec<Related>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Finding {
+    pub file: FileID,
+    pub row: Diagnostic,
+}
+
+#[derive(Debug)]
+pub struct Findings {
+    files: BoundedVec<Diagnostics>,
+    order: BoundedVec<FileID>,
+}
+
+pub struct Walk<'run> {
+    at: u32,
+    held: &'run Findings,
+    row: u32,
+}
+
 impl FileID {
     pub const fn of(index: u32) -> Self {
         assert!(index != NONE);
@@ -70,6 +89,15 @@ impl FileID {
 }
 
 impl Severity {
+    pub const fn lsp_code(self) -> i64 {
+        match self {
+            Self::Error => 1,
+            Self::Hint => 4,
+            Self::Information => 3,
+            Self::Warning => 2,
+        }
+    }
+
     pub const fn name(self) -> &'static str {
         match self {
             Self::Error => "error",
@@ -359,6 +387,226 @@ impl Diagnostic {
     }
 }
 
+impl Findings {
+    pub fn reserve(file_count_max: u32, count_max: u32, arena_bytes_max: u32) -> Self {
+        assert!(file_count_max > 0);
+        assert!(count_max > 0);
+        assert!(arena_bytes_max > 0);
+        assert!(!crate::allocation::is_frozen());
+
+        let mut files = BoundedVec::reserve(file_count_max);
+
+        for _ in 0..file_count_max {
+            files.push_assert(Diagnostics::reserve(count_max, arena_bytes_max));
+        }
+
+        assert_eq!(files.count(), file_count_max);
+
+        Self {
+            files,
+            order: BoundedVec::reserve(file_count_max),
+        }
+    }
+
+    pub fn clear(&mut self) {
+        for held in self.files.iter_mut() {
+            held.clear();
+        }
+
+        self.order.clear();
+
+        assert!(self.is_empty());
+    }
+
+    pub fn count(&self) -> u32 {
+        let mut found = 0_u32;
+
+        for held in self.files.iter() {
+            found = found.saturating_add(held.count());
+        }
+
+        found
+    }
+
+    pub fn detach(&mut self, file: FileID, index: u32) {
+        let Some(held) = self.of_mut(file) else {
+            return;
+        };
+
+        held.attach(index, FIX_NONE);
+    }
+
+    pub fn file_count(&self) -> u32 {
+        self.files.count()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.iter().all(Diagnostics::is_empty)
+    }
+
+    pub fn is_overflowed(&self) -> bool {
+        self.files.iter().any(Diagnostics::is_overflowed)
+    }
+
+    pub const fn iter(&self) -> Walk<'_> {
+        Walk {
+            at: 0,
+            held: self,
+            row: 0,
+        }
+    }
+
+    pub fn message_of(&self, finding: &Finding) -> &[u8] {
+        let Some(held) = self.of(finding.file) else {
+            return &[];
+        };
+
+        held.message_of(&finding.row)
+    }
+
+    pub fn of(&self, file: FileID) -> Option<&Diagnostics> {
+        self.files.get(file.index() as usize)
+    }
+
+    pub fn of_mut(&mut self, file: FileID) -> Option<&mut Diagnostics> {
+        self.files.get_mut(file.index() as usize)
+    }
+
+    pub fn order(&self) -> &[FileID] {
+        &self.order
+    }
+
+    #[must_use]
+    pub fn push(&mut self, file: FileID, row: Diagnostic) -> bool {
+        let Some(held) = self.of_mut(file) else {
+            return false;
+        };
+
+        held.push(row)
+    }
+
+    #[must_use]
+    pub fn push_formatted(
+        &mut self,
+        file: FileID,
+        row: Diagnostic,
+        arguments: fmt::Arguments<'_>,
+    ) -> bool {
+        let Some(held) = self.of_mut(file) else {
+            return false;
+        };
+
+        held.push_formatted_row(row, arguments)
+    }
+
+    #[must_use]
+    pub fn push_related(&mut self, file: FileID, related: Related) -> bool {
+        let Some(held) = self.of_mut(file) else {
+            return false;
+        };
+
+        held.push_related(related)
+    }
+
+    #[must_use]
+    pub fn push_related_formatted(
+        &mut self,
+        file: FileID,
+        related: Related,
+        arguments: fmt::Arguments<'_>,
+    ) -> bool {
+        let Some(held) = self.of_mut(file) else {
+            return false;
+        };
+
+        held.push_related_formatted(related.file, related.span, arguments)
+    }
+
+    pub fn related_count(&self, file: FileID) -> u32 {
+        self.of(file).map_or(0, Diagnostics::related_count)
+    }
+
+    pub fn related_message_of(&self, finding: &Finding, related: &Related) -> &[u8] {
+        let Some(held) = self.of(finding.file) else {
+            return &[];
+        };
+
+        held.related_message_of(related)
+    }
+
+    pub fn related_of(&self, finding: &Finding) -> &[Related] {
+        let Some(held) = self.of(finding.file) else {
+            return &[];
+        };
+
+        held.related_of(&finding.row)
+    }
+
+    pub fn sort(&mut self, mut compare: impl FnMut(FileID, FileID) -> Ordering) {
+        self.order.clear();
+
+        for index in 0..self.files.count() {
+            let held = &mut self.files[index as usize];
+
+            if held.is_empty() {
+                continue;
+            }
+
+            held.sort();
+            self.order.push_assert(FileID::of(index));
+        }
+
+        self.order.sort_by(|left, right| compare(*left, *right));
+
+        assert!(self.order.count() <= self.files.count());
+    }
+}
+
+impl Iterator for Walk<'_> {
+    type Item = Finding;
+
+    fn next(&mut self) -> Option<Finding> {
+        loop {
+            let file = self.held.order.get(self.at as usize).copied()?;
+            let held = self.held.of(file)?;
+
+            if self.row >= held.count() {
+                self.at = self.at.saturating_add(1);
+                self.row = 0;
+
+                continue;
+            }
+
+            let row = held.at(self.row).copied()?;
+
+            self.row = self.row.saturating_add(1);
+
+            return Some(Finding { file, row });
+        }
+    }
+}
+
+impl<'run> IntoIterator for &'run Findings {
+    type IntoIter = Walk<'run>;
+    type Item = Finding;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+pub fn path_order(left: &[u8], right: &[u8]) -> Ordering {
+    let folded = |byte: &u8| if *byte == b'/' { 0_u8 } else { *byte };
+
+    left.iter().map(folded).cmp(right.iter().map(folded))
+}
+
+pub fn shared(count: u32, files: u32) -> u32 {
+    assert!(files > 0);
+
+    count.checked_div(files).unwrap_or(count).max(1)
+}
+
 fn key_of(diagnostic: &Diagnostic) -> (u32, &'static str) {
     (diagnostic.span.offset, diagnostic.code)
 }
@@ -572,6 +820,10 @@ mod tests {
         assert_eq!(Severity::of("WARN"), Some(Severity::Warning));
         assert_eq!(Severity::of("information"), Some(Severity::Information));
         assert_eq!(Severity::of("loud"), None);
+        assert_eq!(Severity::Error.lsp_code(), 1);
+        assert_eq!(Severity::Warning.lsp_code(), 2);
+        assert_eq!(Severity::Information.lsp_code(), 3);
+        assert_eq!(Severity::Hint.lsp_code(), 4);
         assert!(Severity::Error > Severity::Warning);
         assert!(Severity::Hint < Severity::Information);
         assert_eq!(Severity::Warning.name(), "warning");
@@ -596,5 +848,109 @@ mod tests {
 
             offset_previous = diagnostic.span.offset;
         }
+    }
+
+    #[test]
+    fn a_findings_table_walks_its_files_in_the_sorted_order() {
+        let mut findings = Findings::reserve(3, 4, 1 << 10);
+        let paths: [&[u8]; 3] = [b"b/z.rs", b"a/y.rs", b"a-x.rs"];
+
+        assert!(findings.push(FileID::of(0), row("TS002", 8, FIX_NONE)));
+        assert!(findings.push(FileID::of(0), row("TS001", 2, FIX_NONE)));
+        assert!(findings.push(FileID::of(2), row("TS003", 0, FIX_NONE)));
+        assert_eq!(findings.count(), 3);
+        assert!(!findings.is_empty());
+        assert!(!findings.is_overflowed());
+
+        findings.sort(|left, right| {
+            path_order(paths[left.index() as usize], paths[right.index() as usize])
+        });
+
+        assert_eq!(findings.order(), &[FileID::of(2), FileID::of(0)]);
+
+        let walked: Vec<(u32, u32)> = findings
+            .iter()
+            .map(|finding| (finding.file.index(), finding.row.span.offset))
+            .collect();
+
+        assert_eq!(walked, vec![(2, 0), (0, 2), (0, 8)]);
+
+        let first = findings.iter().next().expect("a row was walked");
+
+        assert_eq!(findings.message_of(&first), b"a recorded finding");
+        assert!(findings.related_of(&first).is_empty());
+
+        findings.clear();
+
+        assert!(findings.is_empty());
+        assert_eq!(findings.count(), 0);
+    }
+
+    #[test]
+    fn a_findings_table_carries_related_rows_and_detaches_a_fix() {
+        let mut findings = Findings::reserve(2, 4, 1 << 10);
+        let file = FileID::of(1);
+
+        assert!(findings.push_related(file, related_row(4)));
+
+        assert!(findings.push_related_formatted(
+            file,
+            related_row(8),
+            format_args!("bound at {}", 8)
+        ));
+
+        assert_eq!(findings.related_count(file), 2);
+        assert_eq!(findings.related_count(FileID::of(0)), 0);
+
+        assert!(findings.push_formatted(
+            file,
+            Diagnostic {
+                related_count: 2,
+                related_start: 0,
+                ..row("TS001", 0, 3)
+            },
+            format_args!("names {}", "two"),
+        ));
+
+        findings.sort(|_, _| Ordering::Equal);
+
+        let finding = findings.iter().next().expect("a row was walked");
+        let related = findings.related_of(&finding);
+
+        assert_eq!(related.len(), 2);
+        assert_eq!(findings.message_of(&finding), b"names two");
+        assert_eq!(
+            findings.related_message_of(&finding, &related[1]),
+            b"bound at 8"
+        );
+        assert!(finding.row.is_fixed());
+
+        findings.detach(file, 0);
+
+        let detached = findings.iter().next().expect("a row was walked");
+
+        assert!(!detached.row.is_fixed());
+        assert_eq!(findings.file_count(), 2);
+    }
+
+    #[test]
+    fn a_findings_table_refuses_a_file_it_does_not_hold() {
+        let mut findings = Findings::reserve(1, 2, 1 << 10);
+        let missing = FileID::of(4);
+
+        assert!(!findings.push(missing, row("TS001", 0, FIX_NONE)));
+        assert!(!findings.push_related(missing, related_row(0)));
+        assert!(findings.of(missing).is_none());
+        assert!(findings.of_mut(missing).is_none());
+    }
+
+    #[test]
+    fn a_path_order_sorts_a_separator_before_every_byte() {
+        assert_eq!(path_order(b"a/b.rs", b"a-b.rs"), Ordering::Less);
+        assert_eq!(path_order(b"a.rs", b"a.rs"), Ordering::Equal);
+        assert_eq!(path_order(b"b", b"a"), Ordering::Greater);
+        assert_eq!(shared(10, 4), 2);
+        assert_eq!(shared(1, 4), 1);
+        assert_eq!(shared(8, 1), 8);
     }
 }

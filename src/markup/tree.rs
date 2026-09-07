@@ -1,4 +1,4 @@
-use crate::bounded::{Span, count_of};
+use crate::bounded::{Bytes, Span, count_of};
 use crate::markup::kind::MarkupKind;
 use crate::markup::token::Token;
 use crate::syntax::Category;
@@ -82,6 +82,7 @@ pub enum TreeErrorKind {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TreeError {
     pub kind: TreeErrorKind,
+    pub name: Span,
     pub span: Span,
 }
 
@@ -117,6 +118,10 @@ impl Kind for MarkupKind {
 
     fn is_token(self) -> bool {
         Self::is_token(self)
+    }
+
+    fn name(self) -> &'static str {
+        Self::name(self)
     }
 }
 
@@ -216,7 +221,11 @@ impl<'source, 'tokens, 'tree> Builder<'source, 'tokens, 'tree> {
         let frame = self.stack[self.depth as usize - 1];
 
         if frame.name_token != NONE {
-            self.record(TreeErrorKind::UnclosedElement, frame.offset);
+            self.record(
+                TreeErrorKind::UnclosedElement,
+                frame.offset,
+                frame.name_token,
+            );
         }
 
         self.finish_node();
@@ -385,7 +394,7 @@ impl<'source, 'tokens, 'tree> Builder<'source, 'tokens, 'tree> {
         let unwind = self.matching_frame(name);
 
         if unwind == NONE {
-            self.record(TreeErrorKind::UnexpectedCloseTag, start);
+            self.record(TreeErrorKind::UnexpectedCloseTag, start, name);
             self.parse_wrapped_close_tag(MarkupKind::ErrorNode);
 
             return;
@@ -471,7 +480,7 @@ impl<'source, 'tokens, 'tree> Builder<'source, 'tokens, 'tree> {
         }
 
         if !terminated {
-            self.record(TreeErrorKind::UnterminatedAttributeValue, start);
+            self.record(TreeErrorKind::UnterminatedAttributeValue, start, NONE);
         }
 
         self.finish_node();
@@ -506,7 +515,7 @@ impl<'source, 'tokens, 'tree> Builder<'source, 'tokens, 'tree> {
         self.close_filters(&mut filters);
 
         if !terminated {
-            self.record(error, start);
+            self.record(error, start, NONE);
         }
 
         self.finish_node();
@@ -541,9 +550,15 @@ impl<'source, 'tokens, 'tree> Builder<'source, 'tokens, 'tree> {
             .map(|token| token.kind)
     }
 
-    fn record(&mut self, kind: TreeErrorKind, offset: u32) {
+    fn record(&mut self, kind: TreeErrorKind, offset: u32, name_token: u32) {
+        let name = self
+            .tokens
+            .get(name_token as usize)
+            .map_or(Span::EMPTY, Token::span);
+
         let recorded = self.tree.push_error(TreeError {
             kind,
+            name,
             span: Span { length: 0, offset },
         });
 
@@ -741,6 +756,42 @@ fn name_equals(name: &[u8], other: &[u8]) -> bool {
     name.eq_ignore_ascii_case(other)
 }
 
+pub fn dump<W>(out: &mut W, tree: &Tree, tokens: &[Token], source: &[u8]) -> bool
+where
+    W: Bytes,
+{
+    assert!(u32::try_from(source.len()).is_ok());
+
+    if !crate::tree::dump(out, tree, tokens, source, |token| token.kind.name()) {
+        return false;
+    }
+
+    if tree.errors().is_empty() {
+        return true;
+    }
+
+    if !out.push_bytes(b"\nerrors:\n") {
+        return false;
+    }
+
+    for error in tree.errors() {
+        let mut digits = [0_u8; crate::scan::DECIMAL_BYTES_MAX];
+        let length = crate::scan::decimal_write(&mut digits, u64::from(error.span.offset));
+
+        let written = out.push_bytes(b"  ")
+            && out.push_bytes(error.kind.name().as_bytes())
+            && out.push_bytes(b"@")
+            && out.push_bytes(&digits[..length])
+            && out.push_bytes(b"\n");
+
+        if !written {
+            return false;
+        }
+    }
+
+    true
+}
+
 pub fn build(source: &[u8], tokens: &[Token], tree: &mut Tree) -> Structure {
     assert!(u32::try_from(source.len()).is_ok());
     assert!(u32::try_from(tokens.len()).is_ok());
@@ -753,4 +804,81 @@ pub fn build(source: &[u8], tokens: &[Token], tree: &mut Tree) -> Structure {
     assert!(count_of(tokens.len()) >= tree.count() || tree.count() > 0);
 
     outcome
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bounded::BoundedString;
+    use crate::markup::{self, Tokens};
+
+    fn built(source: &[u8]) -> (Tokens, Tree) {
+        let mut tokens = Tokens::reserve(1 << 10);
+        let mut tree = Tree::reserve(1 << 10, 1 << 4);
+
+        markup::lex(source, &mut tokens);
+        let _ = build(source, tokens.as_slice(), &mut tree);
+
+        (tokens, tree)
+    }
+
+    #[test]
+    fn an_unclosed_element_names_its_tag() {
+        const SOURCE: &[u8] = b"<div><span>a</div>\n";
+
+        let (_, tree) = built(SOURCE);
+        let error = tree.errors()[0];
+
+        assert_eq!(error.kind, TreeErrorKind::UnclosedElement);
+        assert_eq!(&SOURCE[error.name.range()], b"span");
+        assert_eq!(error.span.offset, 5);
+    }
+
+    #[test]
+    fn an_unexpected_close_tag_names_its_tag() {
+        const SOURCE: &[u8] = b"<div></p></div>\n";
+
+        let (_, tree) = built(SOURCE);
+        let error = tree.errors()[0];
+
+        assert_eq!(error.kind, TreeErrorKind::UnexpectedCloseTag);
+        assert_eq!(&SOURCE[error.name.range()], b"p");
+        assert_eq!(error.span.offset, 5);
+    }
+
+    #[test]
+    fn an_unterminated_construct_names_nothing() {
+        const SOURCE: &[u8] = b"{{ a ";
+
+        let (_, tree) = built(SOURCE);
+
+        assert_eq!(tree.errors().len(), 1);
+        assert_eq!(tree.errors()[0].kind, TreeErrorKind::UnterminatedTemplateVariable);
+        assert_eq!(tree.errors()[0].name, Span::EMPTY);
+    }
+
+    #[test]
+    fn a_dump_lists_the_tree_then_its_errors() {
+        const SOURCE: &[u8] = b"<p>a";
+
+        let (tokens, tree) = built(SOURCE);
+        let mut out = BoundedString::reserve(1 << 10);
+
+        assert!(dump(&mut out, &tree, tokens.as_slice(), SOURCE));
+
+        assert_eq!(
+            out.as_str(),
+            "Document@0..4\n  Element@0..4\n    OpenTag@0..3\n      AngleOpen@0..1 \"<\"\n      ElementName@1..2 \"p\"\n      AngleClose@2..3 \">\"\n    Text@3..4 \"a\"\n\nerrors:\n  UnclosedElement@0\n"
+        );
+    }
+
+    #[test]
+    fn a_starved_dump_reports_the_overflow() {
+        const SOURCE: &[u8] = b"<p>a</p>\n";
+
+        let (tokens, tree) = built(SOURCE);
+        let mut out = BoundedString::reserve(8);
+
+        assert!(!dump(&mut out, &tree, tokens.as_slice(), SOURCE));
+    }
 }

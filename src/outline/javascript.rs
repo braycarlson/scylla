@@ -122,6 +122,12 @@ struct Builder<'run> {
     tokens: &'run [Token],
 }
 
+struct Levels {
+    count: usize,
+    depths: [u32; SCOPE_STACK_MAX],
+    starts: [u32; SCOPE_STACK_MAX],
+}
+
 impl Outline {
     pub fn reserve(row_count_max: u32, segment_count_max: u32, token_count_max: u32) -> Self {
         assert!(row_count_max > 0);
@@ -1394,39 +1400,96 @@ impl Builder<'_> {
     }
 
     fn build_statements(&mut self) {
-        let mut start = 0;
-        let mut index = 0;
+        let mut levels = Levels {
+            count: 0,
+            depths: [0; SCOPE_STACK_MAX],
+            starts: [0; SCOPE_STACK_MAX],
+        };
 
-        while index < self.count() {
-            if self.pairs.depth_of(index) > 0 {
-                index += 1;
+        for index in 0..self.count() {
+            let token = self.tokens[index as usize];
+
+            if token.kind == TokenKind::BlockStart {
+                self.statement_open(&mut levels, index);
 
                 continue;
             }
 
-            let token = self.tokens[index as usize];
+            if token.kind == TokenKind::BlockEnd {
+                self.statement_close(&mut levels, index);
 
-            let terminates = token.is_punctuation(Punctuation::Semicolon)
-                || self.outline.braces[index as usize] == BraceKind::Block
-                || token.kind == TokenKind::BlockEnd;
+                continue;
+            }
 
+            if self.pairs.depth_of(index) != levels.depths[levels.count] {
+                continue;
+            }
+
+            let terminates = token.is_punctuation(Punctuation::Semicolon);
             let breaks = self.breaks_line(index) && !self.continues_expression(index + 1);
 
             if !terminates && !breaks {
-                index += 1;
-
                 continue;
             }
 
             let end = if terminates { index } else { index + 1 };
 
-            self.push_statement(start, end);
+            self.push_statement(levels.starts[levels.count], end);
 
-            start = index + 1;
-            index += 1;
+            levels.starts[levels.count] = index + 1;
         }
 
-        self.push_statement(start, self.count());
+        while levels.count > 0 {
+            self.push_statement(levels.starts[levels.count], self.count());
+
+            levels.count -= 1;
+        }
+
+        self.push_statement(levels.starts[0], self.count());
+    }
+
+    fn statement_open(&mut self, levels: &mut Levels, index: u32) {
+        let depth = self.pairs.depth_of(index);
+        let level = levels.count;
+
+        if depth == levels.depths[level] && self.outline.braces[index as usize] == BraceKind::Block
+        {
+            self.push_statement(levels.starts[level], index);
+
+            levels.starts[level] = index + 1;
+        }
+
+        if level + 1 >= SCOPE_STACK_MAX {
+            return;
+        }
+
+        levels.count = level + 1;
+        levels.depths[level + 1] = depth + 1;
+        levels.starts[level + 1] = index + 1;
+    }
+
+    fn statement_close(&mut self, levels: &mut Levels, index: u32) {
+        let depth = self.pairs.depth_of(index);
+
+        if levels.count > 0 && levels.depths[levels.count] == depth + 1 {
+            self.push_statement(levels.starts[levels.count], index);
+
+            levels.count -= 1;
+        }
+
+        let level = levels.count;
+
+        if depth != levels.depths[level] {
+            return;
+        }
+
+        let open = self.pairs.partner_of(index);
+
+        if open == NONE || levels.starts[level] != open + 1 {
+            self.push_statement(levels.starts[level], index);
+        }
+
+        levels.starts[level] = index + 1;
     }
 
     fn push_statement(&mut self, start: u32, end: u32) {
@@ -1535,7 +1598,8 @@ pub fn chain_fate(call: &Call, source: &[u8], tokens: &[Token], statements: &[St
 
     let Some(statement) = statements
         .iter()
-        .find(|held| held.token_start <= call.paren_open && call.paren_open < held.token_end)
+        .filter(|held| held.token_start <= call.paren_open && call.paren_open < held.token_end)
+        .min_by_key(|held| held.token_end - held.token_start)
     else {
         return Fate {
             chained: false,
@@ -1601,7 +1665,7 @@ fn leading_tokens(statement: &Statement, call: &Call, tokens: &[Token], source: 
             continue;
         }
 
-        if token.text(source) == b"new" {
+        if matches!(token.text(source), b"new" | b"super" | b"this") {
             index += 1;
 
             continue;

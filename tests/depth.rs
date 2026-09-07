@@ -16,6 +16,7 @@ const LIMITS: Limits = Limits {
     reference_count_max: 1 << 14,
     scope_count_max: 1 << 12,
     segment_count_max: 1 << 12,
+    tag_count_max: 1 << 12,
     token_count_max: 1 << 20,
 };
 

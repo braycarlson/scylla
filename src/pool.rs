@@ -13,7 +13,7 @@ use core::ptr::{NonNull, null_mut};
 use core::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, Ordering};
 use core::time::Duration;
 use std::sync::{Condvar, Mutex};
-use std::thread::{JoinHandle, spawn};
+use std::thread::{JoinHandle, available_parallelism, spawn};
 
 pub const WORKER_COUNT_MAX: u32 = 64;
 const CLAIM_GENERATION_SHIFT: u32 = 32;
@@ -491,6 +491,17 @@ const fn tagged(generation: u64) -> u64 {
     (generation & CLAIM_INDEX_MASK) << CLAIM_GENERATION_SHIFT
 }
 
+pub fn worker_count_for(item_count: u32) -> u32 {
+    let available =
+        available_parallelism().map_or(1, |held| u32::try_from(held.get()).unwrap_or(1));
+    let chosen = available.clamp(1, WORKER_COUNT_MAX).min(item_count).max(1);
+
+    assert!(chosen >= 1);
+    assert!(chosen <= WORKER_COUNT_MAX);
+
+    chosen
+}
+
 fn stateful_trampoline<T, S>(task: NonNull<()>, worker: u32, index: u32)
 where
     T: Sync,
@@ -508,4 +519,18 @@ where
     let held: &Job<'_, T> = unsafe { task.cast::<Job<'_, T>>().as_ref() };
 
     held.run(index);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_worker_count_is_floored_at_one_and_capped_by_the_items() {
+        assert_eq!(worker_count_for(0), 1);
+        assert_eq!(worker_count_for(1), 1);
+        assert!(worker_count_for(u32::MAX) <= WORKER_COUNT_MAX);
+        assert!(worker_count_for(3) <= 3);
+        assert!(worker_count_for(3) >= 1);
+    }
 }

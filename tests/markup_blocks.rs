@@ -2,6 +2,7 @@ use scylla::markup::blocks::{self, BlockMap, TagSpecification};
 use scylla::markup::tree::{self, Tree};
 use scylla::markup::{self, Tokens};
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const ERROR_COUNT_MAX: u32 = 1 << 10;
 const NODE_COUNT_MAX: u32 = 1 << 12;
 const TAG_COUNT_MAX: u32 = 1 << 11;
@@ -41,7 +42,7 @@ impl Built {
         let mut map = BlockMap::reserve(TAG_COUNT_MAX);
         let bytes = source.as_bytes().to_vec();
 
-        markup::lex(&bytes, &mut tokens);
+        markup::lex_with(&bytes, &mut tokens, RAW_TEXT_TAGS);
         tree::build(&bytes, tokens.as_slice(), &mut built);
 
         blocks::build(
@@ -50,6 +51,7 @@ impl Built {
             &built,
             SPECIFICATIONS,
             WORDS,
+            b"end",
             &mut map,
         );
 

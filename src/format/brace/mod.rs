@@ -238,7 +238,7 @@ struct Emitter<'held> {
     continued: bool,
     count: u32,
     declared: Option<u32>,
-    dedents: [u32; ASSIGN_DEPTH_MAX as usize],
+    dedents: [(u32, u32); ASSIGN_DEPTH_MAX as usize],
     depth: u32,
     document: &'held mut Document,
     gives: &'held [u32],
@@ -258,6 +258,7 @@ struct Emitter<'held> {
     origins: &'held [u32],
     owed: u32,
     owing: u32,
+    owns: u32,
     policy: Policy,
     previous: Option<u32>,
     printed: u32,
@@ -388,7 +389,7 @@ impl Formatter {
             continued: false,
             count: count_of(input.tokens.len()),
             declared: None,
-            dedents: [0; ASSIGN_DEPTH_MAX as usize],
+            dedents: [(0, 0); ASSIGN_DEPTH_MAX as usize],
             depth: 0,
             document: &mut self.document,
             gives: input.gives,
@@ -406,6 +407,7 @@ impl Formatter {
             options: input.options,
             owed: 0,
             owing: 0,
+            owns: 0,
             policy: input.policy,
             origin: input.origin,
             origins: input.origins,
@@ -1969,15 +1971,18 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
-        self.owing = self.owed;
+        let held = self.owed;
 
-        while self.owed > 0 {
+        while self.owed > 0 && self.depth <= self.dedents[self.owed as usize - 1].1 {
             self.owed -= 1;
 
             if !self.document.push(Element::DedentBroken) {
                 return false;
             }
         }
+
+        self.owing = held;
+        self.owns = held - self.owed;
 
         true
     }
@@ -2046,32 +2051,8 @@ impl<'held> Emitter<'held> {
 
             self.depth += 1;
 
-            let heads = self.word_is(self.line_first, self.policy.header_words)
-                || self.word_is(self.line_first, self.policy.block_words);
-
-            let headed = self.policy.header_words.is_empty()
-                || self.head_word(position, self.policy.header_words).is_some();
-
-            let statement = bounded
-                || self.heritage_bodied(position)
-                || self.bodied(position) && self.printed > self.levels && !heads && headed;
-
-            let carried = if HEADER_LINES && self.policy.header_lines {
-                self.header_lined(position)
-                    .and_then(|head| self.line_level(head))
-                    .filter(|level| *level < self.printed)
-            } else {
-                None
-            };
-
             if indents {
-                self.levels = if statement {
-                    self.levels + 1
-                } else if let Some(level) = carried {
-                    level + 1
-                } else {
-                    self.printed + 1
-                };
+                self.levels = self.nested_level(position, bounded);
             }
 
             return true;
@@ -2087,6 +2068,34 @@ impl<'held> Emitter<'held> {
         }
 
         true
+    }
+
+    fn nested_level(&self, position: u32, bounded: bool) -> u32 {
+        let heads = self.word_is(self.line_first, self.policy.header_words)
+            || self.word_is(self.line_first, self.policy.block_words);
+
+        let headed = self.policy.header_words.is_empty()
+            || self.head_word(position, self.policy.header_words).is_some();
+
+        let statement = bounded
+            || self.heritage_bodied(position)
+            || self.bodied(position) && self.printed > self.levels && !heads && headed;
+
+        let carried = if HEADER_LINES && self.policy.header_lines {
+            self.header_lined(position)
+                .and_then(|head| self.line_level(head))
+                .filter(|level| *level < self.printed)
+        } else {
+            None
+        };
+
+        if statement {
+            self.levels + 1
+        } else if let Some(level) = carried {
+            level + 1
+        } else {
+            self.printed + 1
+        }
     }
 
     fn indexes(&self, position: u32) -> bool {
@@ -2723,7 +2732,10 @@ impl<'held> Emitter<'held> {
     }
 
     fn parts_after(&self, position: u32, open: u32) -> bool {
-        self.parts_body(position) || self.arms(position) || self.ends_statement(position, open)
+        self.parts_body(position)
+            || self.arms(position)
+            || self.ends_statement(position, open)
+            || self.ternary_parted(position)
     }
 
     fn ends_statement(&self, position: u32, open: u32) -> bool {
@@ -2864,6 +2876,10 @@ impl<'held> Emitter<'held> {
 
         if self.remark_ended(previous) && !self.spreads() {
             return true;
+        }
+
+        if self.remark_trailing(position) && !is_open(self.tokens[previous as usize].kind) {
+            return false;
         }
 
         if self.chain_broken(position) || self.member_parted(position) {
@@ -4338,19 +4354,7 @@ impl<'held> Emitter<'held> {
             return false;
         };
 
-        if self.generator_star(previous) {
-            return false;
-        }
-
-        if self.module_star(position, previous) {
-            return true;
-        }
-
-        if let Some(held) = self.sourced(position, previous) {
-            return held;
-        }
-
-        if let Some(held) = self.kept(position, previous) {
+        if let Some(held) = self.decided_early(position, previous) {
             return held;
         }
 
@@ -4391,16 +4395,8 @@ impl<'held> Emitter<'held> {
             return self.dotted(position, previous);
         }
 
-        if kind == TokenKind::Punctuation(Punctuation::Semicolon)
-            && matches!(held, TokenKind::Keyword(_))
-        {
-            return self.tokens[previous as usize].end() < self.tokens[position as usize].offset;
-        }
-
-        if kind == TokenKind::Punctuation(Punctuation::Semicolon)
-            && held == TokenKind::Punctuation(Punctuation::Semicolon)
-        {
-            return frame.kind != TokenKind::Punctuation(Punctuation::ParenOpen);
+        if let Some(decided) = self.decided_semicolon(position, previous, frame) {
+            return decided;
         }
 
         if matches!(
@@ -4438,6 +4434,37 @@ impl<'held> Emitter<'held> {
         }
 
         true
+    }
+
+    fn decided_early(&self, position: u32, previous: u32) -> Option<bool> {
+        if self.generator_star(previous) {
+            return Some(false);
+        }
+
+        if self.module_star(position, previous) {
+            return Some(true);
+        }
+
+        self.sourced(position, previous)
+            .or_else(|| self.kept(position, previous))
+    }
+
+    fn decided_semicolon(&self, position: u32, previous: u32, frame: Frame) -> Option<bool> {
+        let held = self.tokens[previous as usize].kind;
+        let kind = self.tokens[position as usize].kind;
+
+        if kind != TokenKind::Punctuation(Punctuation::Semicolon) {
+            return None;
+        }
+
+        if matches!(held, TokenKind::Keyword(_)) {
+            return Some(
+                self.tokens[previous as usize].end() < self.tokens[position as usize].offset,
+            );
+        }
+
+        (held == TokenKind::Punctuation(Punctuation::Semicolon))
+            .then(|| frame.kind != TokenKind::Punctuation(Punctuation::ParenOpen))
     }
 
     fn sourced(&self, position: u32, previous: u32) -> Option<bool> {
@@ -6480,9 +6507,10 @@ impl<'held> Emitter<'held> {
     fn preceded(&mut self, position: u32, body: bool, template: bool, held: bool) -> bool {
         let closing = self.spreads() && position == self.nest[self.depth as usize - 1].close;
 
-        if self.spreads() && self.remark_trailing(position) {
+        if self.remark_trailing(position) {
             return self.document.push(Element::Space);
         }
+
         let token = self.tokens[position as usize];
 
         let tagged = template
@@ -6509,7 +6537,7 @@ impl<'held> Emitter<'held> {
 
         if !closing && (self.separating() || self.binary_wrapped() || self.ternary_parted(position))
             || !held
-            || self.previous.is_some_and(|held| self.valued_colon(held))
+            || self.previous.is_some_and(|first| self.valued_colon(first))
         {
             if self.policy.chain_simples
                 && self.ternary_parted(position)
@@ -6975,9 +7003,37 @@ impl<'held> Emitter<'held> {
                 .is_some_and(|held| self.wrapping_operator(held))
     }
 
+    fn owings(&mut self, position: u32) -> u32 {
+        let held = core::mem::take(&mut self.owing);
+        let owns = core::mem::take(&mut self.owns);
+
+        if self.member_parted(position) {
+            return 0;
+        }
+
+        if self.chained {
+            return owns;
+        }
+
+        if !self.owing_operand() || self.owing_grouped() {
+            return 0;
+        }
+
+        held
+    }
+
+    fn owing_grouped(&self) -> bool {
+        if (0..self.wraps_owed as usize).any(|held| self.wrapped[held].1 != Wrap::Paired) {
+            return true;
+        }
+
+        let frame = self.nest[self.depth as usize - 1];
+
+        self.paren_grouped(frame.open, frame.close)
+    }
+
     fn leads(&mut self, position: u32) -> bool {
         assert!(self.assigned.is_none());
-        assert_eq!(self.owed, 0);
 
         self.line_before = self.line_first;
         self.line_first = position;
@@ -7020,14 +7076,7 @@ impl<'held> Emitter<'held> {
             self.printed
         } else {
             bound
-        } + if (self.chained || self.owing_operand()) && !self.member_parted(position)
-        {
-            core::mem::take(&mut self.owing)
-        } else {
-            self.owing = 0;
-
-            0
-        };
+        } + self.owings(position);
 
         if self.opens_a_clause(position) {
             self.claused_body = false;
@@ -7204,7 +7253,7 @@ impl<'held> Emitter<'held> {
             }
 
             self.assigned = Some((position, close));
-            self.dedents[self.owed as usize] = dedent;
+            self.dedents[self.owed as usize] = (dedent, self.depth);
             self.owed += 1;
 
             let opened =
@@ -7224,7 +7273,7 @@ impl<'held> Emitter<'held> {
             }
         }
 
-        while self.owed > 0 && self.dedents[self.owed as usize - 1] == position {
+        while self.owed > 0 && self.dedents[self.owed as usize - 1].0 == position {
             self.owed -= 1;
 
             if !self.document.push(Element::DedentBroken) {

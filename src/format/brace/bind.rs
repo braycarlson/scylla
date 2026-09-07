@@ -223,9 +223,8 @@ impl Emitter<'_> {
         }
 
         let mut depth = 0_u32;
-        let mut scan = after + 1;
 
-        for _ in 0..DEFINE_SCAN_MAX {
+        for scan in (after + 1..).take(DEFINE_SCAN_MAX as usize) {
             if scan >= self.count {
                 return false;
             }
@@ -251,8 +250,6 @@ impl Emitter<'_> {
                     return false;
                 }
             }
-
-            scan += 1;
         }
 
         false
@@ -303,9 +300,8 @@ impl Emitter<'_> {
 
     fn sequence_end(&self, comma: u32) -> Option<u32> {
         let mut depth = 0_u32;
-        let mut scan = comma;
 
-        for _ in 0..DEFINE_SCAN_MAX {
+        for scan in (comma..).take(DEFINE_SCAN_MAX as usize) {
             if scan >= self.count {
                 return None;
             }
@@ -323,8 +319,6 @@ impl Emitter<'_> {
             } else if depth == 0 && kind == TokenKind::Punctuation(Punctuation::Semicolon) {
                 return Some(scan);
             }
-
-            scan += 1;
         }
 
         None

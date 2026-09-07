@@ -554,10 +554,9 @@ impl Emitter<'_> {
     }
 
     fn ternary_link(&self, question: u32, close: u32, position: u32) -> Option<u32> {
-        let mut index = 0;
         let mut scan = question;
 
-        for _ in 0..TERNARY_CHAIN_MAX {
+        for index in 0..TERNARY_CHAIN_MAX {
             if scan == position {
                 return Some(index);
             }
@@ -569,7 +568,6 @@ impl Emitter<'_> {
             }
 
             scan = self.ternary_next(colon, close)?;
-            index += 1;
         }
 
         None

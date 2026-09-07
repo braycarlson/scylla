@@ -1,8 +1,10 @@
 use crate::bounded::{BoundedVec, FixedMap, Span, count_of};
-use crate::diagnostic::{Diagnostic, Diagnostics, FileID, Message, Severity};
+use crate::diagnostic::{Diagnostic, Diagnostics, FileID, Message, Related, Severity};
 use crate::fix::{Applicability, Fixes};
+use crate::json::{Cursor, Kind};
 use crate::lines;
 use crate::suppress::Regions;
+use crate::timing::Clock;
 
 pub const NONE: u32 = u32::MAX;
 pub const CODE_TEXT_BYTES_MAX: usize = 8;
@@ -61,6 +63,52 @@ pub struct CodeSet {
 pub struct Registry {
     by_code: FixedMap<u32>,
     rules: BoundedVec<Rule>,
+}
+
+pub trait Contextual {
+    type Context<'run>;
+}
+
+pub type Run<R> = fn(&<R as Contextual>::Context<'_>, &mut Sink<'_>);
+
+#[derive(Debug)]
+pub struct Entry<R: Contextual> {
+    pub languages: u64,
+    pub run: Run<R>,
+}
+
+pub trait Policy {
+    fn applicability_of(&self, rule: u32) -> Option<Applicability>;
+    fn enables(&self, rule: u32) -> bool;
+    fn fixes(&self, rule: u32) -> bool;
+    fn severity_of(&self, rule: u32, default: Severity) -> Severity;
+}
+
+#[derive(Debug)]
+pub struct Runner<R: Contextual> {
+    entries: BoundedVec<Entry<R>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SelectorsFault {
+    Selector,
+    Value,
+}
+
+pub struct Tables<'run> {
+    pub diagnostics: &'run mut Diagnostics,
+    pub file: FileID,
+    pub fixes: &'run mut Fixes,
+    pub lines: &'run lines::Index,
+    pub registry: &'run Registry,
+    pub suppressions: &'run mut Regions,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Timings<const STAGE_COUNT: usize> {
+    documents: u64,
+    rules: [u64; RULE_COUNT_MAX as usize],
+    stages: [u64; STAGE_COUNT],
 }
 
 impl Fixable {
@@ -251,6 +299,175 @@ impl Registry {
     }
 }
 
+impl<R: Contextual> Runner<R> {
+    pub fn at(&self, index: u32) -> &Entry<R> {
+        assert!(index < self.count());
+
+        &self.entries[index as usize]
+    }
+
+    pub fn count(&self) -> u32 {
+        self.entries.count()
+    }
+
+    pub fn covers(&self, index: u32, language: u32) -> bool {
+        assert!(language < u64::BITS);
+
+        self.at(index).languages & (1_u64 << language) != 0
+    }
+
+    pub fn register(&mut self, languages: u64, run: Run<R>) {
+        assert!(!crate::allocation::is_frozen());
+
+        let index = self.entries.count();
+
+        assert!(index < RULE_COUNT_MAX);
+
+        self.entries.push_assert(Entry { languages, run });
+
+        assert_eq!(self.count(), index + 1);
+    }
+
+    pub fn reserve(rule_count_max: u32) -> Self {
+        assert!(rule_count_max > 0);
+        assert!(rule_count_max <= RULE_COUNT_MAX);
+        assert!(!crate::allocation::is_frozen());
+
+        Self {
+            entries: BoundedVec::reserve(rule_count_max),
+        }
+    }
+
+    pub fn run<const STAGE_COUNT: usize>(
+        &self,
+        language: u32,
+        context: &R::Context<'_>,
+        policy: &impl Policy,
+        tables: Tables<'_>,
+        timings: &mut Timings<STAGE_COUNT>,
+    ) {
+        assert!(self.count() <= tables.registry.count());
+
+        self.run_with(language, context, policy, tables, timings, Some);
+    }
+
+    pub fn run_with<const STAGE_COUNT: usize>(
+        &self,
+        language: u32,
+        context: &R::Context<'_>,
+        policy: &impl Policy,
+        tables: Tables<'_>,
+        timings: &mut Timings<STAGE_COUNT>,
+        rule_of: impl Fn(u32) -> Option<u32>,
+    ) {
+        assert!(language < u64::BITS);
+
+        let Tables {
+            diagnostics,
+            file,
+            fixes,
+            lines,
+            registry,
+            suppressions,
+        } = tables;
+
+        for index in 0..self.count() {
+            let run = self.entries[index as usize].run;
+
+            let Some(code) = rule_of(index) else {
+                continue;
+            };
+
+            assert!(code < registry.count());
+
+            if !self.covers(index, language) || !policy.enables(code) {
+                continue;
+            }
+
+            let rule = registry.at(code);
+
+            let mut sink = Sink::open(Opened {
+                applicability: policy.applicability_of(code),
+                code: rule.code,
+                code_index: code,
+                diagnostics: &mut *diagnostics,
+                file,
+                fixable: policy.fixes(code),
+                fixes: &mut *fixes,
+                lines,
+                severity: policy.severity_of(code, rule.severity),
+                suppressions: &mut *suppressions,
+            });
+
+            let clock = Clock::start();
+
+            run(context, &mut sink);
+
+            timings.rule_add(code, clock.nanoseconds());
+        }
+    }
+}
+
+impl<const STAGE_COUNT: usize> Timings<STAGE_COUNT> {
+    pub const fn document_record(&mut self) {
+        self.documents = self.documents.saturating_add(1);
+    }
+
+    pub const fn documents(&self) -> u64 {
+        self.documents
+    }
+
+    pub const fn new() -> Self {
+        Self {
+            documents: 0,
+            rules: [0; RULE_COUNT_MAX as usize],
+            stages: [0; STAGE_COUNT],
+        }
+    }
+
+    pub const fn rule_add(&mut self, code: u32, nanoseconds: u64) {
+        assert!(code < RULE_COUNT_MAX);
+
+        self.rules[code as usize] = self.rules[code as usize].saturating_add(nanoseconds);
+    }
+
+    pub const fn rule_at(&self, code: u32) -> u64 {
+        assert!(code < RULE_COUNT_MAX);
+
+        self.rules[code as usize]
+    }
+
+    pub const fn stage_add(&mut self, stage: usize, nanoseconds: u64) {
+        assert!(stage < STAGE_COUNT);
+
+        self.stages[stage] = self.stages[stage].saturating_add(nanoseconds);
+    }
+
+    pub const fn stage_at(&self, stage: usize) -> u64 {
+        assert!(stage < STAGE_COUNT);
+
+        self.stages[stage]
+    }
+
+    pub fn total(&self) -> u64 {
+        let mut total = 0_u64;
+
+        for stage in self.stages {
+            total = total.saturating_add(stage);
+        }
+
+        assert!(self.stages.iter().all(|stage| *stage <= total));
+
+        total
+    }
+}
+
+impl<const STAGE_COUNT: usize> Default for Timings<STAGE_COUNT> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub struct Sink<'run> {
     applicability: Option<Applicability>,
     code: &'static str,
@@ -338,10 +555,59 @@ impl<'run> Sink<'run> {
         self.fix_failed = false;
     }
 
+    pub fn fix_begin_formatted(
+        &mut self,
+        applicability: Applicability,
+        isolation: u32,
+        arguments: core::fmt::Arguments<'_>,
+    ) {
+        self.fixes.open_formatted(
+            self.applicability.unwrap_or(applicability),
+            isolation,
+            arguments,
+        );
+
+        self.fix_failed = false;
+    }
+
+    pub fn fix_discard(&mut self) {
+        self.fixes.discard();
+
+        self.fix_failed = false;
+    }
+
     pub fn fix_edit(&mut self, span: Span, replacement: &[u8]) {
         if !self.fixes.edit(span, replacement) {
             self.fix_failed = true;
         }
+    }
+
+    pub fn fix_edit_formatted(&mut self, span: Span, arguments: core::fmt::Arguments<'_>) {
+        if !self.fixes.edit_formatted(span, arguments) {
+            self.fix_failed = true;
+        }
+    }
+
+    pub fn related(&mut self, file: FileID, span: Span, text: &'static str) -> bool {
+        self.diagnostics.push_related(Related {
+            file,
+            message: Message::Static(text),
+            span,
+        })
+    }
+
+    pub fn related_count(&self) -> u32 {
+        self.diagnostics.related_count()
+    }
+
+    pub fn related_formatted(
+        &mut self,
+        file: FileID,
+        span: Span,
+        arguments: core::fmt::Arguments<'_>,
+    ) -> bool {
+        self.diagnostics
+            .push_related_formatted(file, span, arguments)
     }
 
     pub fn report(&mut self, span: Span, text: &'static str) {
@@ -355,10 +621,32 @@ impl<'run> Sink<'run> {
             message: Message::Static(text),
             related_count: 0,
             related_start: 0,
-            rule: NONE,
+            rule: self.code_index,
             severity: self.severity,
             span,
         });
+    }
+
+    pub fn report_row(&mut self, row: Diagnostic) -> bool {
+        if self.suppression_claimed(row.span) {
+            return false;
+        }
+
+        self.diagnostics.push(self.rowed(row))
+    }
+
+    pub fn report_row_formatted(
+        &mut self,
+        row: Diagnostic,
+        arguments: core::fmt::Arguments<'_>,
+    ) -> bool {
+        if self.suppression_claimed(row.span) {
+            return false;
+        }
+
+        let held = self.rowed(row);
+
+        self.diagnostics.push_formatted_row(held, arguments)
     }
 
     pub fn report_formatted(&mut self, span: Span, arguments: core::fmt::Arguments<'_>) {
@@ -366,13 +654,18 @@ impl<'run> Sink<'run> {
             return;
         }
 
-        let _ = self.diagnostics.push_formatted(
-            self.code,
-            self.severity,
+        let row = self.rowed(Diagnostic {
+            code: self.code,
+            fix: crate::fix::NONE,
+            message: Message::Static(""),
+            related_count: 0,
+            related_start: 0,
+            rule: self.code_index,
+            severity: self.severity,
             span,
-            crate::fix::NONE,
-            arguments,
-        );
+        });
+
+        let _ = self.diagnostics.push_formatted_row(row, arguments);
     }
 
     pub fn report_fixed(&mut self, span: Span, text: &'static str) {
@@ -386,20 +679,62 @@ impl<'run> Sink<'run> {
             message: Message::Static(text),
             related_count: 0,
             related_start: 0,
-            rule: NONE,
+            rule: self.code_index,
             severity: self.severity,
             span,
         });
     }
 
     pub fn report_fixed_formatted(&mut self, span: Span, arguments: core::fmt::Arguments<'_>) {
-        let Some(fix) = self.fix_settled(span) else {
+        let Some(row) = self.fixed_row(span, 0, 0) else {
             return;
         };
 
-        let _ = self
-            .diagnostics
-            .push_formatted(self.code, self.severity, span, fix, arguments);
+        let _ = self.diagnostics.push_formatted_row(row, arguments);
+    }
+
+    pub fn report_fixed_related_formatted(
+        &mut self,
+        span: Span,
+        related_start: u32,
+        arguments: core::fmt::Arguments<'_>,
+    ) {
+        let related_count = self.related_count().saturating_sub(related_start);
+
+        let Some(row) = self.fixed_row(span, related_start, related_count) else {
+            return;
+        };
+
+        let _ = self.diagnostics.push_formatted_row(row, arguments);
+    }
+
+    fn fixed_row(
+        &mut self,
+        span: Span,
+        related_start: u32,
+        related_count: u32,
+    ) -> Option<Diagnostic> {
+        let fix = self.fix_settled(span)?;
+
+        Some(Diagnostic {
+            code: self.code,
+            fix,
+            message: Message::Static(""),
+            related_count,
+            related_start,
+            rule: self.code_index,
+            severity: self.severity,
+            span,
+        })
+    }
+
+    fn rowed(&self, row: Diagnostic) -> Diagnostic {
+        Diagnostic {
+            code: self.code,
+            rule: self.code_index,
+            severity: row.severity.min(self.severity),
+            ..row
+        }
     }
 
     fn fix_settled(&mut self, span: Span) -> Option<u32> {
@@ -468,6 +803,7 @@ pub struct Selector {
 pub struct Selection {
     pub extend_fixable: BoundedVec<Selector>,
     pub extend_select: BoundedVec<Selector>,
+    pub external: BoundedVec<Selector>,
     pub fixable: BoundedVec<Selector>,
     pub fixable_replaced: bool,
     pub ignore: BoundedVec<Selector>,
@@ -530,6 +866,7 @@ impl Selection {
         Self {
             extend_fixable: BoundedVec::reserve(selector_count_max),
             extend_select: BoundedVec::reserve(selector_count_max),
+            external: BoundedVec::reserve(selector_count_max),
             fixable: BoundedVec::reserve(selector_count_max),
             fixable_replaced: false,
             ignore: BoundedVec::reserve(selector_count_max),
@@ -543,6 +880,7 @@ impl Selection {
     pub fn clear(&mut self) {
         self.extend_fixable.clear();
         self.extend_select.clear();
+        self.external.clear();
         self.fixable.clear();
         self.fixable_replaced = false;
         self.ignore.clear();
@@ -550,6 +888,58 @@ impl Selection {
         self.select.clear();
         self.selected = false;
         self.unfixable.clear();
+    }
+
+    pub fn is_external(&self, code: &[u8]) -> bool {
+        if code.is_empty() {
+            return false;
+        }
+
+        self.external
+            .iter()
+            .any(|prefix| !prefix.is_all() && code.starts_with(prefix.as_bytes()))
+    }
+
+    pub fn overlay(&mut self, over: &Self) -> u32 {
+        let mut dropped = 0_u32;
+
+        if over.selected {
+            self.select.clear();
+            self.extend_select.clear();
+            self.ignore.clear();
+            self.selected = true;
+
+            dropped += pushed_from(&mut self.select, &over.select);
+        }
+
+        if over.fixable_replaced {
+            self.fixable.clear();
+            self.extend_fixable.clear();
+            self.unfixable.clear();
+            self.fixable_replaced = true;
+
+            dropped += pushed_from(&mut self.fixable, &over.fixable);
+        }
+
+        dropped += pushed_from(&mut self.extend_select, &over.extend_select);
+        dropped += pushed_from(&mut self.ignore, &over.ignore);
+        dropped += pushed_from(&mut self.extend_fixable, &over.extend_fixable);
+        dropped += pushed_from(&mut self.unfixable, &over.unfixable);
+        dropped += pushed_from(&mut self.external, &over.external);
+
+        assert!(dropped <= over.count());
+
+        dropped
+    }
+
+    fn count(&self) -> u32 {
+        self.extend_fixable.count()
+            + self.extend_select.count()
+            + self.external.count()
+            + self.fixable.count()
+            + self.ignore.count()
+            + self.select.count()
+            + self.unfixable.count()
     }
 
     pub fn resolve(&self, rules: &Registry) -> CodeSet {
@@ -715,8 +1105,53 @@ pub fn parse(text: &[u8], rules: &Registry) -> Option<Selector> {
     Selector::of(rule.code.as_bytes())
 }
 
+pub fn selectors_read(
+    listed: Cursor<'_>,
+    rules: &Registry,
+    out: &mut BoundedVec<Selector>,
+    mut fault: impl FnMut(SelectorsFault),
+) {
+    if listed.kind() != Some(Kind::Array) {
+        fault(SelectorsFault::Value);
+
+        return;
+    }
+
+    for name in listed.elements() {
+        let Some(raw) = name.raw().filter(|_| name.kind() == Some(Kind::String)) else {
+            fault(SelectorsFault::Value);
+
+            return;
+        };
+
+        let Some(parsed) = parse(raw, rules) else {
+            fault(SelectorsFault::Selector);
+
+            continue;
+        };
+
+        if !out.push(parsed) {
+            fault(SelectorsFault::Value);
+        }
+    }
+}
+
 fn exact_in(selectors: &[Selector], code: &str) -> bool {
     selectors.iter().any(|selector| selector.is_exact(code))
+}
+
+fn pushed_from(target: &mut BoundedVec<Selector>, source: &[Selector]) -> u32 {
+    let mut dropped = 0_u32;
+
+    for selector in source {
+        if !target.push(*selector) {
+            dropped += 1;
+        }
+    }
+
+    assert!(dropped as usize <= source.len());
+
+    dropped
 }
 
 fn strongest(current: Option<u8>, selectors: &[Selector], code: &str) -> Option<u8> {
@@ -973,5 +1408,413 @@ mod tests {
         assert_eq!(Fixable::Never.name(), "never");
         assert_eq!(Fixable::Sometimes.name(), "sometimes");
         assert_eq!(Group::Preview.name(), "preview");
+    }
+
+    #[test]
+    fn an_external_prefix_exempts_the_codes_under_it() {
+        let mut selection = Selection::reserve(8);
+
+        selection
+            .external
+            .push_assert(Selector::of(b"DJ").expect("the prefix fits"));
+        selection.external.push_assert(Selector::ALL);
+
+        assert!(selection.is_external(b"DJ001"));
+        assert!(!selection.is_external(b"TS001"));
+        assert!(!selection.is_external(b""));
+    }
+
+    #[test]
+    fn an_overlay_replaces_the_selection_when_it_selects_and_extends_otherwise() {
+        let held = registry();
+        let mut base = selection(&[b"TS"], &[b"TS00"]);
+        let mut over = Selection::reserve(8);
+
+        over.extend_select
+            .push_assert(parse(b"GL", &held).expect("the selector parses"));
+        over.ignore
+            .push_assert(parse(b"GL015", &held).expect("the selector parses"));
+
+        assert_eq!(base.overlay(&over), 0);
+        assert_eq!(base.select.count(), 1);
+        assert_eq!(base.extend_select.count(), 1);
+        assert_eq!(base.ignore.count(), 2);
+
+        over.selected = true;
+        over.select
+            .push_assert(parse(b"GL001", &held).expect("the selector parses"));
+
+        assert_eq!(base.overlay(&over), 0);
+        assert!(base.selected);
+        assert_eq!(base.select.count(), 1);
+        assert!(base.select[0].is_exact("GL001"));
+        assert_eq!(base.extend_select.count(), 1);
+        assert_eq!(base.ignore.count(), 1);
+    }
+
+    #[test]
+    fn an_overlay_counts_the_selectors_that_did_not_fit() {
+        let held = registry();
+        let mut base = Selection::reserve(1);
+        let mut over = Selection::reserve(8);
+
+        over.ignore
+            .push_assert(parse(b"GL", &held).expect("the selector parses"));
+        over.ignore
+            .push_assert(parse(b"TS", &held).expect("the selector parses"));
+
+        assert_eq!(base.overlay(&over), 1);
+        assert_eq!(base.ignore.count(), 1);
+    }
+
+    #[test]
+    fn selectors_read_takes_an_array_of_names_and_reports_each_fault() {
+        let held = registry();
+        let mut document = crate::json::Document::reserve(16);
+        let source =
+            br#"{"good": ["TS", "late-future-import", "XX9"], "bad": "TS", "mixed": ["TS", 4]}"#;
+
+        assert_eq!(document.parse(source), crate::json::Outcome::Complete);
+
+        let root = document.root(source).expect("the document parsed");
+        let mut out = BoundedVec::reserve(4);
+        let mut faults = Vec::new();
+
+        selectors_read(
+            root.member(b"good").expect("the member exists"),
+            &held,
+            &mut out,
+            |fault| faults.push(fault),
+        );
+
+        assert_eq!(out.count(), 2);
+        assert!(out[1].is_exact("TS004"));
+        assert_eq!(faults, vec![SelectorsFault::Selector]);
+
+        faults.clear();
+
+        selectors_read(
+            root.member(b"bad").expect("the member exists"),
+            &held,
+            &mut out,
+            |fault| faults.push(fault),
+        );
+
+        assert_eq!(faults, vec![SelectorsFault::Value]);
+
+        faults.clear();
+
+        selectors_read(
+            root.member(b"mixed").expect("the member exists"),
+            &held,
+            &mut out,
+            |fault| faults.push(fault),
+        );
+
+        assert_eq!(out.count(), 3);
+        assert_eq!(faults, vec![SelectorsFault::Value]);
+    }
+
+    #[test]
+    fn a_full_target_reports_a_value_fault_for_the_selector_that_did_not_fit() {
+        let held = registry();
+        let mut document = crate::json::Document::reserve(8);
+        let source = br#"["TS", "GL"]"#;
+
+        assert_eq!(document.parse(source), crate::json::Outcome::Complete);
+
+        let root = document.root(source).expect("the document parsed");
+        let mut out = BoundedVec::reserve(1);
+        let mut faults = Vec::new();
+
+        selectors_read(root, &held, &mut out, |fault| faults.push(fault));
+
+        assert_eq!(out.count(), 1);
+        assert_eq!(faults, vec![SelectorsFault::Value]);
+    }
+
+    struct Counting {
+        enabled: CodeSet,
+    }
+
+    struct Source;
+
+    impl Contextual for Source {
+        type Context<'run> = &'run [u8];
+    }
+
+    impl Policy for Counting {
+        fn applicability_of(&self, _rule: u32) -> Option<Applicability> {
+            None
+        }
+
+        fn enables(&self, rule: u32) -> bool {
+            self.enabled.contains(rule)
+        }
+
+        fn fixes(&self, _rule: u32) -> bool {
+            false
+        }
+
+        fn severity_of(&self, _rule: u32, default: Severity) -> Severity {
+            default
+        }
+    }
+
+    fn report_first_byte(source: &&[u8], sink: &mut Sink<'_>) {
+        assert!(!source.is_empty());
+
+        sink.report(Span::new(0, 1), "the first byte is reported");
+    }
+
+    fn report_nothing(_source: &&[u8], _sink: &mut Sink<'_>) {}
+
+    #[test]
+    fn a_runner_runs_the_enabled_rules_of_the_language_and_times_each() {
+        let held = registry();
+        let mut runner: Runner<Source> = Runner::reserve(8);
+
+        runner.register(0b01, report_first_byte);
+        runner.register(0b10, report_first_byte);
+        runner.register(0b11, report_nothing);
+        runner.register(0b11, report_first_byte);
+
+        assert_eq!(runner.count(), 4);
+        assert!(runner.covers(0, 0));
+        assert!(!runner.covers(0, 1));
+        assert!(runner.covers(2, 1));
+
+        let mut enabled = CodeSet::EMPTY;
+
+        enabled.insert(0);
+        enabled.insert(1);
+        enabled.insert(2);
+
+        let policy = Counting { enabled };
+        let source: &[u8] = b"fn main() {}\n";
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 10);
+        let mut fixes = Fixes::reserve(4, 4, 1 << 10);
+        let mut lines = lines::Index::reserve(8);
+        let mut suppressions = Regions::reserve(4);
+        let mut timings: Timings<2> = Timings::new();
+
+        assert!(lines.build(source));
+
+        runner.run(
+            0,
+            &source,
+            &policy,
+            Tables {
+                diagnostics: &mut diagnostics,
+                file: FileID::of(0),
+                fixes: &mut fixes,
+                lines: &lines,
+                registry: &held,
+                suppressions: &mut suppressions,
+            },
+            &mut timings,
+        );
+
+        assert_eq!(diagnostics.count(), 1);
+        assert_eq!(diagnostics.at(0).expect("the row was pushed").rule, 0);
+        assert_eq!(diagnostics.at(0).expect("the row was pushed").code, "TS001");
+        assert_eq!(timings.rule_at(3), 0);
+        assert_eq!(timings.documents(), 0);
+
+        timings.document_record();
+        timings.stage_add(1, 7);
+        timings.stage_add(1, 5);
+        timings.rule_add(0, 3);
+
+        assert_eq!(timings.documents(), 1);
+        assert_eq!(timings.stage_at(1), 12);
+        assert_eq!(timings.stage_at(0), 0);
+        assert_eq!(timings.total(), 12);
+        assert!(timings.rule_at(0) >= 3);
+    }
+
+    #[test]
+    fn a_runner_maps_each_entry_to_the_rule_the_caller_names() {
+        let held = registry();
+        let mut runner: Runner<Source> = Runner::reserve(2);
+
+        runner.register(0b01, report_first_byte);
+        runner.register(0b01, report_first_byte);
+
+        let mut enabled = CodeSet::EMPTY;
+
+        enabled.insert(3);
+
+        let policy = Counting { enabled };
+        let source: &[u8] = b"fn main() {}\n";
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 10);
+        let mut fixes = Fixes::reserve(4, 4, 1 << 10);
+        let mut lines = lines::Index::reserve(8);
+        let mut suppressions = Regions::reserve(4);
+        let mut timings: Timings<1> = Timings::new();
+
+        assert!(lines.build(source));
+
+        runner.run_with(
+            0,
+            &source,
+            &policy,
+            Tables {
+                diagnostics: &mut diagnostics,
+                file: FileID::of(0),
+                fixes: &mut fixes,
+                lines: &lines,
+                registry: &held,
+                suppressions: &mut suppressions,
+            },
+            &mut timings,
+            |entry| [Some(4), Some(3)][entry as usize],
+        );
+
+        assert_eq!(diagnostics.count(), 1);
+
+        let row = diagnostics.at(0).copied().expect("the row was pushed");
+
+        assert_eq!(row.rule, 3);
+        assert_eq!(row.code, "GL001");
+        assert_eq!(timings.rule_at(4), 0);
+
+        runner.run_with(
+            0,
+            &source,
+            &policy,
+            Tables {
+                diagnostics: &mut diagnostics,
+                file: FileID::of(0),
+                fixes: &mut fixes,
+                lines: &lines,
+                registry: &held,
+                suppressions: &mut suppressions,
+            },
+            &mut timings,
+            |entry| (entry == 0).then_some(3),
+        );
+
+        assert_eq!(diagnostics.count(), 2);
+    }
+
+    #[test]
+    fn a_sink_settles_a_formatted_fix_and_carries_related_rows_on_a_fixed_row() {
+        let source: &[u8] = b"let value = 1;\n";
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 10);
+        let mut fixes = Fixes::reserve(4, 4, 1 << 10);
+        let mut lines = lines::Index::reserve(8);
+        let mut suppressions = Regions::reserve(4);
+
+        assert!(lines.build(source));
+
+        let mut sink = Sink::open(Opened {
+            applicability: Some(Applicability::Unsafe),
+            code: "TS001",
+            code_index: 0,
+            diagnostics: &mut diagnostics,
+            file: FileID::of(0),
+            fixable: true,
+            fixes: &mut fixes,
+            lines: &lines,
+            severity: Severity::Warning,
+            suppressions: &mut suppressions,
+        });
+
+        let related_start = sink.related_count();
+
+        assert!(sink.related(FileID::of(1), Span::new(4, 5), "declared here"));
+
+        sink.fix_begin_formatted(Applicability::Safe, 0, format_args!("Rename `{}`", "value"));
+        sink.fix_edit_formatted(Span::new(4, 5), format_args!("{}_{}", "held", 2));
+        sink.report_fixed_related_formatted(
+            Span::new(0, 3),
+            related_start,
+            format_args!("`{}` is renamed", "value"),
+        );
+
+        sink.fix_begin("Drop it", Applicability::Safe, 0);
+        sink.fix_edit(Span::new(0, 3), b"");
+        sink.fix_discard();
+        sink.report_fixed(Span::new(0, 3), "the fix was discarded");
+
+        let first = diagnostics.at(0).copied().expect("the row was pushed");
+        let second = diagnostics.at(1).copied().expect("the row was pushed");
+        let fix = fixes.get(first.fix).expect("the fix was closed");
+
+        assert_eq!(fix.applicability, Applicability::Unsafe);
+        assert_eq!(fixes.title_of(fix), b"Rename `value`");
+        assert_eq!(fixes.edits_of(fix).len(), 1);
+        assert_eq!(fixes.replacement_of(&fixes.edits_of(fix)[0]), b"held_2");
+        assert_eq!(diagnostics.message_of(&first), b"`value` is renamed");
+        assert_eq!(first.related_start, related_start);
+        assert_eq!(first.related_count, 1);
+        assert_eq!(diagnostics.related_of(&first).len(), 1);
+        assert_eq!(second.fix, crate::fix::NONE);
+        assert_eq!(fixes.count(), 1);
+    }
+
+    #[test]
+    fn a_sink_carries_related_rows_and_ranks_a_row_below_its_own_severity() {
+        let source: &[u8] = b"let value = 1;\n";
+        let mut diagnostics = Diagnostics::reserve(8, 1 << 10);
+        let mut fixes = Fixes::reserve(4, 4, 1 << 10);
+        let mut lines = lines::Index::reserve(8);
+        let mut suppressions = Regions::reserve(4);
+
+        assert!(lines.build(source));
+
+        let mut sink = Sink::open(Opened {
+            applicability: None,
+            code: "TS001",
+            code_index: 0,
+            diagnostics: &mut diagnostics,
+            file: FileID::of(0),
+            fixable: false,
+            fixes: &mut fixes,
+            lines: &lines,
+            severity: Severity::Warning,
+            suppressions: &mut suppressions,
+        });
+
+        let related_start = sink.related_count();
+
+        assert!(sink.related(FileID::of(1), Span::new(4, 5), "declared here"));
+        assert!(sink.related_formatted(
+            FileID::of(1),
+            Span::new(12, 1),
+            format_args!("used {} times", 2)
+        ));
+
+        let row = Diagnostic {
+            code: "",
+            fix: crate::fix::NONE,
+            message: Message::Static("a row with related rows"),
+            related_count: sink.related_count() - related_start,
+            related_start,
+            rule: NONE,
+            severity: Severity::Error,
+            span: Span::new(0, 3),
+        };
+
+        assert!(sink.report_row(row));
+        assert!(sink.report_row_formatted(
+            Diagnostic {
+                severity: Severity::Hint,
+                ..row
+            },
+            format_args!("formatted {}", "row")
+        ));
+
+        let first = diagnostics.at(0).copied().expect("the row was pushed");
+        let second = diagnostics.at(1).copied().expect("the row was pushed");
+
+        assert_eq!(first.code, "TS001");
+        assert_eq!(first.rule, 0);
+        assert_eq!(first.severity, Severity::Warning);
+        assert_eq!(first.related_count, 2);
+        assert_eq!(diagnostics.related_of(&first).len(), 2);
+        assert_eq!(second.severity, Severity::Hint);
+        assert_eq!(diagnostics.message_of(&second), b"formatted row");
     }
 }

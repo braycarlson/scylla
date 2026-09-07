@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use scylla::markup::{self, MarkupKind, Token, Tokens};
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const MARK: &[u8] = &[0xef, 0xbb, 0xbf];
 const NOTE: &[u8] = b"{# note #}";
 const TOKEN_COUNT_MAX: u32 = 1 << 18;
@@ -12,13 +13,13 @@ fn a_mark_prepended_shifts_every_token_and_changes_no_kind() {
     let mut compared = 0;
 
     for fixture in &fixtures() {
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
 
         let plain: Vec<Token> = tokens.as_slice().to_vec();
         let mut marked_source = MARK.to_vec();
 
         marked_source.extend_from_slice(&fixture.source);
-        markup::lex(&marked_source, &mut tokens);
+        markup::lex_with(&marked_source, &mut tokens, RAW_TEXT_TAGS);
 
         let marked = tokens.as_slice();
         let extra = marked.len() - plain.len();
@@ -74,11 +75,11 @@ fn windows_line_endings_change_no_token_kind() {
             continue;
         }
 
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
 
         let plain: Vec<MarkupKind> = tokens.as_slice().iter().map(|token| token.kind).collect();
 
-        markup::lex(&windows(&fixture.source), &mut tokens);
+        markup::lex_with(&windows(&fixture.source), &mut tokens, RAW_TEXT_TAGS);
 
         let carried: Vec<MarkupKind> = tokens.as_slice().iter().map(|token| token.kind).collect();
 
@@ -96,7 +97,7 @@ fn a_comment_inserted_at_a_tag_boundary_adds_only_its_own_tokens() {
     let mut compared = 0;
 
     for fixture in &fixtures() {
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
 
         let plain: Vec<Token> = tokens.as_slice().to_vec();
 
@@ -108,7 +109,7 @@ fn a_comment_inserted_at_a_tag_boundary_adds_only_its_own_tokens() {
 
         inserted.extend_from_slice(NOTE);
         inserted.extend_from_slice(&fixture.source[at as usize..]);
-        markup::lex(&inserted, &mut tokens);
+        markup::lex_with(&inserted, &mut tokens, RAW_TEXT_TAGS);
 
         let carried = tokens.as_slice();
 

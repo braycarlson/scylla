@@ -774,6 +774,10 @@ impl Kind for RustKind {
     fn is_token(self) -> bool {
         Self::is_token(self)
     }
+
+    fn name(self) -> &'static str {
+        Self::name(self)
+    }
 }
 
 impl RustKind {

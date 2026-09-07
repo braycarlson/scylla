@@ -1,5 +1,6 @@
 use crate::bounded::{BoundedVec, Span, count_of};
 use crate::brackets::{self, Pairs};
+use crate::tree::Positioned;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Keyword {
@@ -89,6 +90,67 @@ pub struct Tokens {
 pub struct TokenIndex {
     comments: u32,
     positions: BoundedVec<u32>,
+}
+
+pub fn in_span<T>(tokens: &[T], span: Span) -> &[T]
+where
+    T: Positioned,
+{
+    let first = index_from(tokens, span.offset);
+
+    let last = tokens
+        .partition_point(|token| token.offset() < span.end())
+        .max(first);
+
+    assert!(first <= last);
+    assert!(last <= tokens.len());
+
+    &tokens[first..last]
+}
+
+pub fn index_at<T>(tokens: &[T], offset: u32) -> Option<usize>
+where
+    T: Positioned,
+{
+    let index = index_from(tokens, offset);
+
+    tokens
+        .get(index)
+        .filter(|token| token.offset() == offset)
+        .map(|_| index)
+}
+
+pub fn index_from<T>(tokens: &[T], offset: u32) -> usize
+where
+    T: Positioned,
+{
+    let index = tokens.partition_point(|token| {
+        token.offset() < offset || (token.offset() == offset && token.end() == offset)
+    });
+
+    assert!(index <= tokens.len());
+
+    index
+}
+
+pub fn index_touching<T>(tokens: &[T], offset: u32) -> Option<usize>
+where
+    T: Positioned,
+{
+    let after = tokens.partition_point(|token| token.offset() < offset);
+
+    assert!(after <= tokens.len());
+
+    if let Some(before) = after.checked_sub(1)
+        && offset <= tokens[before].end()
+    {
+        return Some(before);
+    }
+
+    tokens
+        .get(after)
+        .filter(|token| token.offset() == offset)
+        .map(|_| after)
 }
 
 pub fn significant_next(tokens: &[Token], from: u32, end: u32) -> u32 {
@@ -434,7 +496,66 @@ pub fn label_start(tokens: &[Token], source: &[u8], index: usize) -> usize {
     name
 }
 
-impl crate::tree::Positioned for Token {
+impl Keyword {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Assert => "assert",
+            Self::Branch => "branch",
+            Self::BranchElse => "branch-else",
+            Self::Break => "break",
+            Self::Constant => "constant",
+            Self::Continue => "continue",
+            Self::Declare => "declare",
+            Self::Except => "except",
+            Self::Function => "function",
+            Self::Global => "global",
+            Self::Goto => "goto",
+            Self::Import => "import",
+            Self::Lambda => "lambda",
+            Self::Loop => "loop",
+            Self::LoopUnbounded => "loop-unbounded",
+            Self::Match => "match",
+            Self::Mutable => "mutable",
+            Self::Other => "other",
+            Self::Return => "return",
+            Self::Struct => "struct",
+            Self::Try => "try",
+        }
+    }
+}
+
+impl Punctuation {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Ampersand => "ampersand",
+            Self::AmpersandDouble => "ampersand-double",
+            Self::Arrow => "arrow",
+            Self::Assign => "assign",
+            Self::AssignDeclare => "assign-declare",
+            Self::Bang => "bang",
+            Self::BarDouble => "bar-double",
+            Self::BracketClose => "bracket-close",
+            Self::BracketOpen => "bracket-open",
+            Self::Colon => "colon",
+            Self::Comma => "comma",
+            Self::Dot => "dot",
+            Self::Equal => "equal",
+            Self::Greater => "greater",
+            Self::GreaterEqual => "greater-equal",
+            Self::Less => "less",
+            Self::LessEqual => "less-equal",
+            Self::NotEqual => "not-equal",
+            Self::Other => "other",
+            Self::ParenClose => "paren-close",
+            Self::ParenOpen => "paren-open",
+            Self::Semicolon => "semicolon",
+            Self::Slash => "slash",
+            Self::Star => "star",
+        }
+    }
+}
+
+impl Positioned for Token {
     fn end(&self) -> u32 {
         Self::end(self)
     }
@@ -539,6 +660,22 @@ impl TokenIndex {
 
     pub fn identifiers(&self) -> &[u32] {
         &self.positions[self.comments as usize..]
+    }
+}
+
+impl TokenKind {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::BlockEnd => "block-end",
+            Self::BlockStart => "block-start",
+            Self::Comment => "comment",
+            Self::Identifier => "identifier",
+            Self::Keyword(_) => "keyword",
+            Self::Newline => "newline",
+            Self::Number => "number",
+            Self::Punctuation(_) => "punctuation",
+            Self::String => "string",
+        }
     }
 }
 
@@ -700,5 +837,75 @@ mod tests {
         let call = token_at(SOURCE, &tokens, b"call", 1);
 
         assert_eq!(modifier_start(&pairs, &tokens, SOURCE, call, 4), call);
+    }
+
+    fn spaced(offsets: &[(u32, u32)]) -> Vec<Token> {
+        offsets
+            .iter()
+            .map(|(offset, length)| Token {
+                kind: TokenKind::Identifier,
+                length: *length,
+                offset: *offset,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_index_at_an_offset_names_the_token_that_opens_there() {
+        let tokens = spaced(&[(0, 2), (3, 0), (3, 4), (8, 1)]);
+
+        assert_eq!(index_at(&tokens, 0), Some(0));
+        assert_eq!(index_at(&tokens, 3), Some(2));
+        assert_eq!(index_at(&tokens, 8), Some(3));
+        assert_eq!(index_at(&tokens, 1), None);
+        assert_eq!(index_at(&tokens, 9), None);
+        assert_eq!(index_at(&tokens, 2), None);
+        assert_eq!(index_at::<Token>(&[], 0), None);
+    }
+
+    #[test]
+    fn an_index_from_an_offset_is_the_first_token_not_ending_before_it() {
+        let tokens = spaced(&[(0, 2), (3, 0), (3, 4), (8, 1)]);
+
+        assert_eq!(index_from(&tokens, 0), 0);
+        assert_eq!(index_from(&tokens, 1), 1);
+        assert_eq!(index_from(&tokens, 3), 2);
+        assert_eq!(index_from(&tokens, 9), 4);
+        assert_eq!(index_from::<Token>(&[], 5), 0);
+    }
+
+    #[test]
+    fn a_touching_index_prefers_the_token_the_offset_ends_or_lands_in() {
+        let tokens = spaced(&[(0, 2), (3, 4), (8, 1)]);
+
+        assert_eq!(index_touching(&tokens, 0), Some(0));
+        assert_eq!(index_touching(&tokens, 1), Some(0));
+        assert_eq!(index_touching(&tokens, 2), Some(0));
+        assert_eq!(index_touching(&tokens, 3), Some(1));
+        assert_eq!(index_touching(&tokens, 7), Some(1));
+        assert_eq!(index_touching(&tokens, 8), Some(2));
+        assert_eq!(index_touching(&tokens, 10), None);
+        assert_eq!(index_touching::<Token>(&[], 0), None);
+    }
+
+    #[test]
+    fn the_tokens_in_a_span_are_those_opening_inside_it() {
+        let tokens = spaced(&[(0, 2), (3, 4), (8, 1), (10, 2)]);
+
+        assert_eq!(in_span(&tokens, Span::between(3, 9)).len(), 2);
+        assert_eq!(in_span(&tokens, Span::between(3, 8)).len(), 1);
+        assert_eq!(in_span(&tokens, Span::between(0, 12)).len(), 4);
+        assert_eq!(in_span(&tokens, Span::between(1, 3)).len(), 0);
+        assert_eq!(in_span(&tokens, Span::between(12, 12)).len(), 0);
+        assert_eq!(in_span::<Token>(&[], Span::between(0, 4)).len(), 0);
+    }
+
+    #[test]
+    fn every_kind_keyword_and_punctuation_has_a_kebab_name() {
+        assert_eq!(TokenKind::BlockStart.name(), "block-start");
+        assert_eq!(TokenKind::Keyword(Keyword::Assert).name(), "keyword");
+        assert_eq!(Keyword::LoopUnbounded.name(), "loop-unbounded");
+        assert_eq!(Punctuation::AssignDeclare.name(), "assign-declare");
+        assert_eq!(Punctuation::Star.name(), "star");
     }
 }

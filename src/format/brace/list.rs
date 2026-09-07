@@ -4,7 +4,6 @@ use super::{
     Emitter,
     NEST_DEPTH_MAX,
     Spread,
-    Wrap,
     count_of,
     is_close,
     is_open,
@@ -315,16 +314,6 @@ impl Emitter<'_> {
             .is_none_or(|held| self.tokens[held as usize].text(self.source) != b">");
 
         !keyed && typed
-    }
-
-    fn grouped_paren(&self, open: u32) -> bool {
-        if self.tokens[open as usize].kind != TokenKind::Punctuation(Punctuation::ParenOpen) {
-            return false;
-        }
-
-        self.next_of(open)
-            .and_then(|held| self.value_wrap(held))
-            .is_some_and(|(_, wrap)| wrap == Wrap::Argued)
     }
 
     fn headed_loop(&self, open: u32) -> bool {
@@ -814,18 +803,29 @@ impl Emitter<'_> {
     }
 
     pub(super) fn separating(&self) -> bool {
-        if self.chains_a_header() {
-            return self.previous.is_some_and(|held| self.operating(held));
+        let Some(held) = self.previous else {
+            return false;
+        };
+
+        if !self.spreads() {
+            return false;
         }
 
-        self.spreads()
-            && self.previous.is_some_and(|held| {
-                matches!(
-                    self.tokens[held as usize].kind,
-                    TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
-                ) && !self.angled(held)
-                    || self.remark_ended(held)
-            })
+        if self.remark_ended(held) {
+            return true;
+        }
+
+        if self.chains_a_header() {
+            return self.operating(held)
+                && !self
+                    .back_of(held)
+                    .is_some_and(|first| self.remark_ended(first));
+        }
+
+        matches!(
+            self.tokens[held as usize].kind,
+            TokenKind::Punctuation(Punctuation::Comma | Punctuation::Semicolon)
+        ) && !self.angled(held)
     }
 
     pub(super) fn parted_at(&self, from: u32, close: u32) -> u32 {

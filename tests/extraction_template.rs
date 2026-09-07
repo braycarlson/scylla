@@ -16,6 +16,7 @@ use scylla::mask;
 use scylla::outline::javascript::{self, DeclarationKind, Outline, ScopeKind};
 use scylla::token::Tokens;
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const ERROR_COUNT_MAX: u32 = 1 << 10;
 const HOLE_COUNT_MAX: u32 = 1 << 10;
 const MARKUP_TOKEN_COUNT_MAX: u32 = 1 << 18;
@@ -350,7 +351,7 @@ fn regions(source: &[u8]) -> Vec<Region> {
     let mut tokens = MarkupTokens::reserve(MARKUP_TOKEN_COUNT_MAX);
     let mut built = Tree::reserve(NODE_COUNT_MAX, ERROR_COUNT_MAX);
 
-    markup::lex(source, &mut tokens);
+    markup::lex_with(source, &mut tokens, RAW_TEXT_TAGS);
     tree::build(source, tokens.as_slice(), &mut built);
 
     let mut found = Vec::new();

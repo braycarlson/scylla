@@ -21,6 +21,65 @@ pub fn mark_width(source: &[u8]) -> usize {
 }
 
 pub fn identifier_scan(source: &[u8], start: usize) -> usize {
+    identifier_scan_with(source, start, is_identifier_part)
+}
+
+pub fn identifier_scan_back(source: &[u8], end: usize) -> usize {
+    identifier_scan_back_with(source, end, is_identifier_part)
+}
+
+pub fn identifier_scan_back_javascript(source: &[u8], end: usize) -> usize {
+    identifier_scan_back_with(source, end, is_javascript_identifier_part)
+}
+
+fn identifier_scan_back_with(source: &[u8], end: usize, part: fn(u8) -> bool) -> usize {
+    assert!(end <= source.len());
+
+    let mut start = end;
+
+    while start > 0 {
+        let byte = source[start - 1];
+
+        if byte < 0x80 {
+            if !part(byte) {
+                break;
+            }
+
+            start -= 1;
+
+            continue;
+        }
+
+        let lead = character_start_before(source, start);
+
+        if whitespace_width(source, lead) > 0 {
+            break;
+        }
+
+        start = lead;
+    }
+
+    assert!(start <= end);
+
+    start
+}
+
+pub fn identifier_scan_javascript(source: &[u8], start: usize) -> usize {
+    assert!(start <= source.len());
+
+    let Some(byte) = source.get(start).copied() else {
+        return start;
+    };
+
+    if (byte < 0x80 && !is_javascript_identifier_part(byte)) || whitespace_width(source, start) > 0
+    {
+        return start;
+    }
+
+    identifier_scan_with(source, start, is_javascript_identifier_part)
+}
+
+fn identifier_scan_with(source: &[u8], start: usize, part: fn(u8) -> bool) -> usize {
     assert!(start < source.len());
     debug_assert_eq!(whitespace_width(source, start), 0);
 
@@ -30,7 +89,7 @@ pub fn identifier_scan(source: &[u8], start: usize) -> usize {
         let byte = source[offset];
 
         if byte < 0x80 {
-            if CLASSES[byte as usize] & CLASS_IDENTIFIER_PART == 0 {
+            if !part(byte) {
                 break;
             }
 
@@ -49,6 +108,23 @@ pub fn identifier_scan(source: &[u8], start: usize) -> usize {
     assert!(offset > start);
 
     offset
+}
+
+fn character_start_before(source: &[u8], end: usize) -> usize {
+    assert!(end > 0);
+    assert!(end <= source.len());
+
+    let mut start = end - 1;
+    let mut steps = 0;
+
+    while start > 0 && steps < 3 && source[start] & 0xc0 == 0x80 {
+        start -= 1;
+        steps += 1;
+    }
+
+    assert!(start < end);
+
+    start
 }
 
 pub const CLASS_BLANK: u8 = 1 << 4;
@@ -104,6 +180,10 @@ pub fn is_identifier_start_at(source: &[u8], offset: usize) -> bool {
     is_identifier_start(byte) && whitespace_width(source, offset) == 0
 }
 
+pub const fn is_javascript_identifier_part(byte: u8) -> bool {
+    byte == b'$' || is_identifier_part(byte)
+}
+
 pub const VERTICAL_TAB: u8 = 0x0b;
 
 pub fn whitespace_width(source: &[u8], offset: usize) -> usize {
@@ -157,6 +237,39 @@ pub fn whitespace_scan(source: &[u8], start: usize) -> usize {
     offset
 }
 
+pub fn whitespace_scan_back(source: &[u8], end: usize) -> usize {
+    assert!(end <= source.len());
+
+    let mut start = end;
+
+    while start > 0 {
+        let byte = source[start - 1];
+
+        if byte < 0x80 {
+            if CLASSES[byte as usize] & CLASS_WHITESPACE == 0 {
+                break;
+            }
+
+            start -= 1;
+
+            continue;
+        }
+
+        let lead = character_start_before(source, start);
+        let width = whitespace_width(source, lead);
+
+        if width == 0 || lead + width != start {
+            break;
+        }
+
+        start = lead;
+    }
+
+    assert!(start <= end);
+
+    start
+}
+
 pub fn line_scan(source: &[u8], start: usize) -> usize {
     let mut offset = start;
 
@@ -169,6 +282,19 @@ pub fn line_scan(source: &[u8], start: usize) -> usize {
     }
 
     offset
+}
+
+pub fn line_at(text: &[u8], offset: usize) -> &[u8] {
+    let start = offset.min(text.len());
+    let end = line_scan(text, start);
+
+    assert!(end >= start);
+
+    &text[start..end]
+}
+
+pub fn first_line(text: &[u8]) -> &[u8] {
+    line_at(text, 0).trim_ascii()
 }
 
 pub fn line_start_of(source: &[u8], offset: usize) -> usize {
@@ -452,6 +578,80 @@ fn string_scan_bounded(source: &[u8], start: usize, quote: u8, lines: Lines) -> 
     source.len().min(offset)
 }
 
+pub fn string_scan_back(source: &[u8], end: usize, quote: u8) -> Option<usize> {
+    assert!(end <= source.len());
+    assert!(end > 0);
+    assert_eq!(source[end - 1], quote);
+
+    let mut cursor = end - 1;
+
+    while cursor > 0 {
+        cursor -= 1;
+
+        if source[cursor] == quote && !escaped_at(source, cursor) {
+            return Some(cursor);
+        }
+    }
+
+    None
+}
+
+fn escaped_at(source: &[u8], offset: usize) -> bool {
+    assert!(offset < source.len());
+
+    let mut count = 0_usize;
+
+    while count < offset && source[offset - 1 - count] == b'\\' {
+        count += 1;
+    }
+
+    count % 2 == 1
+}
+
+pub fn group_scan_back(source: &[u8], end: usize) -> Option<usize> {
+    assert!(end <= source.len());
+
+    let closer = *source.get(end.checked_sub(1)?)?;
+
+    let opener = match closer {
+        b')' => b'(',
+        b']' => b'[',
+        b'}' => b'{',
+        _ => return None,
+    };
+
+    let mut depth = 0_u32;
+    let mut cursor = end;
+
+    while cursor > 0 {
+        let byte = source[cursor - 1];
+
+        if matches!(byte, b'\'' | b'"' | b'`') {
+            cursor = string_scan_back(source, cursor, byte)?;
+
+            continue;
+        }
+
+        if byte == closer {
+            depth += 1;
+        }
+
+        if byte == opener {
+            assert!(depth > 0);
+
+            depth -= 1;
+
+            if depth == 0 {
+                return Some(cursor - 1);
+            }
+        }
+
+        cursor -= 1;
+    }
+
+    None
+}
+
 pub fn string_is_terminated(text: &[u8], raw: bool) -> bool {
     let mut prefix = 0;
 
@@ -657,6 +857,16 @@ pub fn find_word(haystack: &[u8], name: &[u8]) -> bool {
 
 pub fn text_of<'bytes>(bytes: &'bytes [u8], fallback: &'bytes str) -> &'bytes str {
     core::str::from_utf8(bytes).unwrap_or(fallback)
+}
+
+pub fn translated(source: &[u8], from: u8, to: u8, out: &mut [u8]) -> Option<usize> {
+    let target = out.get_mut(..source.len())?;
+
+    for (slot, byte) in target.iter_mut().zip(source) {
+        *slot = if *byte == from { to } else { *byte };
+    }
+
+    Some(source.len())
 }
 
 pub fn is_char_boundary(bytes: &[u8], offset: u32) -> bool {
@@ -1262,5 +1472,111 @@ mod tests {
         assert_eq!(string_scan(b"\"a\\\n\"b", 0, b'\"'), 3);
         assert_eq!(string_scan(b"\"a\\", 0, b'\"'), 3);
         assert_eq!(string_scan(b"\"a", 0, b'\"'), 2);
+    }
+
+    #[test]
+    fn a_javascript_identifier_carries_a_dollar_sign_in_both_directions() {
+        assert_eq!(identifier_scan_javascript(b"$store.x", 0), 6);
+        assert_eq!(identifier_scan_javascript(b"a$b = 1", 0), 3);
+        assert_eq!(identifier_scan(b"a$b = 1", 0), 1);
+        assert_eq!(identifier_scan_back_javascript(b"x.$refs", 7), 2);
+        assert_eq!(identifier_scan_back_javascript(b"$x", 2), 0);
+        assert_eq!(identifier_scan_back(b"$x", 2), 1);
+
+        assert_eq!(
+            identifier_scan_javascript("$w\u{00e4}rt\u{00a0}x".as_bytes(), 0),
+            "$w\u{00e4}rt".len()
+        );
+
+        assert_eq!(identifier_scan_back_javascript("a\u{a0}$b".as_bytes(), 5), 3);
+        assert_eq!(identifier_scan_javascript(b"", 0), 0);
+        assert_eq!(identifier_scan_javascript(b"x", 1), 1);
+        assert_eq!(identifier_scan_javascript(b" x", 0), 0);
+        assert_eq!(identifier_scan_javascript(b".x", 0), 0);
+        assert_eq!(identifier_scan_javascript("\u{a0}x".as_bytes(), 0), 0);
+        assert_eq!(identifier_scan_javascript(b"a.b", 2), 3);
+        assert!(is_javascript_identifier_part(b'$'));
+        assert!(is_javascript_identifier_part(b'_'));
+        assert!(is_javascript_identifier_part(0xc3));
+        assert!(!is_javascript_identifier_part(b'.'));
+        assert!(!is_identifier_part(b'$'));
+    }
+
+    #[test]
+    fn an_identifier_scans_back_to_its_first_byte() {
+        assert_eq!(identifier_scan_back(b"a.held", 6), 2);
+        assert_eq!(identifier_scan_back(b"held", 4), 0);
+        assert_eq!(identifier_scan_back(b"held", 0), 0);
+        assert_eq!(identifier_scan_back(b"a b", 2), 2);
+        assert_eq!(identifier_scan_back(b"", 0), 0);
+        assert_eq!(identifier_scan_back("x.h\u{e9}ld".as_bytes(), 7), 2);
+        assert_eq!(identifier_scan_back("a\u{a0}b".as_bytes(), 4), 3);
+        assert_eq!(identifier_scan_back(b"$x", 2), 1);
+    }
+
+    #[test]
+    fn whitespace_scans_back_across_blanks_and_line_breaks() {
+        assert_eq!(whitespace_scan_back(b"a  \n\t b", 6), 1);
+        assert_eq!(whitespace_scan_back(b"a  b", 4), 4);
+        assert_eq!(whitespace_scan_back(b"   ", 3), 0);
+        assert_eq!(whitespace_scan_back(b"", 0), 0);
+        assert_eq!(whitespace_scan_back(b"a ", 0), 0);
+        assert_eq!(whitespace_scan_back("a\u{a0} b".as_bytes(), 4), 1);
+        assert_eq!(whitespace_scan_back("a\u{e9} ".as_bytes(), 4), 3);
+    }
+
+    #[test]
+    fn a_string_scans_back_to_its_opening_quote() {
+        assert_eq!(string_scan_back(b"x = \"a\"", 7, b'"'), Some(4));
+        assert_eq!(string_scan_back(b"\"a\\\"b\"", 6, b'"'), Some(0));
+        assert_eq!(string_scan_back(b"\"a\\\\\"", 5, b'"'), Some(0));
+        assert_eq!(string_scan_back(b"a\"", 2, b'"'), None);
+        assert_eq!(string_scan_back(b"''", 2, b'\''), Some(0));
+        assert_eq!(string_scan_back(b"`a`", 3, b'`'), Some(0));
+    }
+
+    #[test]
+    fn a_group_scans_back_to_its_opener_over_nested_groups_and_strings() {
+        assert_eq!(group_scan_back(b"f(a, g(b))", 10), Some(1));
+        assert_eq!(group_scan_back(b"x[\")\"]", 6), Some(1));
+        assert_eq!(group_scan_back(b"{a: [1]}", 8), Some(0));
+        assert_eq!(group_scan_back(b"a)", 2), None);
+        assert_eq!(group_scan_back(b"abc", 3), None);
+        assert_eq!(group_scan_back(b"()", 0), None);
+        assert_eq!(group_scan_back(b"", 0), None);
+        assert_eq!(group_scan_back(b"(\"", 2), None);
+    }
+
+    #[test]
+    fn a_translation_swaps_one_byte_for_another_when_it_fits() {
+        let mut out = [0_u8; 8];
+
+        assert_eq!(translated(b"a_b_c", b'_', b'-', &mut out), Some(5));
+        assert_eq!(&out[..5], b"a-b-c");
+        assert_eq!(translated(b"", b'_', b'-', &mut out), Some(0));
+        assert_eq!(translated(b"abc", b'x', b'y', &mut out), Some(3));
+        assert_eq!(&out[..3], b"abc");
+        assert_eq!(translated(b"123456789", b'1', b'2', &mut out), None);
+        assert_eq!(translated(b"a", b'a', b'b', &mut []), None);
+    }
+
+    #[test]
+    fn a_line_at_an_offset_runs_to_the_line_break() {
+        assert_eq!(line_at(b"one\ntwo\n", 0), b"one");
+        assert_eq!(line_at(b"one\ntwo\n", 4), b"two");
+        assert_eq!(line_at(b"one\ntwo", 4), b"two");
+        assert_eq!(line_at(b"one\ntwo", 3), b"");
+        assert_eq!(line_at(b"one", 3), b"");
+        assert_eq!(line_at(b"one", 9), b"");
+        assert_eq!(line_at(b"", 0), b"");
+        assert_eq!(line_at(b"a\r\nb", 0), b"a\r");
+    }
+
+    #[test]
+    fn the_first_line_is_trimmed() {
+        assert_eq!(first_line(b"  # head \r\nbody\n"), b"# head");
+        assert_eq!(first_line(b"head"), b"head");
+        assert_eq!(first_line(b"\nbody"), b"");
+        assert_eq!(first_line(b""), b"");
     }
 }

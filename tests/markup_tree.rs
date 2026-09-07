@@ -11,6 +11,7 @@ mod residue;
 use scylla::markup::tree::{self, Step, Structure, Tree};
 use scylla::markup::{self, MarkupKind, NONE, Node, Token, Tokens};
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const ERROR_COUNT_MAX: u32 = 1 << 10;
 const NODE_COUNT_MAX: u32 = 1 << 17;
 const TOKEN_COUNT_MAX: u32 = 1 << 18;
@@ -23,7 +24,7 @@ fn every_fixture_builds_the_node_walk_the_oracle_recorded() {
     let mut classified = 0;
 
     for fixture in &common::fixtures() {
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
 
         let outcome = tree::build(&fixture.source, tokens.as_slice(), &mut built);
 
@@ -89,7 +90,7 @@ fn every_fixture_records_the_errors_the_oracle_recorded() {
             continue;
         }
 
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
         tree::build(&fixture.source, tokens.as_slice(), &mut built);
 
         let recorded = &fixture.golden.errors;
@@ -125,7 +126,7 @@ fn every_fixture_walks_the_order_the_links_describe() {
     let mut built = Tree::reserve(NODE_COUNT_MAX, ERROR_COUNT_MAX);
 
     for fixture in &common::fixtures() {
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
         tree::build(&fixture.source, tokens.as_slice(), &mut built);
 
         let walked: Vec<Step> = tree::walk(&built).collect();
@@ -192,7 +193,7 @@ fn a_parent_covers_its_children_and_siblings_never_overlap() {
     let mut built = Tree::reserve(NODE_COUNT_MAX, ERROR_COUNT_MAX);
 
     for fixture in &common::fixtures() {
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
         tree::build(&fixture.source, tokens.as_slice(), &mut built);
 
         invariants_hold(&built, tokens.as_slice(), &fixture.name);
@@ -216,7 +217,7 @@ fn every_corpus_template_builds_a_tree_that_holds_its_invariants() {
     let mut compared = 0;
 
     for (name, source) in &found {
-        markup::lex(source, &mut tokens);
+        markup::lex_with(source, &mut tokens, RAW_TEXT_TAGS);
         tree::build(source, tokens.as_slice(), &mut built);
 
         invariants_hold(&built, tokens.as_slice(), name);
@@ -249,7 +250,7 @@ fn byte_soup_builds_a_tree_that_holds_its_invariants() {
             source.push(alphabet[index]);
         }
 
-        markup::lex(&source, &mut tokens);
+        markup::lex_with(&source, &mut tokens, RAW_TEXT_TAGS);
         tree::build(&source, tokens.as_slice(), &mut built);
         invariants_hold(&built, tokens.as_slice(), &format!("soup {case}"));
     }
@@ -265,7 +266,7 @@ fn a_starved_node_budget_truncates_rather_than_overrunning() {
     let mut tokens = Tokens::reserve(TOKEN_COUNT_MAX);
     let mut starved = Tree::reserve(4, ERROR_COUNT_MAX);
 
-    markup::lex(&fixture.source, &mut tokens);
+    markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
 
     assert_eq!(
         tree::build(&fixture.source, tokens.as_slice(), &mut starved),

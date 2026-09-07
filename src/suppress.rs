@@ -1144,6 +1144,41 @@ impl Regions {
     }
 }
 
+pub fn comment_spans<T>(
+    source: &[u8],
+    tokens: &[T],
+    markers: &Markers,
+    comment_span: impl Fn(&T) -> Option<Span>,
+    out: &mut BoundedVec<Span>,
+) -> bool {
+    let words = [markers.disable, markers.enable, markers.file, markers.line];
+    let mut fitted = true;
+
+    for token in tokens {
+        let Some(span) = comment_span(token) else {
+            continue;
+        };
+
+        assert!(span.end() as usize <= source.len());
+
+        let text = &source[span.range()];
+
+        let marked = words
+            .iter()
+            .any(|word| !word.is_empty() && crate::scan::find(text, word).is_some());
+
+        if !marked {
+            continue;
+        }
+
+        fitted &= out.push(span);
+    }
+
+    assert!(out.count() as usize <= tokens.len());
+
+    fitted
+}
+
 pub fn directive_removed(source: &[u8], index: &lines::Index, found: &Unused) -> Span {
     let at = index.line_of(found.span.offset);
     let line = index.line_span(at, source);
@@ -1355,7 +1390,7 @@ mod tests {
     use crate::language::Lexer as _;
     use crate::lex::{GO, PYTHON, RUST};
     use crate::markup::{self, MarkupKind, Tokens as MarkupTokens};
-    use crate::token::{TokenKind, Tokens};
+    use crate::token::{Lex, TokenKind, Tokens};
 
     const WORD: &[u8] = b"noqa";
     const FILE_PREFIXES: [&[u8]; 2] = [b"flake8:", b"ruff:"];
@@ -2496,5 +2531,51 @@ mod tests {
         );
 
         assert!(!regions.unclosed_at(0));
+    }
+
+    #[test]
+    fn comment_spans_keeps_the_comments_that_carry_a_marker_word() {
+        let source: &[u8] = b"// plain\nlet x = 1; // tool: ok(TS001)\n/* tool: off */\n";
+        let mut tokens = Tokens::reserve(32);
+
+        assert_eq!(RUST.lex(source, &mut tokens), Lex::Complete);
+
+        let markers = Markers {
+            annotation: b"",
+            close: b")",
+            disable: b"tool: off",
+            enable: b"tool: on",
+            file: b"tool: ok-file",
+            line: b"tool: ok",
+            open: b"(",
+        };
+
+        let mut out = BoundedVec::reserve(4);
+
+        let fitted = comment_spans(
+            source,
+            tokens.as_slice(),
+            &markers,
+            |token| (token.kind == TokenKind::Comment).then(|| token.span()),
+            &mut out,
+        );
+
+        assert!(fitted);
+        assert_eq!(out.count(), 2);
+
+        let spans: Vec<&[u8]> = out.iter().map(|span| &source[span.range()]).collect();
+
+        assert_eq!(spans, [&b"// tool: ok(TS001)"[..], b"/* tool: off */"]);
+
+        let mut small = BoundedVec::reserve(1);
+
+        assert!(!comment_spans(
+            source,
+            tokens.as_slice(),
+            &markers,
+            |token| (token.kind == TokenKind::Comment).then(|| token.span()),
+            &mut small,
+        ));
+        assert_eq!(small.count(), 1);
     }
 }

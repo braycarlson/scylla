@@ -1,8 +1,15 @@
-use crate::bounded::{Arena, BoundedVec, Buffer, Bytes as _, Span, count_of};
-use crate::path::{directory_of, is_file, is_separator, join, open, trimmed};
+use core::fmt::Write as _;
+use std::env::var_os;
+
+use crate::bounded::{Arena, BoundedString, BoundedVec, Buffer, Bytes, Span, count_of};
+use crate::json::Pen;
+use crate::path::{bytes_of, directory_of, is_file, is_separator, join, open, trimmed};
+use crate::toml::{Reader, Value};
 
 pub const DIRECTORY_DEPTH_MAX: u32 = 64;
 pub const EXTEND_KEY: &[u8] = b"extend";
+pub const NAME_BYTES_MAX: usize = 64;
+const SCHEMA_URI: &[u8] = b"https://json-schema.org/draft/2020-12/schema";
 
 #[expect(
     clippy::struct_field_names,
@@ -18,7 +25,25 @@ pub struct Limits {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Names {
     pub file_names: &'static [&'static [u8]],
-    pub pyproject_name: &'static [u8],
+    pub section_file_name: &'static [u8],
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Kind {
+    Boolean,
+    Integer,
+    Map,
+    Strings,
+    Text,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Metadata {
+    pub default: &'static str,
+    pub description: &'static str,
+    pub example: &'static str,
+    pub kind: Kind,
+    pub name: &'static str,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,9 +54,9 @@ pub enum Extend {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Outcome {
+pub enum Outcome<F = ()> {
     Cycle,
-    Faulted,
+    Faulted(F),
     Malformed,
     Missing,
     Oversized,
@@ -53,13 +78,56 @@ pub struct Resolver {
     target: Vec<u8>,
 }
 
+impl Kind {
+    pub const fn schema(self) -> &'static [u8] {
+        match self {
+            Self::Boolean => b"boolean",
+            Self::Integer => b"integer",
+            Self::Map => b"object",
+            Self::Strings => b"array",
+            Self::Text => b"string",
+        }
+    }
+}
+
+impl Metadata {
+    fn default_write<W>(&self, pen: &mut Pen<'_, W>)
+    where
+        W: Bytes,
+    {
+        match self.kind {
+            Kind::Boolean | Kind::Integer => pen.raw(self.default.as_bytes()),
+            Kind::Map | Kind::Strings | Kind::Text => pen.string(self.default.as_bytes()),
+        }
+    }
+
+    fn property_write<W>(&self, pen: &mut Pen<'_, W>, name: &[u8])
+    where
+        W: Bytes,
+    {
+        pen.key(name);
+        pen.object_open();
+        pen.key(b"type");
+        pen.string(self.kind.schema());
+        pen.key(b"description");
+        pen.string(self.description.as_bytes());
+
+        if !self.default.is_empty() {
+            pen.key(b"default");
+            self.default_write(pen);
+        }
+
+        pen.object_close();
+    }
+}
+
 impl Names {
-    pub fn is_pyproject(&self, path: &[u8]) -> bool {
-        if self.pyproject_name.is_empty() || !path.ends_with(self.pyproject_name) {
+    pub fn needs_section(&self, path: &[u8]) -> bool {
+        if self.section_file_name.is_empty() || !path.ends_with(self.section_file_name) {
             return false;
         }
 
-        let at = path.len() - self.pyproject_name.len();
+        let at = path.len() - self.section_file_name.len();
 
         at == 0 || is_separator(path[at - 1])
     }
@@ -122,6 +190,14 @@ impl Resolver {
         self.paths.intern(path)
     }
 
+    pub fn discover(&mut self, start: &[u8], rooted: bool) -> Option<Span> {
+        let directory = if rooted { start } else { directory_of(start) };
+
+        self.discover_start(directory);
+
+        self.discover_next()
+    }
+
     pub fn discover_start(&mut self, directory: &[u8]) {
         self.directory.clear();
         self.name = 0;
@@ -173,14 +249,14 @@ impl Resolver {
         None
     }
 
-    pub fn load<E, A>(&mut self, path: Span, extend_of: E, mut apply: A) -> Outcome
+    pub fn load<E, A, F>(&mut self, path: Span, extend_of: E, mut apply: A) -> Outcome<F>
     where
         E: Fn(&[u8], &[u8], &mut [u8]) -> Extend,
-        A: FnMut(&[u8], &[u8]) -> Outcome,
+        A: FnMut(&[u8], &[u8]) -> Outcome<F>,
     {
         let chained = self.chain_collect(path, &extend_of);
 
-        if chained != Outcome::Read {
+        if !matches!(chained, Outcome::Read) {
             return chained;
         }
 
@@ -193,7 +269,7 @@ impl Resolver {
             let held = self.chain[index as usize];
             let read = self.read(held);
 
-            if read != Outcome::Read {
+            if !matches!(read, Outcome::Read) {
                 return read;
             }
 
@@ -208,7 +284,7 @@ impl Resolver {
         Outcome::Read
     }
 
-    fn chain_collect<E>(&mut self, path: Span, extend_of: &E) -> Outcome
+    fn chain_collect<E, F>(&mut self, path: Span, extend_of: &E) -> Outcome<F>
     where
         E: Fn(&[u8], &[u8], &mut [u8]) -> Extend,
     {
@@ -245,13 +321,13 @@ impl Resolver {
         Outcome::Read
     }
 
-    fn extend_of<E>(&mut self, path: Span, extend_of: &E) -> Result<Option<Span>, Outcome>
+    fn extend_of<E, F>(&mut self, path: Span, extend_of: &E) -> Result<Option<Span>, Outcome<F>>
     where
         E: Fn(&[u8], &[u8], &mut [u8]) -> Extend,
     {
         let read = self.read(path);
 
-        if read != Outcome::Read {
+        if !matches!(read, Outcome::Read) {
             return Err(read);
         }
 
@@ -280,7 +356,7 @@ impl Resolver {
             .map_or(Err(Outcome::Oversized), |span| Ok(Some(span)))
     }
 
-    fn read(&mut self, path: Span) -> Outcome {
+    fn read<F>(&mut self, path: Span) -> Outcome<F> {
         self.buffer.clear();
 
         let Some(mut file) = open(self.paths.bytes_of(path)) else {
@@ -293,6 +369,163 @@ impl Resolver {
             Err(_) => Outcome::Unreadable,
         }
     }
+}
+
+pub fn documentation_write(out: &mut BoundedString, options: &[Metadata]) -> bool {
+    let mut fits = writeln!(out, "# Settings").is_ok();
+
+    fits &= writeln!(out).is_ok();
+    fits &= writeln!(
+        out,
+        "Every key is accepted in `snake_case` and `kebab-case`."
+    )
+    .is_ok();
+    fits &= writeln!(out).is_ok();
+
+    for option in options {
+        fits &= writeln!(out, "## `{}`", option.name).is_ok();
+        fits &= writeln!(out).is_ok();
+        fits &= writeln!(out, "{}", option.description).is_ok();
+        fits &= writeln!(out).is_ok();
+
+        if !option.default.is_empty() {
+            fits &= writeln!(out, "Default: `{}`", option.default).is_ok();
+            fits &= writeln!(out).is_ok();
+        }
+
+        fits &= writeln!(out, "```toml").is_ok();
+        fits &= writeln!(out, "{}", option.example).is_ok();
+        fits &= writeln!(out, "```").is_ok();
+        fits &= writeln!(out).is_ok();
+    }
+
+    fits
+}
+
+pub fn extend_toml(_path: &[u8], source: &[u8], out: &mut [u8]) -> Extend {
+    let mut reader = Reader::new(source);
+    let mut found = None;
+
+    while let Some(entry) = reader.read() {
+        let Ok(parsed) = entry else {
+            continue;
+        };
+
+        if !parsed.table.is_empty() || parsed.key != EXTEND_KEY {
+            continue;
+        }
+
+        let Value::String(text) = parsed.value else {
+            return Extend::Faulted;
+        };
+
+        found = Some(text);
+    }
+
+    let Some(text) = found else {
+        return Extend::None;
+    };
+
+    text.write_into(out).map_or(Extend::Faulted, Extend::Target)
+}
+
+pub fn kebab_of<'text>(name: &str, buffer: &'text mut [u8; NAME_BYTES_MAX]) -> Option<&'text str> {
+    assert!(name.len() <= NAME_BYTES_MAX);
+
+    let mut underscored = false;
+
+    for (index, byte) in name.bytes().enumerate() {
+        if byte == b'_' {
+            buffer[index] = b'-';
+            underscored = true;
+
+            continue;
+        }
+
+        buffer[index] = byte;
+    }
+
+    if !underscored {
+        return None;
+    }
+
+    core::str::from_utf8(&buffer[..name.len()]).ok()
+}
+
+pub fn schema_write<W>(pen: &mut Pen<'_, W>, title: &[u8], options: &[Metadata])
+where
+    W: Bytes,
+{
+    pen.object_open();
+    pen.key(b"$schema");
+    pen.string(SCHEMA_URI);
+    pen.key(b"title");
+    pen.string(title);
+    pen.key(b"type");
+    pen.string(b"object");
+    pen.key(b"additionalProperties");
+    pen.boolean(false);
+    pen.key(b"properties");
+    pen.object_open();
+
+    for option in options {
+        let mut kebab = [0_u8; NAME_BYTES_MAX];
+
+        option.property_write(pen, option.name.as_bytes());
+
+        if let Some(spelled) = kebab_of(option.name, &mut kebab) {
+            option.property_write(pen, spelled.as_bytes());
+        }
+    }
+
+    pen.object_close();
+    pen.object_close();
+}
+
+pub fn user_config_path(
+    out: &mut BoundedVec<u8>,
+    override_variable: &str,
+    directory_name: &[u8],
+    file_name: &[u8],
+) -> bool {
+    assert!(!directory_name.is_empty());
+    assert!(!file_name.is_empty());
+
+    out.clear();
+
+    let (found, tail): (Option<std::ffi::OsString>, &[u8]) = if cfg!(target_os = "windows") {
+        (var_os("APPDATA"), b"")
+    } else if let Some(named) = var_os(override_variable).filter(|_| !override_variable.is_empty())
+    {
+        (Some(named), b"")
+    } else if let Some(named) = var_os("XDG_CONFIG_HOME") {
+        (Some(named), b"")
+    } else if cfg!(target_os = "macos") {
+        (var_os("HOME"), b"/Library/Application Support")
+    } else {
+        (var_os("HOME"), b"/.config")
+    };
+
+    let Some(directory) = found else {
+        return false;
+    };
+
+    let Some(bytes) = bytes_of(&directory) else {
+        return false;
+    };
+
+    let pushed = out.push_bytes(bytes)
+        && out.push_bytes(tail)
+        && out.push_bytes(b"/")
+        && out.push_bytes(directory_name)
+        && out.push_bytes(b"/")
+        && out.push_bytes(file_name);
+
+    if !pushed {
+        out.clear();
+    }
+
+    pushed
 }
 
 #[cfg(test)]
@@ -311,7 +544,7 @@ mod tests {
 
     const NAMES: Names = Names {
         file_names: &[b"tool.toml", b".tool.toml", b"pyproject.toml"],
-        pyproject_name: b"pyproject.toml",
+        section_file_name: b"pyproject.toml",
     };
 
     static COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -401,7 +634,7 @@ mod tests {
 
         while let Some(path) = resolver.discover_next() {
             let outcome = resolver.load(path, extend_of, |found, source| {
-                if resolver_names().is_pyproject(found) && !source.starts_with(b"[tool.tool]") {
+                if resolver_names().needs_section(found) && !source.starts_with(b"[tool.tool]") {
                     return Outcome::Missing;
                 }
 
@@ -642,18 +875,171 @@ mod tests {
         let outcome = held.load(path, extend_of, |_, _| {
             seen += 1;
 
-            Outcome::Faulted
+            Outcome::Faulted(seen)
         });
 
-        assert_eq!(outcome, Outcome::Faulted);
+        assert_eq!(outcome, Outcome::Faulted(1));
         assert_eq!(seen, 1);
     }
 
     #[test]
-    fn a_pyproject_is_recognised_by_its_last_segment_only() {
-        assert!(NAMES.is_pyproject(b"pyproject.toml"));
-        assert!(NAMES.is_pyproject(b"/a/b/pyproject.toml"));
-        assert!(!NAMES.is_pyproject(b"/a/b/mypyproject.toml"));
-        assert!(!NAMES.is_pyproject(b"/a/b/pyproject.toml.bak"));
+    fn a_section_file_is_recognised_by_its_last_segment_only() {
+        assert!(NAMES.needs_section(b"pyproject.toml"));
+        assert!(NAMES.needs_section(b"/a/b/pyproject.toml"));
+        assert!(!NAMES.needs_section(b"/a/b/mypyproject.toml"));
+        assert!(!NAMES.needs_section(b"/a/b/pyproject.toml.bak"));
+    }
+
+    #[test]
+    fn discover_starts_from_the_directory_of_a_file_unless_rooted() {
+        let tree = Tree::new();
+
+        tree.seed("tool.toml", "x = 1\n");
+        tree.seed("a/b/main.rs", "");
+
+        let mut held = resolver();
+        let found = held
+            .discover(&tree.bytes("a/b/main.rs"), false)
+            .expect("the config is found");
+
+        assert_eq!(held.path_of(found), tree.bytes("tool.toml").as_slice());
+
+        let rooted = held
+            .discover(&tree.bytes("a/b"), true)
+            .expect("the config is found");
+
+        assert_eq!(held.path_of(rooted), tree.bytes("tool.toml").as_slice());
+    }
+
+    #[test]
+    fn extend_toml_reads_the_top_level_extend_key_only() {
+        let mut out = [0_u8; 64];
+
+        assert_eq!(
+            extend_toml(b"", b"select = [\"GL\"]\nextend = \"../base.toml\"\n", &mut out),
+            Extend::Target(12)
+        );
+        assert_eq!(&out[..12], b"../base.toml");
+        assert_eq!(extend_toml(b"", b"[tool]\nextend = \"x\"\n", &mut out), Extend::None);
+        assert_eq!(extend_toml(b"", b"extend = 3\n", &mut out), Extend::Faulted);
+        assert_eq!(extend_toml(b"", b"extend = \"a\\tb\"\n", &mut out), Extend::Target(3));
+        assert_eq!(&out[..3], b"a\tb");
+        assert_eq!(extend_toml(b"", b"x = 1\n", &mut out), Extend::None);
+    }
+
+    #[test]
+    fn a_config_extended_through_extend_toml_applies_the_base_first() {
+        let tree = Tree::new();
+
+        tree.seed("base.toml", "select = [\"GL\"]\n");
+        tree.seed("child/tool.toml", "extend = \"../base.toml\"\n");
+
+        let mut held = resolver();
+        let mut applied: Vec<Vec<u8>> = Vec::new();
+        let path = held
+            .discover(&tree.bytes("child"), true)
+            .expect("the config is found");
+
+        let outcome: Outcome = held.load(path, extend_toml, |_, source| {
+            applied.push(source.to_vec());
+
+            Outcome::Read
+        });
+
+        assert_eq!(outcome, Outcome::Read);
+        assert_eq!(applied.len(), 2);
+        assert_eq!(applied[0], b"select = [\"GL\"]\n".to_vec());
+    }
+
+    const OPTIONS: [Metadata; 3] = [
+        Metadata {
+            default: "2",
+            description: "The assertions a function is expected to carry.",
+            example: "assertions_min = 2",
+            kind: Kind::Integer,
+            name: "assertions_min",
+        },
+        Metadata {
+            default: "",
+            description: "A \"quoted\" description.",
+            example: "select = []",
+            kind: Kind::Strings,
+            name: "select",
+        },
+        Metadata {
+            default: "auto",
+            description: "Colour.",
+            example: "color = \"auto\"",
+            kind: Kind::Text,
+            name: "color",
+        },
+    ];
+
+    #[test]
+    fn a_schema_lists_each_option_under_both_spellings() {
+        let mut writer = crate::json::Writer::reserve(8);
+        let mut out = Buffer::reserve(1 << 12);
+        let mut pen = Pen::bound(&mut writer, &mut out);
+
+        schema_write(&mut pen, b"tool.toml", &OPTIONS);
+
+        assert!(pen.finish());
+
+        let text = core::str::from_utf8(out.as_bytes()).expect("the schema is utf-8");
+
+        assert!(text.starts_with("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"title\":\"tool.toml\","));
+        assert!(text.contains("\"additionalProperties\":false"));
+        assert!(text.contains("\"assertions_min\":{\"type\":\"integer\",\"description\":\"The assertions a function is expected to carry.\",\"default\":2}"));
+        assert!(text.contains("\"assertions-min\":{\"type\":\"integer\""));
+        assert!(text.contains("\"select\":{\"type\":\"array\",\"description\":\"A \\\"quoted\\\" description.\"}"));
+        assert!(!text.contains("\"select\":{\"type\":\"array\",\"description\":\"A \\\"quoted\\\" description.\",\"default\""));
+        assert!(text.contains("\"color\":{\"type\":\"string\",\"description\":\"Colour.\",\"default\":\"auto\"}"));
+        assert_eq!(text.matches("\"color\"").count(), 1);
+        assert!(text.ends_with("}}"));
+    }
+
+    #[test]
+    fn the_documentation_writes_a_section_for_each_option() {
+        let mut out = BoundedString::reserve(1 << 12);
+
+        assert!(documentation_write(&mut out, &OPTIONS));
+
+        let text = out.as_str();
+
+        assert!(text.starts_with("# Settings\n\nEvery key is accepted in `snake_case` and `kebab-case`.\n\n## `assertions_min`\n\n"));
+        assert!(text.contains("Default: `2`\n\n```toml\nassertions_min = 2\n```\n"));
+        assert!(text.contains("## `select`\n\nA \"quoted\" description.\n\n```toml\nselect = []\n```\n"));
+        assert!(!text.contains("Default: ``"));
+
+        let mut small = BoundedString::reserve(16);
+
+        assert!(!documentation_write(&mut small, &OPTIONS));
+    }
+
+    #[test]
+    fn a_kebab_spelling_appears_only_where_an_underscore_did() {
+        let mut buffer = [0_u8; NAME_BYTES_MAX];
+
+        assert_eq!(kebab_of("line_length_max", &mut buffer), Some("line-length-max"));
+        assert_eq!(kebab_of("select", &mut buffer), None);
+        assert_eq!(Kind::Map.schema(), b"object");
+        assert_eq!(Kind::Boolean.schema(), b"boolean");
+    }
+
+    #[test]
+    fn a_user_config_path_ends_in_the_tool_directory_and_file() {
+        let mut out = BoundedVec::reserve(256);
+        let found = user_config_path(&mut out, "", b"tool", b"tool.toml");
+
+        if found {
+            assert!(out.ends_with(b"/tool/tool.toml"));
+        } else {
+            assert!(out.is_empty());
+        }
+
+        let mut small = BoundedVec::reserve(4);
+
+        assert!(!user_config_path(&mut small, "", b"tool", b"tool.toml"));
+        assert!(small.is_empty());
     }
 }

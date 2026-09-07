@@ -1440,20 +1440,18 @@ impl Emitter<'_> {
             };
 
             if kind == TokenKind::Punctuation(Punctuation::ParenOpen) && self.calling(scan) {
-                let Some(from) = self.next_of(scan).filter(|held| *held < close) else {
-                    scan = close + 1;
+                let inner = self.next_of(scan).filter(|held| *held < close);
 
-                    continue;
-                };
+                if let Some(from) = inner {
+                    if self.next_of(from) != Some(close) {
+                        return false;
+                    }
 
-                if self.next_of(from) != Some(close) {
-                    return false;
-                }
+                    let argument = self.tokens[from as usize];
 
-                let held = self.tokens[from as usize];
-
-                if columns(self.source, held.offset, held.end()) > room {
-                    return false;
+                    if columns(self.source, argument.offset, argument.end()) > room {
+                        return false;
+                    }
                 }
             }
 
@@ -1514,18 +1512,18 @@ impl Emitter<'_> {
             .unwrap_or(stop);
 
         let room = self.options.line_width;
-        let step = self.options.indent_width;
+        let unit = self.options.indent_width;
         let widened = self.chain_widened(head, stop);
 
         let Some(object) = self.back_of(dot) else {
             return false;
         };
 
-        if level * step + self.printed_columns(from, object) + widened <= room {
-            return level * step + self.printed_columns(from, end) + widened > room;
+        if level * unit + self.printed_columns(from, object) + widened <= room {
+            return level * unit + self.printed_columns(from, end) + widened > room;
         }
 
-        (level + 1) * step + self.printed_columns(head, end) + widened > room
+        (level + 1) * unit + self.printed_columns(head, end) + widened > room
     }
 
     fn member_last(&self, head: u32, stop: u32) -> u32 {
@@ -1822,13 +1820,9 @@ impl Emitter<'_> {
     }
 
     fn chain_stop(&self, head: u32) -> Option<u32> {
-        let mut scan = head;
-        let mut stop = head;
-
-        if is_open(self.tokens[head as usize].kind) {
-            scan = self.closing_of(head)?;
-            stop = scan;
-        }
+        let opened = is_open(self.tokens[head as usize].kind);
+        let mut scan = if opened { self.closing_of(head)? } else { head };
+        let mut stop = scan;
 
         for _ in 0..CHAIN_SCAN_MAX {
             let Some(after) = self.next_of(scan) else {
@@ -1859,14 +1853,11 @@ impl Emitter<'_> {
             }
 
             if text == b"<" {
-                let Some(close) = self
+                let close = self
                     .policy
                     .chain_simples
                     .then(|| self.angle_close(after))
-                    .flatten()
-                else {
-                    return None;
-                };
+                    .flatten()?;
 
                 scan = close;
                 stop = close;
@@ -2506,9 +2497,9 @@ impl Emitter<'_> {
         }
 
         let run = self.binary_run(previous);
-        let seat = run.and_then(|(head, stop)| self.binary_seat(head, stop));
+        let seated = run.and_then(|(head, stop)| self.binary_seat(head, stop));
         let (head, stop) = run?;
-        let seat = seat?;
+        let seat = seated?;
 
         if self.binary_inlined(stop) {
             return None;
@@ -3408,6 +3399,14 @@ impl Emitter<'_> {
 
             scan = after;
             stop = after;
+        }
+
+        for _ in 0..CHAIN_SCAN_MAX {
+            if stop <= position || !self.remark_ended(stop) {
+                break;
+            }
+
+            stop = self.back_of(stop)?;
         }
 
         (head < position && stop > position).then_some((head, stop))

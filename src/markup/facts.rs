@@ -12,6 +12,8 @@ pub fn build(
     tree: &Tree,
     facts: &mut Facts,
     names: &[&[u8]],
+    extends: &[&[u8]],
+    only_word: &[u8],
 ) -> Structure {
     facts.clear();
 
@@ -34,9 +36,17 @@ pub fn build(
             continue;
         }
 
+        let kind = if names_a_template(tag, view, source, extends) {
+            FactKind::Extends
+        } else {
+            FactKind::Include {
+                only: names_only(tag, view, source, only_word),
+            }
+        };
+
         let pushed = facts.push(Fact {
             binding: NONE,
-            kind: FactKind::ImportSideEffect,
+            kind,
             local: view.span(),
             remote: Span::EMPTY,
             specifier: specifier_of(tag, view, source).unwrap_or(Span::EMPTY),
@@ -65,6 +75,30 @@ fn names_a_template(
     names.contains(&text)
 }
 
+fn names_only(tag: TemplateTag<'_, '_>, view: View<'_, '_>, source: &[u8], word: &[u8]) -> bool {
+    if word.is_empty() {
+        return false;
+    }
+
+    let mut found = false;
+    let mut pending = false;
+
+    for index in tag.argument_tokens() {
+        let token = view.token_at(index);
+
+        if pending && token.kind == MarkupKind::Equals {
+            pending = false;
+
+            continue;
+        }
+
+        found = found || pending;
+        pending = token.kind == MarkupKind::Identifier && token.text(source) == word;
+    }
+
+    found || pending
+}
+
 fn specifier_of(tag: TemplateTag<'_, '_>, view: View<'_, '_>, source: &[u8]) -> Option<Span> {
     for index in tag.argument_tokens() {
         let token = view.token_at(index);
@@ -85,6 +119,8 @@ mod tests {
     use crate::markup::{self, Tokens};
     use crate::syntax::Facts;
 
+    const EXTENDS: [&[u8]; 1] = [b"extends"];
+    const ONLY: &[u8] = b"only";
     const TEMPLATE_IMPORTS: [&[u8]; 2] = [b"extends", b"include"];
 
     fn built(source: &[u8]) -> (Facts, Structure) {
@@ -104,6 +140,8 @@ mod tests {
             &tree,
             &mut facts,
             &TEMPLATE_IMPORTS,
+            &EXTENDS,
+            ONLY,
         );
 
         (facts, outcome)
@@ -118,6 +156,7 @@ mod tests {
 
         assert_eq!(outcome, Structure::Complete);
         assert_eq!(facts.count(), 1);
+        assert_eq!(fact.kind, FactKind::Extends);
         assert_eq!(&SOURCE[fact.local.range()], b"{% extends 'base.html' %}");
         assert_eq!(&SOURCE[fact.specifier.range()], b"base.html");
     }
@@ -130,6 +169,7 @@ mod tests {
         let fact = facts.as_slice()[0];
 
         assert_eq!(facts.count(), 1);
+        assert_eq!(fact.kind, FactKind::Include { only: false });
 
         assert_eq!(
             &SOURCE[fact.local.range()],
@@ -149,6 +189,19 @@ mod tests {
         assert_eq!(facts.count(), 1);
         assert_eq!(&SOURCE[fact.local.range()], b"{% extends parent %}");
         assert_eq!(fact.specifier, Span::EMPTY);
+    }
+
+    #[test]
+    fn an_include_with_the_only_word_says_so() {
+        const SOURCE: &[u8] =
+            b"{% include 'a.html' with x=1 only %}{% include 'b.html' with only=1 %}\n";
+
+        let (facts, _) = built(SOURCE);
+        let held = facts.as_slice();
+
+        assert_eq!(held.len(), 2);
+        assert_eq!(held[0].kind, FactKind::Include { only: true });
+        assert_eq!(held[1].kind, FactKind::Include { only: false });
     }
 
     #[test]

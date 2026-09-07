@@ -1,4 +1,5 @@
-use crate::scan::{DECIMAL_BYTES_MAX, decimal_read, line_scan};
+use crate::bounded::Bytes;
+use crate::scan::{DECIMAL_BYTES_MAX, decimal_read, decimal_write, line_scan};
 
 pub const SEGMENT_COUNT_MAX: usize = 8;
 
@@ -12,6 +13,7 @@ pub enum Fault {
     TableUnterminated,
     TrailingText,
     ValueExpected,
+    ValueKind,
     ValueUnreadable,
 }
 
@@ -74,6 +76,20 @@ pub struct Segments<'source> {
     source: &'source [u8],
 }
 
+#[derive(Debug)]
+pub struct Under<'source> {
+    prefix: &'source [&'source [u8]],
+    reader: Reader<'source>,
+}
+
+pub struct Writer<'run, W>
+where
+    W: Bytes,
+{
+    out: &'run mut W,
+    room: bool,
+}
+
 impl Fault {
     pub const fn text(self) -> &'static str {
         match self {
@@ -85,6 +101,7 @@ impl Fault {
             Self::TableUnterminated => "the table header is not closed",
             Self::TrailingText => "text follows the value on the same line",
             Self::ValueExpected => "a value was expected",
+            Self::ValueKind => "the value is not of the kind the key takes",
             Self::ValueUnreadable => "the value is not a string, integer, boolean, array or table",
         }
     }
@@ -379,6 +396,13 @@ impl<'source> Reader<'source> {
             break;
         }
     }
+
+    pub const fn under(self, prefix: &'source [&'source [u8]]) -> Under<'source> {
+        Under {
+            prefix,
+            reader: self,
+        }
+    }
 }
 
 impl<'source> Segments<'source> {
@@ -427,6 +451,125 @@ impl<'source> Iterator for Segments<'source> {
         self.offset = dot_skipped(self.source, end);
 
         self.source.get(start..end)
+    }
+}
+
+impl Under<'_> {
+    fn covers(&self, table: &[u8]) -> bool {
+        let mut segments = Segments::of(table);
+
+        for wanted in self.prefix {
+            if segments.next() != Some(*wanted) {
+                return false;
+            }
+        }
+
+        true
+    }
+}
+
+impl<'source> Iterator for Under<'source> {
+    type Item = Result<Entry<'source>, Error>;
+
+    fn next(&mut self) -> Option<Result<Entry<'source>, Error>> {
+        loop {
+            let read = self.reader.read()?;
+
+            let table = match &read {
+                Ok(entry) => entry.table,
+                Err(_) => self.reader.header(),
+            };
+
+            if self.covers(table) {
+                return Some(read);
+            }
+        }
+    }
+}
+
+impl<'run, W> Writer<'run, W>
+where
+    W: Bytes,
+{
+    pub fn boolean(&mut self, key: &[u8], value: bool) {
+        self.raw(key);
+        self.raw(b" = ");
+        self.raw(if value { b"true" } else { b"false" });
+        self.raw(b"\n");
+    }
+
+    pub const fn bound(out: &'run mut W) -> Self {
+        Self { out, room: true }
+    }
+
+    pub const fn finish(self) -> bool {
+        self.room
+    }
+
+    pub fn integer(&mut self, key: &[u8], value: u64) {
+        let mut digits = [0_u8; DECIMAL_BYTES_MAX];
+        let length = decimal_write(&mut digits, value);
+
+        self.raw(key);
+        self.raw(b" = ");
+        self.raw(&digits[..length]);
+        self.raw(b"\n");
+    }
+
+    pub fn list<'item>(&mut self, key: &[u8], items: impl Iterator<Item = &'item [u8]>) {
+        self.raw(key);
+        self.raw(b" = [");
+
+        let mut count = 0_u32;
+
+        for item in items {
+            self.raw(b"\n    ");
+            self.quoted(item);
+            self.raw(b",");
+
+            count = count.saturating_add(1);
+        }
+
+        if count > 0 {
+            self.raw(b"\n");
+        }
+
+        self.raw(b"]\n");
+    }
+
+    pub fn quoted(&mut self, text: &[u8]) {
+        if !self.room {
+            return;
+        }
+
+        self.room = quoted_write(self.out, text);
+    }
+
+    pub fn raw(&mut self, bytes: &[u8]) {
+        if !self.room {
+            return;
+        }
+
+        self.room = self.out.push_bytes(bytes);
+    }
+
+    pub const fn room(&self) -> bool {
+        self.room
+    }
+
+    pub fn string(&mut self, key: &[u8], text: &[u8]) {
+        self.raw(key);
+        self.raw(b" = ");
+        self.quoted(text);
+        self.raw(b"\n");
+    }
+
+    pub fn table(&mut self, name: &[u8]) {
+        assert!(!name.is_empty());
+
+        self.raw(b"\n[");
+        self.raw(name);
+        self.raw(b"]\n");
     }
 }
 
@@ -486,6 +629,39 @@ impl Text<'_> {
 }
 
 impl<'source> Value<'source> {
+    pub const fn as_boolean(&self) -> Result<bool, Fault> {
+        match *self {
+            Self::Boolean(flag) => Ok(flag),
+            Self::Array(_)
+            | Self::Header
+            | Self::InlineTable(_)
+            | Self::Integer(_)
+            | Self::String(_) => Err(Fault::ValueKind),
+        }
+    }
+
+    pub const fn as_integer(&self) -> Result<u64, Fault> {
+        match *self {
+            Self::Integer(number) => Ok(number),
+            Self::Array(_)
+            | Self::Boolean(_)
+            | Self::Header
+            | Self::InlineTable(_)
+            | Self::String(_) => Err(Fault::ValueKind),
+        }
+    }
+
+    pub const fn as_string(&self) -> Result<Text<'source>, Fault> {
+        match *self {
+            Self::String(text) => Ok(text),
+            Self::Array(_)
+            | Self::Boolean(_)
+            | Self::Header
+            | Self::InlineTable(_)
+            | Self::Integer(_) => Err(Fault::ValueKind),
+        }
+    }
+
     pub const fn items(&self) -> Items<'source> {
         let source: &'source [u8] = match *self {
             Self::Array(body) => body,
@@ -608,8 +784,31 @@ const fn faulted_at(source: &[u8], start: usize, fault: Fault) -> usize {
         | Fault::TableUnterminated
         | Fault::TrailingText
         | Fault::ValueExpected
+        | Fault::ValueKind
         | Fault::ValueUnreadable => start,
     }
+}
+
+pub fn quoted_write<W>(out: &mut W, text: &[u8]) -> bool
+where
+    W: Bytes,
+{
+    let mut room = out.push_bytes(b"\"");
+
+    for byte in text {
+        let escaped: &[u8] = match *byte {
+            b'"' => b"\\\"",
+            b'\\' => b"\\\\",
+            b'\n' => b"\\n",
+            b'\t' => b"\\t",
+            b'\r' => b"\\r",
+            _ => &[*byte],
+        };
+
+        room = out.push_bytes(escaped) && room;
+    }
+
+    out.push_bytes(b"\"") && room
 }
 
 fn integer(text: &[u8]) -> Option<u64> {
@@ -1154,5 +1353,83 @@ mod tests {
                 assert!(steps <= length + 1, "{source:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_value_coerces_to_its_own_kind_and_faults_on_another() {
+        let text = Text {
+            literal: false,
+            raw: b"abc",
+        };
+
+        assert_eq!(Value::Boolean(true).as_boolean(), Ok(true));
+        assert_eq!(Value::Integer(7).as_integer(), Ok(7));
+        assert_eq!(Value::String(text).as_string(), Ok(text));
+        assert_eq!(Value::Integer(1).as_boolean(), Err(Fault::ValueKind));
+        assert_eq!(Value::String(text).as_integer(), Err(Fault::ValueKind));
+        assert_eq!(Value::Header.as_string(), Err(Fault::ValueKind));
+        assert_eq!(Value::Array(b"").as_boolean(), Err(Fault::ValueKind));
+        assert!(!Fault::ValueKind.text().is_empty());
+    }
+
+    #[test]
+    fn a_prefixed_reader_yields_only_the_rows_under_the_prefix() {
+        let source = b"top = 1\n[tool.other]\nx = 1\n[tool.tool]\nselect = [\"GL\"]\nbad = \n[tool.tool.lint]\npreview = true\n[tool.other]\ny = ]\n";
+        let prefix: [&[u8]; 2] = [b"tool", b"tool"];
+        let mut rows = Vec::new();
+
+        for read in Reader::new(source).under(&prefix) {
+            match read {
+                Ok(entry) => rows.push((entry.table, entry.key)),
+                Err(error) => rows.push((b"error".as_slice(), error.fault.text().as_bytes())),
+            }
+        }
+
+        assert_eq!(
+            rows,
+            vec![
+                (&b"tool.tool"[..], &b""[..]),
+                (b"tool.tool", b"select"),
+                (b"error", Fault::ValueExpected.text().as_bytes()),
+                (b"tool.tool.lint", b""),
+                (b"tool.tool.lint", b"preview"),
+            ]
+        );
+
+        let empty: [&[u8]; 0] = [];
+        let all = Reader::new(b"a = 1\n[b]\nc = 2\n").under(&empty).count();
+
+        assert_eq!(all, 3);
+    }
+
+    #[test]
+    fn a_writer_spells_each_value_kind_and_quotes_its_strings() {
+        let mut out = crate::bounded::Buffer::reserve(1 << 10);
+        let mut writer = Writer::bound(&mut out);
+
+        writer.string(b"extend", b"a \"b\"\\c\n\t\r");
+        writer.table(b"lint");
+        writer.boolean(b"preview", true);
+        writer.integer(b"width", 120);
+        writer.list(b"select", [&b"GL"[..], b"HS"].into_iter());
+        writer.list(b"ignore", core::iter::empty());
+
+        assert!(writer.room());
+        assert!(writer.finish());
+        assert_eq!(
+            out.as_bytes(),
+            b"extend = \"a \\\"b\\\"\\\\c\\n\\t\\r\"\n\n[lint]\npreview = true\nwidth = 120\nselect = [\n    \"GL\",\n    \"HS\",\n]\nignore = []\n"
+        );
+
+        let mut small = crate::bounded::Buffer::reserve(4);
+        let mut cramped = Writer::bound(&mut small);
+
+        cramped.string(b"key", b"value");
+
+        assert!(!cramped.finish());
+
+        let mut quoted_out = crate::bounded::Buffer::reserve(2);
+
+        assert!(!quoted_write(&mut quoted_out, b"x"));
     }
 }

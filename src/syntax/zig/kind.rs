@@ -714,6 +714,10 @@ impl Kind for ZigKind {
     fn is_token(self) -> bool {
         Self::is_token(self)
     }
+
+    fn name(self) -> &'static str {
+        Self::name(self)
+    }
 }
 
 impl ZigKind {

@@ -1,0 +1,8 @@
+./templates/django/child.html:
+  6:4    warning DG009 `{{ block.super }}` outside any `{% block %}` renders nothing
+  12:1   warning DG008 `script` is not a block `django/base.html` or its parents define
+  18:41  warning DG013 `location/ap.css` is not a file under any `static/` directory this project has
+
+./templates/django/context.html:
+  6:18  warning DG004 `locations` is not in the context of any view that renders this template. Rendered by `detail_view` in `./app/location/views.py`, `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py`
+  8:12  warning DG004 `title` is read here, but `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py` render this template without it

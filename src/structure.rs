@@ -165,6 +165,22 @@ pub fn ancestor_of<'nodes>(
     None
 }
 
+pub fn innermost_at(nodes: &[Node], tokens: &[Token], offset: u32) -> Option<u32> {
+    let mut found: Option<u32> = None;
+
+    for (index, node) in nodes.iter().enumerate() {
+        if !node.span(tokens).contains(offset) {
+            continue;
+        }
+
+        if found.is_none_or(|held| nodes[held as usize].depth <= node.depth) {
+            found = Some(count_of(index));
+        }
+    }
+
+    found
+}
+
 pub fn of_header(nodes: &[Node], header: u32) -> Option<&Node> {
     nodes.iter().find(|node| node.header == header)
 }
@@ -1136,5 +1152,22 @@ mod tests {
         assert_eq!(nodes.len(), 1);
         assert_ne!(nodes[0].token_end, NONE);
         assert!(nodes[0].span(&tokens).length > 0);
+    }
+
+    #[test]
+    fn the_innermost_node_at_an_offset_is_the_deepest_one_holding_it() {
+        let source =
+            b"fn f() {\n    if a {\n        loop {\n            x;\n        }\n    }\n    y;\n}\n";
+        let (tokens, nodes) = nodes_of(&RUST, source);
+        let deep = count_of(source.iter().position(|byte| *byte == b'x').expect("x"));
+        let shallow = count_of(source.iter().position(|byte| *byte == b'y').expect("y"));
+        let inner = innermost_at(&nodes, &tokens, deep).expect("x sits in a node");
+        let outer = innermost_at(&nodes, &tokens, shallow).expect("y sits in a node");
+
+        assert_eq!(nodes[inner as usize].kind, NodeKind::Loop);
+        assert_eq!(nodes[outer as usize].kind, NodeKind::Function);
+        assert_eq!(innermost_at(&nodes, &tokens, 0).map(|held| nodes[held as usize].kind), Some(NodeKind::Function));
+        assert_eq!(innermost_at(&nodes, &tokens, count_of(source.len())), None);
+        assert_eq!(innermost_at(&[], &tokens, deep), None);
     }
 }

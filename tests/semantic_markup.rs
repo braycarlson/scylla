@@ -11,6 +11,7 @@ use scylla::markup::tree::{self, Step, Structure, Tree, walk};
 use scylla::markup::view::View;
 use scylla::markup::{self, MarkupKind, NONE, Token, Tokens};
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const DEFINITION_COUNT_MAX: u32 = 1 << 14;
 const ERROR_COUNT_MAX: u32 = 1 << 10;
 const NODE_COUNT_MAX: u32 = 1 << 17;
@@ -182,7 +183,7 @@ impl Machine {
     }
 
     fn build(&mut self, source: &[u8]) -> bool {
-        markup::lex(source, &mut self.tokens);
+        markup::lex_with(source, &mut self.tokens, RAW_TEXT_TAGS);
 
         if tree::build(source, self.tokens.as_slice(), &mut self.tree) != Structure::Complete {
             return false;

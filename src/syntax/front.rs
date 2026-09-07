@@ -1,9 +1,10 @@
 use crate::bounded::{BoundedVec, Span, count_of};
 use crate::language::{Language, Lexer};
 use crate::lex::{CSS, GO, JAVASCRIPT, ODIN, PYTHON, RUST, TYPESCRIPT, ZIG};
-use crate::markup;
+use crate::markup::blocks::{self, BlockMap};
 use crate::markup::kind::MarkupKind;
 use crate::markup::tree::TreeError;
+use crate::markup::{self, Vocabulary};
 use crate::syntax::Category;
 use crate::syntax::binding::Bindings;
 use crate::syntax::css::classify::classify as css_classify;
@@ -80,6 +81,7 @@ pub struct Limits {
     pub reference_count_max: u32,
     pub scope_count_max: u32,
     pub segment_count_max: u32,
+    pub tag_count_max: u32,
     pub token_count_max: u32,
 }
 
@@ -98,6 +100,7 @@ impl Limits {
             reference_count_max: shrunk_of(self.reference_count_max, shift),
             scope_count_max: shrunk_of(self.scope_count_max, shift),
             segment_count_max: shrunk_of(self.segment_count_max, shift),
+            tag_count_max: shrunk_of(self.tag_count_max, shift),
             token_count_max: shrunk_of(self.token_count_max, shift),
         }
     }
@@ -152,9 +155,12 @@ pub(crate) enum Tables {
         syntax: Syntax<JavaScriptKind>,
     },
     Markup {
+        blocks: BlockMap,
         facts: Facts,
+        lex: Lex,
         tokens: markup::Tokens,
         tree: Tree<MarkupKind>,
+        vocabulary: Vocabulary<'static>,
     },
     Odin {
         semantic: OdinSemantic,
@@ -328,7 +334,7 @@ impl Front {
 
         if self.outcome == Structure::Complete {
             self.tables.index_build();
-        } else {
+        } else if !self.tables.keeps_partial() {
             self.tables.clear();
         }
 
@@ -360,6 +366,34 @@ impl Front {
 
     pub const fn language(&self) -> Language {
         self.language
+    }
+
+    pub fn markup_blocks(&self) -> Option<&BlockMap> {
+        match &self.tables {
+            Tables::Markup { blocks, .. } => Some(blocks),
+            Tables::Css { .. }
+            | Tables::Go { .. }
+            | Tables::JavaScript { .. }
+            | Tables::Odin { .. }
+            | Tables::Python { .. }
+            | Tables::Rust { .. }
+            | Tables::TypeScript { .. }
+            | Tables::Zig { .. } => None,
+        }
+    }
+
+    pub fn markup_lex(&self) -> Option<Lex> {
+        match &self.tables {
+            Tables::Markup { lex, .. } => Some(*lex),
+            Tables::Css { .. }
+            | Tables::Go { .. }
+            | Tables::JavaScript { .. }
+            | Tables::Odin { .. }
+            | Tables::Python { .. }
+            | Tables::Rust { .. }
+            | Tables::TypeScript { .. }
+            | Tables::Zig { .. } => None,
+        }
     }
 
     pub fn markup_tokens(&self) -> &[markup::Token] {
@@ -402,6 +436,18 @@ impl Front {
             | Tables::TypeScript { .. }
             | Tables::Zig { .. } => &[],
         }
+    }
+
+    pub fn markup_view(&self, node: u32) -> Option<markup::view::View<'_, '_>> {
+        let Tables::Markup { tokens, tree, .. } = &self.tables else {
+            return None;
+        };
+
+        if node >= tree.count() {
+            return None;
+        }
+
+        Some(markup::view::View::new(tree, tokens.as_slice(), node))
     }
 
     pub const fn outcome(&self) -> Structure {
@@ -489,6 +535,35 @@ impl Front {
 
         self.tables.view(node)
     }
+
+    pub fn view_at(&self, category: Category, offset: u32) -> Option<View<'_>> {
+        let positions = self.index_of(category);
+
+        let first = positions.partition_point(|position| {
+            self.view(*position)
+                .is_some_and(|held| held.span().offset < offset)
+        });
+
+        assert!(first <= positions.len());
+
+        positions
+            .get(first)
+            .and_then(|position| self.view(*position))
+            .filter(|held| held.span().offset == offset)
+    }
+
+    pub fn vocabulary_set(&mut self, vocabulary: Vocabulary<'static>) {
+        let Tables::Markup {
+            vocabulary: held, ..
+        } = &mut self.tables
+        else {
+            return;
+        };
+
+        *held = vocabulary;
+
+        assert_eq!(self.language, Language::Markup);
+    }
 }
 
 impl Links for Front {
@@ -570,11 +645,16 @@ impl Tables {
                 syntax.clear();
             }
             Self::Markup {
+                blocks,
                 facts,
+                lex,
                 tokens,
                 tree,
+                ..
             } => {
+                blocks.clear();
                 facts.clear();
+                *lex = Lex::Complete;
                 tokens.clear();
                 tree.clear();
             }
@@ -606,6 +686,10 @@ impl Tables {
                 syntax.clear();
             }
         }
+    }
+
+    fn keeps_partial(&self) -> bool {
+        matches!(self, Self::Markup { .. })
     }
 
     fn index_build(&mut self) {
@@ -940,6 +1024,16 @@ impl Fronts {
         self.of_language(language.dialect_of_path(path))
     }
 
+    pub fn vocabulary_set(&mut self, vocabulary: Vocabulary<'static>) {
+        let index = self.of_language(Language::Markup);
+
+        if index == NONE {
+            return;
+        }
+
+        self.held[index as usize].vocabulary_set(vocabulary);
+    }
+
     pub const fn wanted(&self) -> [bool; Language::COUNT] {
         self.wanted
     }
@@ -1013,10 +1107,24 @@ fn build_of(
             build_javascript(source, semantic, syntax, lexed, events, globals)
         }
         Tables::Markup {
+            blocks,
             facts,
+            lex,
             tokens,
             tree,
-        } => build_markup(source, facts, tokens, tree, options.template_imports),
+            vocabulary,
+        } => build_markup(
+            source,
+            MarkupBuildInput {
+                blocks,
+                facts,
+                lex,
+                tokens,
+                tree,
+                vocabulary,
+            },
+            options.template_imports,
+        ),
         Tables::Odin { semantic, syntax } => {
             build_odin(source, semantic, syntax, lexed, events, globals)
         }
@@ -1180,28 +1288,66 @@ fn build_javascript(
     )
 }
 
+struct MarkupBuildInput<'run> {
+    blocks: &'run mut BlockMap,
+    facts: &'run mut Facts,
+    lex: &'run mut Lex,
+    tokens: &'run mut markup::Tokens,
+    tree: &'run mut Tree<MarkupKind>,
+    vocabulary: &'run Vocabulary<'static>,
+}
+
 fn build_markup(
     source: &[u8],
-    facts: &mut Facts,
-    tokens: &mut markup::Tokens,
-    tree: &mut Tree<MarkupKind>,
+    input: MarkupBuildInput<'_>,
     template_imports: &[&[u8]],
 ) -> Structure {
+    let MarkupBuildInput {
+        blocks: map,
+        facts,
+        lex,
+        tokens,
+        tree,
+        vocabulary,
+    } = input;
+
     tokens.clear();
 
     assert_eq!(tokens.count(), 0);
 
-    if markup::lex(source, tokens) != Lex::Complete {
-        return Structure::Truncated;
-    }
+    *lex = markup::lex_with(source, tokens, vocabulary.raw_text_tags);
 
     let built = markup::tree::build(source, tokens.as_slice(), tree);
+
+    blocks::build(
+        source,
+        tokens.as_slice(),
+        tree,
+        vocabulary.specifications,
+        vocabulary.intermediate_words,
+        vocabulary.end_prefix,
+        map,
+    );
+
+    let gathered = markup::facts::build(
+        source,
+        tokens.as_slice(),
+        tree,
+        facts,
+        template_imports,
+        vocabulary.extends_tags,
+        vocabulary.only_word,
+    );
+
+    if *lex != Lex::Complete {
+        return Structure::Truncated;
+    }
 
     if built != Structure::Complete {
         return built;
     }
 
-    markup::facts::build(source, tokens.as_slice(), tree, facts, template_imports)
+    gathered
 }
 
 fn build_odin(
@@ -1512,9 +1658,12 @@ fn reserve_javascript(limits: &Limits) -> Tables {
 
 fn reserve_markup(limits: &Limits) -> Tables {
     Tables::Markup {
+        blocks: BlockMap::reserve(limits.tag_count_max),
         facts: Facts::reserve(limits.fact_count_max),
+        lex: Lex::Complete,
         tokens: markup::Tokens::reserve(limits.token_count_max),
         tree: Tree::reserve(limits.node_count_max, limits.error_count_max),
+        vocabulary: Vocabulary::EMPTY,
     }
 }
 
@@ -1581,5 +1730,116 @@ fn reserve_zig(limits: &Limits) -> Tables {
             limits.fact_count_max,
         ),
         syntax: Syntax::reserve(limits),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markup::blocks::TagSpecification;
+    use crate::syntax::FactKind;
+    use crate::syntax::python::stdlib::PythonVersion;
+
+    const LIMITS: Limits = Limits {
+        binding_count_max: 1 << 8,
+        error_count_max: 1 << 6,
+        event_count_max: 1 << 12,
+        export_count_max: 1 << 6,
+        fact_count_max: 1 << 6,
+        node_count_max: 1 << 10,
+        reference_count_max: 1 << 8,
+        scope_count_max: 1 << 6,
+        segment_count_max: 1 << 6,
+        tag_count_max: 1 << 6,
+        token_count_max: 1 << 10,
+    };
+
+    const OPTIONS: Options<'static> = Options {
+        globals: &[],
+        python_version: PythonVersion::Py310,
+        template_imports: &[b"extends", b"include"],
+    };
+
+    const VOCABULARY: Vocabulary<'static> = Vocabulary {
+        end_prefix: b"end",
+        extends_tags: &[b"extends"],
+        intermediate_words: &[b"else"],
+        only_word: b"only",
+        raw_text_tags: &[(b"verbatim", b"endverbatim")],
+        specifications: &[TagSpecification {
+            intermediates: &[b"else"],
+            name: b"if",
+        }],
+    };
+
+    fn built(source: &[u8], vocabulary: Vocabulary<'static>) -> Fronts {
+        let mut fronts = Fronts::reserve(&LIMITS, &[Language::Markup]);
+
+        fronts.vocabulary_set(vocabulary);
+
+        let index = fronts.of_language(Language::Markup);
+
+        assert_ne!(index, NONE);
+
+        let _ = fronts.build(index, source, &[], &OPTIONS);
+
+        fronts
+    }
+
+    #[test]
+    fn a_markup_front_pairs_its_blocks_and_kinds_its_facts() {
+        const SOURCE: &[u8] =
+            b"{% extends 'b.html' %}{% if a %}{% include 'c.html' only %}{% endif %}";
+
+        let fronts = built(SOURCE, VOCABULARY);
+        let front = fronts.at(fronts.of_language(Language::Markup));
+        let blocks = front.markup_blocks().expect("a markup front pairs blocks");
+
+        assert_eq!(front.outcome(), Structure::Complete);
+        assert_eq!(front.markup_lex(), Some(Lex::Complete));
+        assert_eq!(blocks.blocks().iter().filter(|block| block.is_closed()).count(), 1);
+        assert_eq!(blocks.unmatched_closers().len(), 0);
+        assert_eq!(front.facts()[0].kind, FactKind::Extends);
+        assert_eq!(front.facts()[1].kind, FactKind::Include { only: true });
+        assert_eq!(front.markup_view(0).map(|view| view.kind()), Some(MarkupKind::Document));
+        assert!(front.markup_view(front.count()).is_none());
+    }
+
+    #[test]
+    fn a_truncated_lex_keeps_the_tree() {
+        let mut fronts = Fronts::reserve(&LIMITS.shrunk(7), &[Language::Markup]);
+        let index = fronts.of_language(Language::Markup);
+        let source = b"<p>a</p>".repeat(64);
+
+        assert_eq!(fronts.build(index, &source, &[], &OPTIONS), Structure::Truncated);
+
+        let front = fronts.at(index);
+
+        assert_eq!(front.markup_lex(), Some(Lex::Truncated));
+        assert!(front.count() > 0);
+        assert!(!front.markup_tokens().is_empty());
+    }
+
+    #[test]
+    fn an_empty_vocabulary_pairs_nothing_and_includes_everything() {
+        const SOURCE: &[u8] = b"{% extends 'b.html' %}{% if a %}{% endif %}";
+
+        let fronts = built(SOURCE, Vocabulary::EMPTY);
+        let front = fronts.at(fronts.of_language(Language::Markup));
+        let blocks = front.markup_blocks().expect("a markup front pairs blocks");
+
+        assert_eq!(front.facts()[0].kind, FactKind::Include { only: false });
+        assert!(blocks.blocks().iter().all(|block| !block.is_closed()));
+    }
+
+    #[test]
+    fn a_non_markup_front_has_no_markup_tables() {
+        let fronts = Fronts::reserve(&LIMITS, &[Language::Python]);
+        let front = fronts.at(fronts.of_language(Language::Python));
+
+        assert!(front.markup_blocks().is_none());
+        assert!(front.markup_lex().is_none());
+        assert!(front.markup_view(0).is_none());
+        assert_eq!(fronts.of_language(Language::Markup), NONE);
     }
 }

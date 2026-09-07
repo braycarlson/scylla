@@ -53,6 +53,17 @@ impl BoundedString {
         self.count() == 0
     }
 
+    pub fn of(capacity: u32, bytes: &[u8]) -> Self {
+        assert!(bytes.len() <= capacity as usize);
+
+        let mut string = Self::reserve(capacity);
+        let pushed = string.push_bytes(bytes);
+
+        assert!(pushed || core::str::from_utf8(bytes).is_err());
+
+        string
+    }
+
     #[must_use]
     fn bytes_push(&mut self, bytes: &[u8]) -> bool {
         let count_new = self.count() as usize + bytes.len();
@@ -222,5 +233,28 @@ mod tests {
         text.truncate(6);
 
         assert_eq!(text.as_str(), "linter");
+    }
+
+    #[test]
+    fn a_string_of_bytes_holds_the_text_it_was_given() {
+        let string = BoundedString::of(16, b"held");
+
+        assert_eq!(string.as_str(), "held");
+        assert_eq!(string.capacity(), 16);
+        assert!(BoundedString::of(16, b"").is_empty());
+        assert_eq!(BoundedString::of(4, b"full").as_str(), "full");
+    }
+
+    #[test]
+    fn a_string_of_bytes_that_are_not_text_stays_empty() {
+        let string = BoundedString::of(16, &[0xff, 0xfe]);
+
+        assert!(string.is_empty());
+    }
+
+    #[test]
+    #[should_panic(expected = "bytes.len() <= capacity")]
+    fn a_string_of_more_bytes_than_its_capacity_is_refused() {
+        let _string = BoundedString::of(2, b"abc");
     }
 }

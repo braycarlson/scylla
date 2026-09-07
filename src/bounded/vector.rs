@@ -75,6 +75,14 @@ impl<T: Copy> BoundedVec<T> {
         assert_eq!(self.count(), 0);
     }
 
+    pub fn dedup(&mut self, mut same: impl FnMut(&T, &T) -> bool) {
+        let count_before = self.count();
+
+        self.items.dedup_by(|second, first| same(first, second));
+
+        assert!(self.count() <= count_before);
+    }
+
     pub fn truncate(&mut self, count: u32) {
         assert!(count <= self.count());
 
@@ -222,5 +230,31 @@ mod tests {
 
             assert!(vector.count() <= 64);
         }
+    }
+
+    #[test]
+    fn a_dedup_keeps_the_first_of_each_run() {
+        let mut items = BoundedVec::reserve(8);
+
+        for item in [1_u32, 1, 2, 3, 3, 3, 4] {
+            items.push_assert(item);
+        }
+
+        items.dedup(|first, second| first == second);
+
+        assert_eq!(&*items, &[1, 2, 3, 4]);
+
+        items.dedup(|first, second| first == second);
+
+        assert_eq!(&*items, &[1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn a_dedup_of_nothing_is_nothing() {
+        let mut items: BoundedVec<u32> = BoundedVec::reserve(8);
+
+        items.dedup(|first, second| first == second);
+
+        assert_eq!(items.count(), 0);
     }
 }

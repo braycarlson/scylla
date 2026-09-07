@@ -1,0 +1,62 @@
+[
+  {
+    "check_name": "DG009",
+    "description": "`{{ block.super }}` outside any `{% block %}` renders nothing",
+    "fingerprint": "bd26916eae1da9a4",
+    "location": {
+      "lines": {
+        "begin": 6
+      },
+      "path": "./templates/django/child.html"
+    },
+    "severity": "minor"
+  },
+  {
+    "check_name": "DG008",
+    "description": "`script` is not a block `django/base.html` or its parents define",
+    "fingerprint": "cdb9cd01a65004a8",
+    "location": {
+      "lines": {
+        "begin": 12
+      },
+      "path": "./templates/django/child.html"
+    },
+    "severity": "minor"
+  },
+  {
+    "check_name": "DG013",
+    "description": "`location/ap.css` is not a file under any `static/` directory this project has",
+    "fingerprint": "37817c7f15b0cb15",
+    "location": {
+      "lines": {
+        "begin": 18
+      },
+      "path": "./templates/django/child.html"
+    },
+    "severity": "minor"
+  },
+  {
+    "check_name": "DG004",
+    "description": "`locations` is not in the context of any view that renders this template. Rendered by `detail_view` in `./app/location/views.py`, `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py`",
+    "fingerprint": "92fdbcb279117846",
+    "location": {
+      "lines": {
+        "begin": 6
+      },
+      "path": "./templates/django/context.html"
+    },
+    "severity": "minor"
+  },
+  {
+    "check_name": "DG004",
+    "description": "`title` is read here, but `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py` render this template without it",
+    "fingerprint": "f0c0630f7c932041",
+    "location": {
+      "lines": {
+        "begin": 8
+      },
+      "path": "./templates/django/context.html"
+    },
+    "severity": "minor"
+  }
+]

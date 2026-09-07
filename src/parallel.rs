@@ -1,13 +1,14 @@
 use core::mem::{ManuallyDrop, MaybeUninit};
 use core::ptr::NonNull;
-use std::thread::{Builder, available_parallelism, scope};
+use std::thread::{Builder, scope};
 
 use crate::allocation;
 use crate::bounded::count_of;
+use crate::pool::worker_count_for;
 
+pub const COUNT_SERIAL_MAX: u32 = 256;
 pub const RESERVE_STACK_BYTES: usize = 1 << 26;
 const COUNT_PER_THREAD: u32 = 64;
-const COUNT_SERIAL_MAX: u32 = 256;
 const STACK_DEFAULT: usize = 0;
 const THREAD_COUNT_MAX: u32 = 12;
 
@@ -18,26 +19,26 @@ struct Strided<T> {
 
 unsafe impl<T: Send> Sync for Strided<T> {}
 
-pub fn striped<T, F>(count: u32, build: F) -> Vec<T>
+pub fn striped<T, F>(count: u32, serial_max: u32, build: F) -> Vec<T>
 where
     T: Send,
     F: Fn(u32) -> T + Sync,
 {
-    built(STACK_DEFAULT, count, &build)
+    built(STACK_DEFAULT, count, serial_max, &build)
 }
 
-pub fn striped_into<T, F, S>(stack_bytes: usize, count: u32, build: F, mut take: S)
+pub fn striped_into<T, F, S>(stack_bytes: usize, count: u32, serial_max: u32, build: F, mut take: S)
 where
     T: Send,
     F: Fn(u32) -> T + Sync,
     S: FnMut(T),
 {
-    for value in built(stack_bytes, count, &build) {
+    for value in built(stack_bytes, count, serial_max, &build) {
         take(value);
     }
 }
 
-fn built<T, F>(stack_bytes: usize, count: u32, build: &F) -> Vec<T>
+fn built<T, F>(stack_bytes: usize, count: u32, serial_max: u32, build: &F) -> Vec<T>
 where
     T: Send,
     F: Fn(u32) -> T + Sync,
@@ -49,7 +50,7 @@ where
     let threads = if deep {
         reserve_thread_count_of(count)
     } else {
-        thread_count_of(count)
+        thread_count_of(count, serial_max)
     };
 
     if threads <= 1 && !deep {
@@ -146,22 +147,17 @@ where
 }
 
 fn reserve_thread_count_of(count: u32) -> u32 {
-    let available =
-        available_parallelism().map_or(1, |held| u32::try_from(held.get()).unwrap_or(1));
-
-    count.min(available.clamp(1, THREAD_COUNT_MAX)).max(1)
+    worker_count_for(count).min(THREAD_COUNT_MAX)
 }
 
-fn thread_count_of(count: u32) -> u32 {
-    if count <= COUNT_SERIAL_MAX {
+fn thread_count_of(count: u32, serial_max: u32) -> u32 {
+    if count <= serial_max {
         return 1;
     }
 
-    let available =
-        available_parallelism().map_or(1, |held| u32::try_from(held.get()).unwrap_or(1));
     let wanted = count.div_ceil(COUNT_PER_THREAD).max(2);
 
-    available.clamp(1, THREAD_COUNT_MAX).min(wanted)
+    worker_count_for(wanted).min(THREAD_COUNT_MAX)
 }
 
 #[cfg(test)]
@@ -170,14 +166,14 @@ mod tests {
 
     #[test]
     fn an_empty_count_builds_nothing() {
-        let values = striped(0, |index| index);
+        let values = striped(0, COUNT_SERIAL_MAX, |index| index);
 
         assert!(values.is_empty());
     }
 
     #[test]
     fn a_small_count_stays_serial_and_ordered() {
-        let values = striped(COUNT_SERIAL_MAX, |index| index);
+        let values = striped(COUNT_SERIAL_MAX, COUNT_SERIAL_MAX, |index| index);
 
         assert_eq!(count_of(values.len()), COUNT_SERIAL_MAX);
         assert!(
@@ -196,6 +192,7 @@ mod tests {
         striped_into(
             RESERVE_STACK_BYTES,
             count,
+            COUNT_SERIAL_MAX,
             |index| (index, index * 2),
             |pair| seen.push(pair),
         );
@@ -212,7 +209,7 @@ mod tests {
     #[test]
     fn a_large_count_stripes_and_weaves_in_order() {
         let count = COUNT_SERIAL_MAX * 8 + 3;
-        let values = striped(count, |index| u64::from(index) * 3);
+        let values = striped(count, COUNT_SERIAL_MAX, |index| u64::from(index) * 3);
 
         assert_eq!(count_of(values.len()), count);
 
@@ -221,6 +218,19 @@ mod tests {
                 .iter()
                 .enumerate()
                 .all(|(at, held)| u64::from(count_of(at)) * 3 == *held)
+        );
+    }
+
+    #[test]
+    fn a_serial_threshold_of_zero_stripes_a_small_count_in_order() {
+        let values = striped(8, 0, |index| index + 1);
+
+        assert_eq!(count_of(values.len()), 8);
+        assert!(
+            values
+                .iter()
+                .enumerate()
+                .all(|(at, held)| count_of(at) + 1 == *held)
         );
     }
 }

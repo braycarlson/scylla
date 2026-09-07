@@ -215,11 +215,11 @@ impl Graph {
         self.starts[index] = start;
 
         for (position, fact) in store.facts_of(file).iter().enumerate() {
-            if fact.specifier == Span::EMPTY {
-                continue;
-            }
-
-            let to = resolve(&source[fact.specifier.range()], file, store);
+            let to = if fact.specifier == Span::EMPTY {
+                NONE
+            } else {
+                resolve(&source[fact.specifier.range()], file, store)
+            };
 
             let pushed = self.edges.push(Edge {
                 fact: count_of(position),
@@ -340,6 +340,7 @@ mod tests {
                 reference_count_max: 128,
                 scope_count_max: 32,
                 segment_count_max: 128,
+                tag_count_max: 128,
                 token_count_max: 512,
             },
             line_count_max: 128,
@@ -463,6 +464,36 @@ mod tests {
         assert_eq!(edges[0].to, NONE);
         assert_eq!(edges[0].from, FileID::of(0));
         assert_eq!(graph.order().len(), 1);
+    }
+
+    #[test]
+    fn an_empty_specifier_is_an_unresolved_edge_that_is_not_resolved() {
+        let store = store_of(&[(b"a", b"__all__ = [\"x\"]\nimport b\n"), (b"b", b"y = 1\n")]);
+        let mut graph = Graph::reserve(16, 2);
+        let asked = core::cell::Cell::new(0_u32);
+
+        let counting = |specifier: &[u8], _from: FileID, held: &Store| {
+            asked.set(asked.get() + 1);
+
+            assert!(!specifier.is_empty());
+
+            held.find(hash_of(specifier))
+        };
+
+        assert!(graph.build(&store, &counting));
+        assert_eq!(asked.get(), 1);
+
+        let edges = graph.edges_of(FileID::of(0));
+
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].fact, 0);
+        assert!(!edges[0].resolved);
+        assert_eq!(edges[0].to, NONE);
+        assert!(edges[1].resolved);
+        assert_eq!(edges[1].to, 1);
+        assert_eq!(graph.dependents_of(FileID::of(1)).count(), 1);
+        assert_eq!(graph.order(), [FileID::of(1), FileID::of(0)]);
+        assert_eq!(graph.cycles().count(), 0);
     }
 
     #[test]

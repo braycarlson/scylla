@@ -2,8 +2,17 @@ use core::cell::RefCell;
 use core::mem::swap;
 use core::ops::Range;
 
-use crate::bounded::{BoundedVec, Bytes as _};
-use crate::path::is_separator;
+use crate::bounded::{BoundedVec, Bytes as _, count_of};
+use crate::path::{
+    PATH_BYTES_MAX,
+    contains,
+    file_name,
+    is_absolute,
+    is_separator,
+    join,
+    normalised_into,
+    relative_into,
+};
 
 pub const CLASS_BYTES: u32 = 32;
 pub const SEPARATOR: u8 = b'/';
@@ -75,6 +84,29 @@ struct Expansion {
     work: BoundedVec<u8>,
 }
 
+#[expect(
+    clippy::struct_field_names,
+    reason = "each field is a bound, and `_max` is what every bound in this tree is named"
+)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Bounds {
+    pub class_count_max: u32,
+    pub row_count_max: u32,
+    pub set_count_max: u32,
+    pub token_count_max: u32,
+}
+
+#[derive(Debug)]
+pub struct Filter {
+    anchoring: Anchoring,
+    base: BoundedVec<u8>,
+    excludes: Patterns,
+    includes: Patterns,
+    per_file: Patterns,
+    root: BoundedVec<u8>,
+    sets: BoundedVec<Row>,
+}
+
 #[derive(Debug)]
 pub struct Patterns {
     classes: BoundedVec<u8>,
@@ -139,6 +171,147 @@ impl Scratch {
             live: filled(words),
             next: filled(words),
         }
+    }
+}
+
+impl Filter {
+    pub fn base_set(&mut self, directory: &[u8]) -> bool {
+        cleaned_into(directory, &mut self.base)
+    }
+
+    pub fn clear(&mut self) {
+        self.base.clear();
+        self.excludes.clear();
+        self.includes.clear();
+        self.per_file.clear();
+        self.root.clear();
+        self.sets.clear();
+
+        assert!(self.excludes.is_empty());
+    }
+
+    pub fn exclude(&mut self, pattern: &[u8]) -> Result<(), Error> {
+        pushed_whole(&mut self.excludes, pattern, self.anchoring)
+    }
+
+    pub fn excluded(&self, path: &[u8]) -> bool {
+        if self.excludes.is_empty() {
+            return false;
+        }
+
+        let mut scratch = [0_u8; PATH_BYTES_MAX];
+
+        let Some(length) = self.relative(path, &mut scratch) else {
+            return false;
+        };
+
+        self.excludes.matches(&scratch[..length])
+    }
+
+    pub fn excludes(&self) -> &Patterns {
+        &self.excludes
+    }
+
+    pub fn include(&mut self, pattern: &[u8]) -> Result<(), Error> {
+        pushed_whole(&mut self.includes, pattern, self.anchoring)
+    }
+
+    pub fn included(&self, path: &[u8]) -> bool {
+        if self.includes.is_empty() {
+            return true;
+        }
+
+        let mut scratch = [0_u8; PATH_BYTES_MAX];
+
+        let Some(length) = self.relative(path, &mut scratch) else {
+            return false;
+        };
+
+        self.includes.matches(&scratch[..length]) || self.includes.matches(file_name(path))
+    }
+
+    pub fn includes(&self) -> &Patterns {
+        &self.includes
+    }
+
+    pub fn per_file(&mut self, pattern: &[u8]) -> Result<u32, Error> {
+        if self.sets.is_full() {
+            return Err(Error::Overflow);
+        }
+
+        let start = self.per_file.count();
+
+        pushed_whole(&mut self.per_file, pattern, self.anchoring)?;
+
+        let end = self.per_file.count();
+
+        assert!(end > start);
+
+        self.sets.push_assert(Row { end, start });
+
+        Ok(self.sets.count() - 1)
+    }
+
+    pub fn per_file_matches(&self, set: u32, path: &[u8]) -> bool {
+        assert!(set < self.sets.count());
+
+        let row = self.sets[set as usize];
+        let mut scratch = [0_u8; PATH_BYTES_MAX];
+
+        let Some(length) = self.relative(path, &mut scratch) else {
+            return false;
+        };
+
+        self.per_file
+            .matches_within(row.start, row.end, &scratch[..length])
+            || self.per_file.matches_within(row.start, row.end, path)
+    }
+
+    pub fn relative(&self, path: &[u8], out: &mut [u8]) -> Option<usize> {
+        let mut scratch = [0_u8; PATH_BYTES_MAX];
+        let length = normalised_into(path, &mut scratch)?;
+        let held = &scratch[..length];
+
+        let direct = self.root.is_empty()
+            || self.base.is_empty()
+            || is_absolute(held)
+            || contains(&self.root, held);
+
+        if direct {
+            return relative_into(&self.root, held, out);
+        }
+
+        let mut joined = [0_u8; PATH_BYTES_MAX];
+        let end = join(&mut joined, &self.base, held)?;
+
+        relative_into(&self.root, &joined[..end], out)
+    }
+
+    pub fn reserve(bounds: Bounds, anchoring: Anchoring) -> Self {
+        assert!(bounds.set_count_max > 0);
+        assert!(!crate::allocation::is_frozen());
+
+        let patterns = || {
+            Patterns::reserve(
+                bounds.row_count_max,
+                bounds.token_count_max,
+                bounds.class_count_max,
+            )
+        };
+
+        Self {
+            anchoring,
+            base: BoundedVec::reserve(count_of(PATH_BYTES_MAX)),
+            excludes: patterns(),
+            includes: patterns(),
+            per_file: patterns(),
+            root: BoundedVec::reserve(count_of(PATH_BYTES_MAX)),
+            sets: BoundedVec::reserve(bounds.set_count_max),
+        }
+    }
+
+    pub fn root_set(&mut self, directory: &[u8]) -> bool {
+        cleaned_into(directory, &mut self.root)
     }
 }
 
@@ -406,6 +579,35 @@ fn row(
     }
 
     Err(Error::Overflow)
+}
+
+fn cleaned_into(directory: &[u8], out: &mut BoundedVec<u8>) -> bool {
+    out.clear();
+
+    let mut scratch = [0_u8; PATH_BYTES_MAX];
+
+    let Some(length) = normalised_into(directory, &mut scratch) else {
+        return false;
+    };
+
+    out.push_bytes(&scratch[..length])
+}
+
+fn pushed_whole(
+    patterns: &mut Patterns,
+    pattern: &[u8],
+    anchoring: Anchoring,
+) -> Result<(), Error> {
+    let first = patterns.count();
+    let pushed = patterns.pushed(pattern, anchoring);
+
+    if pushed.is_err() {
+        patterns.truncate(first);
+    }
+
+    assert!(pushed.is_ok() || patterns.count() == first);
+
+    pushed
 }
 
 fn trimmed(pattern: &[u8]) -> &[u8] {
@@ -1770,5 +1972,125 @@ mod tests {
                 );
             }
         }
+    }
+
+    const FILTER_BOUNDS: Bounds = Bounds {
+        class_count_max: CLASS_COUNT_MAX,
+        row_count_max: ROW_COUNT_MAX,
+        set_count_max: 8,
+        token_count_max: TOKEN_COUNT_MAX,
+    };
+
+    fn filtered(anchoring: Anchoring) -> Filter {
+        Filter::reserve(FILTER_BOUNDS, anchoring)
+    }
+
+    fn relative_of(filter: &Filter, path: &[u8]) -> Vec<u8> {
+        let mut out = [0_u8; 64];
+        let length = filter.relative(path, &mut out).expect("the path fits");
+
+        out[..length].to_vec()
+    }
+
+    #[test]
+    fn a_filter_rewrites_a_path_relative_to_its_root_through_its_base() {
+        let mut filter = filtered(Anchoring::Inferred);
+
+        assert_eq!(relative_of(&filter, b"/project/src/main.rs"), b"/project/src/main.rs");
+        assert!(filter.root_set(b"/project/"));
+        assert_eq!(relative_of(&filter, b"/project/src/main.rs"), b"src/main.rs");
+        assert_eq!(relative_of(&filter, b"/project/./src/../lib.rs"), b"lib.rs");
+        assert_eq!(relative_of(&filter, b"./src/main.rs"), b"src/main.rs");
+        assert_eq!(relative_of(&filter, b"/elsewhere/x.rs"), b"/elsewhere/x.rs");
+        assert_eq!(relative_of(&filter, b"/project"), b"");
+        assert!(filter.base_set(b"/project/src"));
+        assert_eq!(relative_of(&filter, b"main.rs"), b"src/main.rs");
+        assert_eq!(relative_of(&filter, b"../lib.rs"), b"lib.rs");
+        assert_eq!(relative_of(&filter, b"/project/src/main.rs"), b"src/main.rs");
+        assert_eq!(relative_of(&filter, b"/elsewhere/x.rs"), b"/elsewhere/x.rs");
+        assert!(filter.relative(b"/project/x", &mut []).is_none());
+    }
+
+    #[test]
+    fn a_filter_includes_and_excludes_against_the_relative_path() {
+        let mut filter = filtered(Anchoring::Inferred);
+
+        assert!(filter.root_set(b"/project"));
+        assert!(filter.included(b"/project/a.rs"));
+        assert!(!filter.excluded(b"/project/a.rs"));
+
+        filter
+            .include(b"src/**/*.rs")
+            .expect("the pattern compiles");
+        filter
+            .exclude(b"src/generated/*")
+            .expect("the pattern compiles");
+
+        assert!(filter.included(b"/project/src/main.rs"));
+        assert!(filter.included(b"/project/src/deep/main.rs"));
+        assert!(!filter.included(b"/project/docs/x.md"));
+        assert!(filter.excluded(b"/project/src/generated/x.rs"));
+        assert!(!filter.excluded(b"/project/src/main.rs"));
+        assert!(!filter.includes().is_empty());
+        assert!(!filter.excludes().is_empty());
+
+        filter.clear();
+
+        assert!(filter.included(b"/project/docs/x.md"));
+        assert_eq!(relative_of(&filter, b"/project/docs/x.md"), b"/project/docs/x.md");
+    }
+
+    #[test]
+    fn an_anchored_include_also_matches_by_file_name() {
+        let mut filter = filtered(Anchoring::Anchored);
+
+        assert!(filter.root_set(b"/project"));
+        filter.include(b"Makefile").expect("the pattern compiles");
+
+        assert!(filter.included(b"/project/Makefile"));
+        assert!(filter.included(b"/project/deep/Makefile"));
+        assert!(!filter.included(b"/project/deep/Makefile.in"));
+    }
+
+    #[test]
+    fn a_per_file_set_matches_its_own_patterns_only() {
+        let mut filter = filtered(Anchoring::Inferred);
+
+        assert!(filter.root_set(b"/project"));
+        assert_eq!(filter.per_file(b"tests/*.py"), Ok(0));
+        assert_eq!(filter.per_file(b"{a,b}.py"), Ok(1));
+        assert!(filter.per_file_matches(0, b"/project/tests/x.py"));
+        assert!(!filter.per_file_matches(1, b"/project/tests/x.py"));
+        assert!(filter.per_file_matches(1, b"/project/a.py"));
+        assert!(filter.per_file_matches(1, b"/project/b.py"));
+        assert!(!filter.per_file_matches(0, b"/project/a.py"));
+        assert!(filter.per_file_matches(0, b"tests/x.py"));
+    }
+
+    #[test]
+    fn a_refused_pattern_leaves_the_filter_as_it_was() {
+        let mut filter = filtered(Anchoring::Inferred);
+
+        assert!(filter.exclude(b"{a,b").is_err());
+        assert!(filter.excludes().is_empty());
+        assert!(filter.include(b"").is_err());
+        assert!(filter.includes().is_empty());
+        assert!(filter.per_file(b"[abc").is_err());
+        assert_eq!(filter.per_file(b"ok.py"), Ok(0));
+        assert!(filter.per_file_matches(0, b"ok.py"));
+    }
+
+    #[test]
+    fn a_filled_set_table_refuses_another_set() {
+        let mut filter = Filter::reserve(
+            Bounds {
+                set_count_max: 1,
+                ..FILTER_BOUNDS
+            },
+            Anchoring::Inferred,
+        );
+
+        assert_eq!(filter.per_file(b"a.py"), Ok(0));
+        assert_eq!(filter.per_file(b"b.py"), Err(Error::Overflow));
     }
 }

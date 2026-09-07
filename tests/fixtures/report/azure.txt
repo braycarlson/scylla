@@ -1,0 +1,5 @@
+##vso[task.logissue type=warning;sourcepath=./templates/django/child.html;linenumber=6;columnnumber=4;code=DG009;]`{{ block.super }}` outside any `{% block %}` renders nothing
+##vso[task.logissue type=warning;sourcepath=./templates/django/child.html;linenumber=12;columnnumber=1;code=DG008;]`script` is not a block `django/base.html` or its parents define
+##vso[task.logissue type=warning;sourcepath=./templates/django/child.html;linenumber=18;columnnumber=41;code=DG013;]`location/ap.css` is not a file under any `static/` directory this project has
+##vso[task.logissue type=warning;sourcepath=./templates/django/context.html;linenumber=6;columnnumber=18;code=DG004;]`locations` is not in the context of any view that renders this template. Rendered by `detail_view` in `./app/location/views.py`, `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py`
+##vso[task.logissue type=warning;sourcepath=./templates/django/context.html;linenumber=8;columnnumber=12;code=DG004;]`title` is read here, but `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py` render this template without it

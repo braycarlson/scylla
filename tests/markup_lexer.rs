@@ -9,6 +9,7 @@ use scylla::bounded::Random;
 use scylla::markup::{self, MarkupKind, Tokens};
 use scylla::token::Lex;
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const TOKEN_COUNT_MAX: u32 = 1 << 18;
 
 #[test]
@@ -17,7 +18,7 @@ fn every_fixture_lexes_to_the_token_stream_the_oracle_recorded() {
     let fixtures = common::fixtures();
 
     for fixture in &fixtures {
-        let outcome = markup::lex(&fixture.source, &mut tokens);
+        let outcome = markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
 
         assert_eq!(outcome, Lex::Complete, "{}", fixture.name);
 
@@ -60,7 +61,7 @@ fn the_token_spans_reproduce_every_fixture_byte_for_byte() {
     let mut tokens = Tokens::reserve(TOKEN_COUNT_MAX);
 
     for fixture in &common::fixtures() {
-        markup::lex(&fixture.source, &mut tokens);
+        markup::lex_with(&fixture.source, &mut tokens, RAW_TEXT_TAGS);
         lossless(&fixture.source, &tokens, &fixture.name);
     }
 }
@@ -81,7 +82,7 @@ fn every_corpus_template_is_tiled_by_its_tokens() {
     let mut compared = 0;
 
     for (name, source) in &found {
-        markup::lex(source, &mut tokens);
+        markup::lex_with(source, &mut tokens, RAW_TEXT_TAGS);
         lossless(source, &tokens, name);
 
         compared += 1;
@@ -111,12 +112,12 @@ fn the_token_spans_reproduce_byte_soup_byte_for_byte() {
             source.push(alphabet[index]);
         }
 
-        markup::lex(&source, &mut tokens);
+        markup::lex_with(&source, &mut tokens, RAW_TEXT_TAGS);
         lossless(&source, &tokens, &format!("soup {case}"));
 
         let first: Vec<_> = tokens.as_slice().to_vec();
 
-        markup::lex(&source, &mut tokens);
+        markup::lex_with(&source, &mut tokens, RAW_TEXT_TAGS);
 
         assert_eq!(
             first,
@@ -137,8 +138,8 @@ fn a_starved_budget_truncates_and_still_covers_every_byte() {
     let mut starved = Tokens::reserve(4);
     let mut generous = Tokens::reserve(TOKEN_COUNT_MAX);
 
-    assert_eq!(markup::lex(&source, &mut starved), Lex::Truncated);
-    assert_eq!(markup::lex(&source, &mut generous), Lex::Complete);
+    assert_eq!(markup::lex_with(&source, &mut starved, RAW_TEXT_TAGS), Lex::Truncated);
+    assert_eq!(markup::lex_with(&source, &mut generous, RAW_TEXT_TAGS), Lex::Complete);
 
     lossless(&source, &starved, "the starved lex");
     lossless(&source, &generous, "the generous lex");
@@ -151,7 +152,7 @@ fn a_starved_budget_truncates_and_still_covers_every_byte() {
 fn an_empty_source_is_complete_under_any_budget() {
     let mut tokens = Tokens::reserve(1);
 
-    assert_eq!(markup::lex(b"", &mut tokens), Lex::Complete);
+    assert_eq!(markup::lex_with(b"", &mut tokens, RAW_TEXT_TAGS), Lex::Complete);
     assert_eq!(tokens.count(), 0);
 }
 
@@ -189,7 +190,7 @@ fn every_awkward_source_holds_the_lossless_property() {
     let mut tokens = Tokens::reserve(TOKEN_COUNT_MAX);
 
     for source in SOURCES {
-        assert_eq!(markup::lex(source, &mut tokens), Lex::Complete);
+        assert_eq!(markup::lex_with(source, &mut tokens, RAW_TEXT_TAGS), Lex::Complete);
         lossless(source, &tokens, "an awkward source");
     }
 }

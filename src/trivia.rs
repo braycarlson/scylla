@@ -1,5 +1,7 @@
 use crate::bounded::{Span, count_of};
-use crate::scan::BYTE_ORDER_MARK;
+use crate::language::Grammar;
+use crate::lines::Index;
+use crate::scan::{BYTE_ORDER_MARK, indent_width};
 use crate::tree::Positioned;
 
 pub const CONTINUATION_NONE: u8 = 0;
@@ -58,6 +60,62 @@ where
     }
 }
 
+pub fn comment_precedes(source: &[u8], index: &Index, line: u32, grammar: &Grammar) -> bool {
+    assert!(line < index.count());
+
+    let mut cursor = line;
+
+    while cursor > 0 {
+        cursor -= 1;
+
+        let text = source[index.line_span(cursor, source).range()].trim_ascii();
+
+        if text.is_empty() {
+            continue;
+        }
+
+        return opens_a_comment(text, grammar);
+    }
+
+    false
+}
+
+fn opens_a_comment(text: &[u8], grammar: &Grammar) -> bool {
+    let prefix = grammar.comment_prefix;
+    let opener = grammar.comment_block_open;
+
+    (!prefix.is_empty() && text.starts_with(prefix))
+        || (!opener.is_empty() && text.starts_with(opener))
+}
+
+pub fn trails_the_block(
+    source: &[u8],
+    index: &Index,
+    first: u32,
+    last: u32,
+    grammar: &Grammar,
+) -> bool {
+    assert!(first <= last);
+    assert!(last < index.count());
+
+    let line = &source[index.line_span(last, source).range()];
+    let text = line.trim_ascii();
+
+    if text.is_empty() {
+        return true;
+    }
+
+    let prefix = grammar.comment_prefix;
+
+    if prefix.is_empty() || !text.starts_with(prefix) {
+        return false;
+    }
+
+    let opening = &source[index.line_span(first, source).range()];
+
+    indent_width(line) <= indent_width(opening)
+}
+
 pub fn gaps<T>(length: u32, tokens: &[T]) -> Gaps<'_, T>
 where
     T: Positioned,
@@ -103,4 +161,56 @@ pub fn gap_is_blank(source: &[u8], gap: Span, continuation: u8) -> bool {
     }
 
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SOURCE: &[u8] = b"fn held() {\n    // why\n\n    let x = 1;\n    /* block */\n    let y = 2;\n        // deeper\n    // level\n\n}\n";
+
+    fn indexed() -> Index {
+        let mut index = Index::reserve(64);
+
+        assert!(index.build(SOURCE));
+
+        index
+    }
+
+    #[test]
+    fn a_comment_precedes_a_line_across_blank_lines() {
+        let index = indexed();
+        let grammar = Grammar {
+            comment_block_open: b"/*",
+            ..Grammar::DEFAULT
+        };
+
+        assert!(comment_precedes(SOURCE, &index, 3, &grammar));
+        assert!(comment_precedes(SOURCE, &index, 5, &grammar));
+        assert!(!comment_precedes(SOURCE, &index, 5, &Grammar::DEFAULT));
+        assert!(!comment_precedes(SOURCE, &index, 1, &grammar));
+        assert!(!comment_precedes(SOURCE, &index, 0, &grammar));
+        assert!(!comment_precedes(SOURCE, &index, 4, &Grammar {
+            comment_prefix: b"",
+            ..Grammar::DEFAULT
+        }));
+    }
+
+    #[test]
+    fn a_line_trails_the_block_when_blank_or_a_comment_no_deeper_than_the_opener() {
+        let index = indexed();
+
+        assert!(trails_the_block(SOURCE, &index, 0, 2, &Grammar::DEFAULT));
+        assert!(trails_the_block(SOURCE, &index, 0, 8, &Grammar::DEFAULT));
+        assert!(trails_the_block(SOURCE, &index, 3, 7, &Grammar::DEFAULT));
+        assert!(!trails_the_block(SOURCE, &index, 3, 6, &Grammar::DEFAULT));
+        assert!(!trails_the_block(SOURCE, &index, 0, 5, &Grammar::DEFAULT));
+        assert!(!trails_the_block(SOURCE, &index, 0, 4, &Grammar::DEFAULT));
+        assert!(!trails_the_block(SOURCE, &index, 0, 1, &Grammar {
+            comment_prefix: b"",
+            ..Grammar::DEFAULT
+        }));
+        assert!(trails_the_block(SOURCE, &index, 8, 8, &Grammar::DEFAULT));
+        assert!(!trails_the_block(SOURCE, &index, 9, 9, &Grammar::DEFAULT));
+    }
 }

@@ -110,6 +110,15 @@ impl Emitter<'_> {
         None
     }
 
+    fn value_cast(&self, close: u32) -> bool {
+        self.next_of(close).is_some_and(|next| {
+            matches!(
+                self.tokens[next as usize].text(self.source),
+                b"as" | b"satisfies"
+            )
+        })
+    }
+
     fn ending(&self, position: u32, close: u32) -> bool {
         let Some(next) = self.next_of(position) else {
             return false;
@@ -236,6 +245,11 @@ impl Emitter<'_> {
         }
 
         let frame = self.nest[self.depth as usize - 1];
+
+        if self.headed(frame.open) || self.paren_grouped(frame.open, frame.close) {
+            return false;
+        }
+
         let Some(remark) = self.next_of(position) else {
             return false;
         };
@@ -404,7 +418,7 @@ impl Emitter<'_> {
                         return None;
                     }
 
-                    if close.is_none() && !self.slight(scan, ends) {
+                    if close.is_none() && (self.value_cast(ends) || !self.slight(scan, ends)) {
                         close = Some(scan);
                     }
 
@@ -418,7 +432,7 @@ impl Emitter<'_> {
                     return None;
                 }
 
-                if !self.slight(scan, closes) {
+                if self.value_cast(closes) || !self.slight(scan, closes) {
                     close = Some(scan);
                 }
 
@@ -547,14 +561,7 @@ impl Emitter<'_> {
         }
 
         if grouped {
-            let close = self.frame().close;
-            let stop = self.back_of(close)?;
-
-            if stop <= position || !self.valued_binary(position, stop) {
-                return None;
-            }
-
-            return Some((stop, Wrap::Argued));
+            return self.value_grouped(position);
         }
 
         let end = if paired || argued {
@@ -591,6 +598,17 @@ impl Emitter<'_> {
         let wrap = if argued { Wrap::Argued } else { Wrap::Paired };
 
         Some((stop, wrap))
+    }
+
+    fn value_grouped(&self, position: u32) -> Option<(u32, Wrap)> {
+        let close = self.frame().close;
+        let stop = self.back_of(close)?;
+
+        if stop <= position || !self.valued_binary(position, stop) {
+            return None;
+        }
+
+        Some((stop, Wrap::Argued))
     }
 
     pub(super) fn value_joined(&self, position: u32, previous: u32) -> bool {
@@ -692,37 +710,6 @@ impl Emitter<'_> {
         }
 
         (close > head).then_some(close)
-    }
-
-    fn valued_leveled(&self, head: u32, stop: u32) -> bool {
-        let floor = self.binary_floor(head, stop);
-        let mut depth = 0_u32;
-        let mut scan = head;
-
-        while scan <= stop {
-            if let Some(end) = self.spanned_body(scan).or_else(|| self.spanned_unit(scan)) {
-                scan = end + 1;
-
-                continue;
-            }
-
-            let kind = self.tokens[scan as usize].kind;
-
-            if is_open(kind) || kind == TokenKind::BlockStart {
-                depth += 1;
-            } else if is_close(kind) || kind == TokenKind::BlockEnd {
-                depth = depth.saturating_sub(1);
-            } else if depth == 0
-                && self.wrapping_operator(scan)
-                && !self.binary_floored(scan, floor)
-            {
-                return false;
-            }
-
-            scan += 1;
-        }
-
-        true
     }
 
     fn valued_binary(&self, head: u32, stop: u32) -> bool {

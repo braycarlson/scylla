@@ -2536,3 +2536,18 @@ fn a_test_calls_arguments_are_written_on_the_line_the_call_opens() {
         String::from_utf8_lossy(WANTED)
     );
 }
+
+#[test]
+fn a_line_comment_never_takes_the_token_behind_it_onto_its_line() {
+    const SOURCE: &[u8] = b"function f() {\n    if (a || // note\n        !b\n    ) {\n        return;\n    }\n    g( // note\n        x);\n    const y = a || // note\n        b;\n}\n";
+    const WANTED: &[u8] = b"function f() {\n    if (\n        a || // note\n        !b\n    ) {\n        return;\n    }\n    g(\n        // note\n        x,\n    );\n    const y =\n        a || // note\n        b;\n}\n";
+
+    let mut held = Held::reserve();
+    let mut out = Buffer::reserve(OUT_BYTES_MAX);
+
+    assert_eq!(held.format(SOURCE, &mut out), Outcome::Complete);
+    assert_eq!(
+        String::from_utf8_lossy(out.as_bytes()),
+        String::from_utf8_lossy(WANTED)
+    );
+}

@@ -2,9 +2,8 @@ use crate::markup::kind::MarkupKind;
 use crate::markup::token::{Tokens, length_of};
 use crate::token::Lex;
 
-const VERBATIM_END_TAG_NAME: &[u8] = b"endverbatim";
+pub type RawTextTag<'run> = (&'run [u8], &'run [u8]);
 const VERBATIM_SCAN_BYTES_MAX: u32 = 1_024;
-const VERBATIM_TAG_NAME: &[u8] = b"verbatim";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Mode {
@@ -27,12 +26,13 @@ struct Name {
     start: u32,
 }
 
-struct Lexer<'source, 'tokens> {
+struct Lexer<'source, 'tokens, 'tags> {
     after_equals: bool,
     length: u32,
     mode: Mode,
     position: u32,
     raw_pending: Option<RawKind>,
+    raw_text_tags: &'tags [RawTextTag<'tags>],
     source: &'source [u8],
     tokens: &'tokens mut Tokens,
     truncated: bool,
@@ -74,8 +74,12 @@ impl Name {
     }
 }
 
-impl<'source, 'tokens> Lexer<'source, 'tokens> {
-    fn new(source: &'source [u8], tokens: &'tokens mut Tokens) -> Self {
+impl<'source, 'tokens, 'tags> Lexer<'source, 'tokens, 'tags> {
+    fn new(
+        source: &'source [u8],
+        tokens: &'tokens mut Tokens,
+        raw_text_tags: &'tags [RawTextTag<'tags>],
+    ) -> Self {
         let length = length_of(source);
 
         assert_eq!(tokens.count(), 0);
@@ -86,6 +90,7 @@ impl<'source, 'tokens> Lexer<'source, 'tokens> {
             mode: Mode::Text,
             position: 0,
             raw_pending: None,
+            raw_text_tags,
             source,
             tokens,
             truncated: false,
@@ -210,7 +215,7 @@ impl<'source, 'tokens> Lexer<'source, 'tokens> {
             && matches!(self.byte_ahead(position, 1), Some(b'{' | b'%' | b'#'))
     }
 
-    fn is_verbatim_end(&self, position: u32) -> bool {
+    fn is_verbatim_end(&self, position: u32, end_name: &[u8]) -> bool {
         if !self.matches_at(position, b"{%") {
             return false;
         }
@@ -237,7 +242,7 @@ impl<'source, 'tokens> Lexer<'source, 'tokens> {
             return false;
         };
 
-        name.trim_ascii() == VERBATIM_END_TAG_NAME
+        name.trim_ascii() == end_name
     }
 
     fn matches_at(&self, position: u32, needle: &[u8]) -> bool {
@@ -570,16 +575,24 @@ impl<'source, 'tokens> Lexer<'source, 'tokens> {
 
     fn lex_template_tag(&mut self) {
         let name = self.lex_delimited(MarkupKind::TagOpen, MarkupKind::TagClose, b"%}");
+        let text = self.name_bytes(name);
 
-        if self.name_bytes(name) == VERBATIM_TAG_NAME {
-            self.lex_verbatim_body();
-        }
+        let Some(pair) = self.raw_text_tags.iter().find(|pair| pair.0 == text) else {
+            return;
+        };
+
+        self.lex_verbatim_body(pair.1);
     }
 
-    fn lex_verbatim_body(&mut self) {
+    fn lex_verbatim_body(&mut self, end_name: &[u8]) {
         let start = self.position;
 
-        self.scan_while(|lexer, position| !lexer.is_verbatim_end(position));
+        while self.position < self.length && !self.is_verbatim_end(self.position, end_name) {
+            self.advance(1);
+        }
+
+        assert!(self.position <= self.length);
+
         self.push(MarkupKind::VerbatimText, start, self.position);
     }
 
@@ -792,11 +805,59 @@ const fn interior_punctuation(byte: u8) -> Option<MarkupKind> {
 }
 
 pub fn lex(source: &[u8], tokens: &mut Tokens) -> Lex {
+    lex_with(source, tokens, &[])
+}
+
+pub fn lex_with(source: &[u8], tokens: &mut Tokens, raw_text_tags: &[RawTextTag<'_>]) -> Lex {
     assert!(u32::try_from(source.len()).is_ok());
 
     tokens.clear();
 
-    let mut lexer = Lexer::new(source, tokens);
+    let mut lexer = Lexer::new(source, tokens, raw_text_tags);
 
     lexer.run()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const RAW_TEXT_TAGS: &[RawTextTag<'static>] = &[(b"verbatim", b"endverbatim")];
+
+    fn kinds(source: &[u8], raw_text_tags: &[RawTextTag<'_>]) -> Vec<MarkupKind> {
+        let mut tokens = Tokens::reserve(1 << 8);
+
+        assert_eq!(lex_with(source, &mut tokens, raw_text_tags), Lex::Complete);
+
+        tokens.as_slice().iter().map(|token| token.kind).collect()
+    }
+
+    #[test]
+    fn a_named_raw_text_tag_swallows_its_body() {
+        let found = kinds(b"{% verbatim %}{{ a }}{% endverbatim %}", RAW_TEXT_TAGS);
+
+        assert!(found.contains(&MarkupKind::VerbatimText));
+        assert!(!found.contains(&MarkupKind::VariableOpen));
+    }
+
+    #[test]
+    fn a_body_without_a_named_pair_lexes_as_template_text() {
+        let found = kinds(b"{% verbatim %}{{ a }}{% endverbatim %}", &[]);
+
+        assert!(!found.contains(&MarkupKind::VerbatimText));
+        assert!(found.contains(&MarkupKind::VariableOpen));
+    }
+
+    #[test]
+    fn each_pair_closes_on_its_own_end_name() {
+        let pairs: &[RawTextTag<'static>] = &[(b"raw", b"endraw"), (b"verbatim", b"endverbatim")];
+        let found = kinds(b"{% raw %}{% endverbatim %}{% endraw %}", pairs);
+        let raw = found
+            .iter()
+            .filter(|kind| **kind == MarkupKind::VerbatimText)
+            .count();
+
+        assert_eq!(raw, 1);
+        assert_eq!(found.iter().filter(|kind| **kind == MarkupKind::TagOpen).count(), 2);
+    }
 }

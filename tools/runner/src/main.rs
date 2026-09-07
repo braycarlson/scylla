@@ -11,6 +11,7 @@ mod oracle;
 mod printer;
 mod record;
 mod signature;
+mod tokens;
 
 use std::cell::RefCell;
 use std::io::Write as _;
@@ -25,6 +26,7 @@ use signature::signature_of;
 
 const USAGE: &str = concat!(
     "usage: runner --corpus <directory> [options]\n",
+    "       runner tokens <path>\n",
     "  --corpus <directory>   the corpus root to walk\n",
     "  --language <name>      a language to run, repeatable (default: every language)\n",
     "  --level <name>         the highest ladder level to climb: ",
@@ -32,6 +34,7 @@ const USAGE: &str = concat!(
     "  --out <path>           the divergence JSONL (default: divergences.jsonl)\n",
     "  --minimize             shrink each new signature's first repro\n",
     "  --require              treat an unavailable oracle as a harness failure\n",
+    "  tokens <path>          print one file's token boundaries as offset:length kind lines\n",
 );
 
 struct Arguments {
@@ -92,7 +95,13 @@ fn panicked() -> String {
 }
 
 fn run() -> i32 {
-    let arguments = match parsed(std::env::args().skip(1).collect()) {
+    let raw: Vec<String> = std::env::args().skip(1).collect();
+
+    if raw.first().is_some_and(|held| held == "tokens") {
+        return tokens::run(&raw[1..]);
+    }
+
+    let arguments = match parsed(raw) {
         Ok(held) => held,
         Err(error) => return fault(&error),
     };

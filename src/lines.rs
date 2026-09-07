@@ -24,6 +24,12 @@ pub struct Position {
     pub line: u32,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct Range {
+    pub end: Position,
+    pub start: Position,
+}
+
 #[derive(Debug)]
 pub struct Index {
     starts: BoundedVec<u32>,
@@ -375,8 +381,22 @@ impl Index {
         self.starts.push(start)
     }
 
+    pub fn range_of(&self, source: &[u8], span: Span, encoding: Encoding) -> Range {
+        Range {
+            end: self.position_clamped(source, span.end(), encoding),
+            start: self.position_clamped(source, span.offset, encoding),
+        }
+    }
+
     pub fn shift_tail(&mut self, from: u32, to: u32) -> bool {
         self.starts.shift_tail(from, to)
+    }
+
+    pub fn span_of(&self, source: &[u8], range: Range, encoding: Encoding) -> Span {
+        let first = self.offset_clamped(source, range.start, encoding);
+        let second = self.offset_clamped(source, range.end, encoding);
+
+        Span::between(first.min(second), first.max(second))
     }
 
     pub fn validate(&self, length: u32) {
@@ -725,6 +745,51 @@ mod tests {
         for line in 0..index.count() {
             assert_eq!(index.line_start(line), rebuilt.line_start(line));
         }
+    }
+
+    #[test]
+    fn a_span_maps_to_a_range_and_back() {
+        const SOURCE: &[u8] = b"one\ntwo\nthree";
+
+        let index = built("one\ntwo\nthree");
+        let range = index.range_of(SOURCE, Span::between(4, 7), Encoding::Utf16);
+
+        assert_eq!(range.start, Position { character: 0, line: 1 });
+        assert_eq!(range.end, Position { character: 3, line: 1 });
+        assert_eq!(index.span_of(SOURCE, range, Encoding::Utf16), Span::between(4, 7));
+    }
+
+    #[test]
+    fn a_reversed_range_reads_as_the_span_between_its_ends() {
+        const SOURCE: &[u8] = b"one\ntwo\nthree";
+
+        let index = built("one\ntwo\nthree");
+
+        let reversed = Range {
+            end: Position {
+                character: 0,
+                line: 0,
+            },
+            start: Position {
+                character: 2,
+                line: 1,
+            },
+        };
+
+        assert_eq!(index.span_of(SOURCE, reversed, Encoding::Utf16), Span::between(0, 6));
+
+        let past = Range {
+            end: Position {
+                character: 99,
+                line: 99,
+            },
+            start: Position {
+                character: 99,
+                line: 2,
+            },
+        };
+
+        assert_eq!(index.span_of(SOURCE, past, Encoding::Utf16), Span::between(13, 13));
     }
 
     #[test]

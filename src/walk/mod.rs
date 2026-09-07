@@ -17,6 +17,38 @@ pub use crate::walk::windows::{Directory, Listing};
 
 const DOTS: [&[u8]; 2] = [b".", b".."];
 
+pub const SKIPPED_DEFAULT: &[&[u8]] = &[
+    b".bzr",
+    b".direnv",
+    b".eggs",
+    b".git",
+    b".git-rewrite",
+    b".hg",
+    b".mypy_cache",
+    b".nox",
+    b".pants.d",
+    b".pytype",
+    b".ruff_cache",
+    b".snapshots",
+    b".svn",
+    b".tox",
+    b".venv",
+    b"__pycache__",
+    b"__pypackages__",
+    b"__snapshots__",
+    b"build",
+    b"dist",
+    b"node_modules",
+    b"site-packages",
+    b"snapshots",
+    b"target",
+    b"testdata",
+    b"vendor",
+    b"venv",
+    b"zig-cache",
+    b"zig-out",
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Outcome {
     Complete,
@@ -76,6 +108,16 @@ impl Walk {
 
     pub fn count(&self) -> u32 {
         self.entries.count()
+    }
+
+    pub fn dedup(&mut self) {
+        let Self { arena, entries, .. } = self;
+
+        assert!(entries.is_sorted_by(|first, second| {
+            arena[first.path.range()] <= arena[second.path.range()]
+        }));
+
+        entries.dedup(|first, second| arena[first.path.range()] == arena[second.path.range()]);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -195,6 +237,20 @@ impl Walk {
         }
 
         Outcome::Truncated
+    }
+
+    pub fn record(&mut self, path: &[u8]) -> bool {
+        if path.is_empty() || path.len() > PATH_BYTES_MAX || self.entries.is_full() {
+            return false;
+        }
+
+        let Some(span) = copied(&mut self.arena, path) else {
+            return false;
+        };
+
+        self.entries.push_assert(Entry { path: span });
+
+        true
     }
 
     pub fn reserve(bounds: Bounds) -> Self {
@@ -661,5 +717,45 @@ mod tests {
         });
 
         let _ = remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_recorded_path_is_walked_and_a_sorted_dedup_drops_the_repeats() {
+        let mut walk = Walk::reserve(BOUNDS);
+
+        assert!(walk.record(b"/tmp/b.rs"));
+        assert!(walk.record(b"/tmp/a.rs"));
+        assert!(walk.record(b"/tmp/b.rs"));
+        assert!(!walk.record(b""));
+        assert!(!walk.record(&[b'a'; PATH_BYTES_MAX + 1]));
+        assert_eq!(walk.count(), 3);
+
+        walk.sort();
+        walk.dedup();
+
+        assert_eq!(walk.paths().collect::<Vec<_>>(), [b"/tmp/a.rs".as_slice(), b"/tmp/b.rs"]);
+
+        walk.dedup();
+
+        assert_eq!(walk.count(), 2);
+    }
+
+    #[test]
+    fn a_full_walk_refuses_another_record() {
+        let mut walk = Walk::reserve(Bounds {
+            entry_count_max: 1,
+            ..BOUNDS
+        });
+
+        assert!(walk.record(b"/tmp/a.rs"));
+        assert!(!walk.record(b"/tmp/b.rs"));
+        assert_eq!(walk.count(), 1);
+    }
+
+    #[test]
+    fn the_default_skip_list_is_sorted_and_names_no_product() {
+        assert!(SKIPPED_DEFAULT.is_sorted());
+        assert!(SKIPPED_DEFAULT.contains(&b".git".as_slice()));
+        assert!(SKIPPED_DEFAULT.contains(&b"node_modules".as_slice()));
     }
 }

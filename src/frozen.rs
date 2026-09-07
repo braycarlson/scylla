@@ -139,7 +139,15 @@ fn every_fixture_runs_on_a_frozen_thread() {
 
         markup::lex(source, &mut markup_tokens);
         tree::build(source, markup_tokens.as_slice(), &mut built);
-        blocks::build(source, markup_tokens.as_slice(), &built, &[], &[], &mut map);
+        blocks::build(
+            source,
+            markup_tokens.as_slice(),
+            &built,
+            &[],
+            &[],
+            b"end",
+            &mut map,
+        );
 
         tokens.clear();
         JAVASCRIPT.lex(source, &mut tokens);
@@ -241,6 +249,7 @@ fn the_markup_layer_runs_on_a_frozen_thread() {
         &built,
         &[],
         &[],
+        b"end",
         &mut map,
     );
 
@@ -1424,7 +1433,15 @@ fn the_markup_formatter_runs_on_a_frozen_thread() {
 
         markup::lex(source, &mut tokens);
         tree::build(source, tokens.as_slice(), &mut built);
-        blocks::build(source, tokens.as_slice(), &built, &[], &[], &mut map);
+        blocks::build(
+            source,
+            tokens.as_slice(),
+            &built,
+            &[],
+            &[],
+            b"end",
+            &mut map,
+        );
 
         let input = MarkupInput {
             index: &index,
@@ -1725,6 +1742,7 @@ fn project_limits() -> Limits {
             reference_count_max: 1 << 10,
             scope_count_max: 1 << 8,
             segment_count_max: 1 << 10,
+            tag_count_max: 1 << 10,
             token_count_max: 1 << 12,
         },
         line_count_max: 1 << 10,
@@ -1812,6 +1830,7 @@ fn the_project_graph_runs_on_a_frozen_thread() {
             reference_count_max: 1 << 8,
             scope_count_max: 1 << 6,
             segment_count_max: 1 << 8,
+            tag_count_max: 1 << 8,
             token_count_max: 1 << 9,
         },
         line_count_max: 1 << 8,
@@ -1859,6 +1878,7 @@ fn parallel_limits() -> Limits {
             reference_count_max: 1 << 8,
             scope_count_max: 1 << 6,
             segment_count_max: 1 << 8,
+            tag_count_max: 1 << 8,
             token_count_max: 1 << 9,
         },
         line_count_max: 1 << 8,

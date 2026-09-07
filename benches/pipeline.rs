@@ -62,6 +62,7 @@ fn main() {
     zig_benches();
 }
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const ARENA_BYTES_MAX: u32 = 1 << 22;
 const BYTES_TARGET: usize = 1 << 20;
 const EDGE_COUNT_MAX: u32 = 1 << 10;
@@ -1434,6 +1435,15 @@ const SPECIFICATIONS: &[blocks::TagSpecification] = &[
 
 const WORDS: &[&[u8]] = &[b"elif", b"else", b"empty", b"plural"];
 
+fn blocks_built(
+    source: &[u8],
+    tokens: &[markup::Token],
+    tree: &markup_tree::Tree,
+    map: &mut BlockMap,
+) {
+    blocks::build(source, tokens, tree, SPECIFICATIONS, WORDS, b"end", map);
+}
+
 fn markup_benches() {
     let corpus = corpus_of("templates", "html");
     let sources = sources_of("templates", "html");
@@ -1444,41 +1454,27 @@ fn markup_benches() {
     let mut tree = markup_tree::Tree::reserve(NODE_COUNT_MAX, ERROR_COUNT_MAX);
 
     measure("markup-lex", corpus.len(), &mut || {
-        markup::lex(&corpus, &mut tokens);
+        markup::lex_with(&corpus, &mut tokens, RAW_TEXT_TAGS);
     });
 
     measure("markup-tree", corpus.len(), &mut || {
-        markup::lex(&corpus, &mut tokens);
+        markup::lex_with(&corpus, &mut tokens, RAW_TEXT_TAGS);
         markup_tree::build(&corpus, tokens.as_slice(), &mut tree);
     });
 
     measure("markup-blocks", corpus.len(), &mut || {
-        markup::lex(&corpus, &mut tokens);
+        markup::lex_with(&corpus, &mut tokens, RAW_TEXT_TAGS);
         markup_tree::build(&corpus, tokens.as_slice(), &mut tree);
 
-        blocks::build(
-            &corpus,
-            tokens.as_slice(),
-            &tree,
-            SPECIFICATIONS,
-            WORDS,
-            &mut map,
-        );
+        blocks_built(&corpus, tokens.as_slice(), &tree, &mut map);
     });
 
     measure("markup-blocks-small", small, &mut || {
         for source in &sources {
-            markup::lex(source, &mut tokens);
+            markup::lex_with(source, &mut tokens, RAW_TEXT_TAGS);
             markup_tree::build(source, tokens.as_slice(), &mut tree);
 
-            blocks::build(
-                source,
-                tokens.as_slice(),
-                &tree,
-                SPECIFICATIONS,
-                WORDS,
-                &mut map,
-            );
+            blocks_built(source, tokens.as_slice(), &tree, &mut map);
         }
     });
 
@@ -1491,20 +1487,13 @@ fn markup_benches() {
     let mut out = Buffer::reserve(OUT_BYTES_MAX);
 
     measure("markup-format", corpus.len(), &mut || {
-        markup::lex(&corpus, &mut tokens);
+        markup::lex_with(&corpus, &mut tokens, RAW_TEXT_TAGS);
 
         let _ = index.build(&corpus);
 
         markup_tree::build(&corpus, tokens.as_slice(), &mut tree);
 
-        blocks::build(
-            &corpus,
-            tokens.as_slice(),
-            &tree,
-            SPECIFICATIONS,
-            WORDS,
-            &mut map,
-        );
+        blocks_built(&corpus, tokens.as_slice(), &tree, &mut map);
 
         let input = scylla::format::markup::Input {
             index: &index,
@@ -1719,6 +1708,7 @@ fn project_benches() {
             reference_count_max: 512,
             scope_count_max: 128,
             segment_count_max: 512,
+            tag_count_max: 512,
             token_count_max: 2_048,
         },
         line_count_max: 512,

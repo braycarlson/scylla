@@ -4,6 +4,7 @@ mod pool;
 use core::cell::Cell;
 use core::mem::ManuallyDrop;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::io::Write as _;
 
 use crate::log_line;
 
@@ -42,6 +43,18 @@ pub struct Report {
     pub heap_bytes_live: u64,
 }
 
+#[expect(
+    clippy::exit,
+    reason = "the single exit is the design, and every other shutdown path diverges into it"
+)]
+pub fn exit(code: i32) -> ! {
+    stand_down();
+
+    assert!(exempt());
+
+    std::process::exit(code)
+}
+
 pub fn freeze() {
     let frozen_already = FROZEN.swap(true, Ordering::SeqCst);
 
@@ -66,10 +79,47 @@ pub fn report() -> Report {
     }
 }
 
+pub fn report_log() {
+    assert!(is_frozen_here());
+
+    let report = report();
+
+    assert!(report.allocation_count > 0);
+
+    log_line!(
+        "frozen: {} bytes live of {} bytes across {} allocations",
+        report.heap_bytes_live,
+        report.heap_bytes_allocated,
+        report.allocation_count
+    );
+}
+
 pub fn stand_down() {
     STOOD_DOWN.store(true, Ordering::SeqCst);
 
     assert!(exempt());
+}
+
+pub fn warm() {
+    assert!(!is_frozen());
+
+    let identifier = std::thread::current().id();
+
+    assert_eq!(identifier, std::thread::current().id());
+
+    let flushed = std::io::stderr().flush();
+
+    assert!(flushed.is_ok());
+}
+
+pub fn warm_streams() {
+    assert!(!is_frozen());
+
+    let input = std::io::stdin().lock();
+    let output = std::io::stdout().lock();
+
+    drop(input);
+    drop(output);
 }
 
 pub fn selftest_reserve() -> ManuallyDrop<Vec<u8>> {
@@ -329,5 +379,54 @@ mod tests {
 
         assert!(report.heap_bytes_allocated >= report.heap_bytes_live);
         assert!(report.allocation_count > 0);
+    }
+
+    #[test]
+    fn a_report_logs_on_a_frozen_thread() {
+        warm();
+        warm_streams();
+
+        frozen(report_log);
+
+        assert!(!is_frozen_here());
+    }
+
+    #[test]
+    fn warming_never_touches_the_streams() {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let input = std::io::stdin().lock();
+        let output = std::io::stdout().lock();
+
+        let warmed = std::thread::spawn(move || {
+            warm();
+
+            sender.send(()).expect("the test thread is waiting");
+        });
+
+        let answer = receiver.recv_timeout(core::time::Duration::from_secs(10));
+
+        drop(input);
+        drop(output);
+
+        assert!(answer.is_ok());
+        assert!(warmed.join().is_ok());
+    }
+
+    #[test]
+    fn an_exit_stands_the_guard_down_and_ends_the_child() {
+        if std::env::var_os("SCYLLA_EXIT_PROBE").is_some() {
+            exit(3);
+        }
+
+        let executable = std::env::current_exe().expect("the test binary names itself");
+
+        let status = std::process::Command::new(executable)
+            .arg("allocation::tests::an_exit_stands_the_guard_down_and_ends_the_child")
+            .arg("--exact")
+            .env("SCYLLA_EXIT_PROBE", "1")
+            .status()
+            .expect("the child runs");
+
+        assert_eq!(status.code(), Some(3));
     }
 }

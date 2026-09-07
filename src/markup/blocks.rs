@@ -7,7 +7,6 @@ use crate::markup::view::View;
 pub const BLOCK_DEPTH_MAX: u32 = 128;
 pub const INTERMEDIATE_COUNT_MAX: u32 = 32;
 pub const PAIRING_LOOKBACK_MAX: u32 = 64;
-const END_PREFIX: &[u8] = b"end";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TagSpecification {
@@ -146,6 +145,7 @@ impl BlockMap {
 }
 
 struct Pairer<'run> {
+    end_prefix: &'run [u8],
     map: &'run mut BlockMap,
     source: &'run [u8],
     specifications: &'run [TagSpecification],
@@ -341,7 +341,9 @@ impl Pairer<'_> {
             let tag = self.map.tags[index as usize];
             let name = tag.name(self.tokens, self.source);
 
-            if let Some(target) = name.strip_prefix(END_PREFIX) {
+            if !self.end_prefix.is_empty()
+                && let Some(target) = name.strip_prefix(self.end_prefix)
+            {
                 self.close(tag, target);
 
                 continue;
@@ -374,6 +376,7 @@ pub fn build(
     tree: &Tree,
     specifications: &[TagSpecification],
     words: &[&[u8]],
+    end_prefix: &[u8],
     map: &mut BlockMap,
 ) {
     assert!(u32::try_from(source.len()).is_ok());
@@ -383,6 +386,7 @@ pub fn build(
     collect(source, tokens, tree, map);
 
     let mut pairer = Pairer {
+        end_prefix,
         map,
         source,
         specifications,
@@ -418,5 +422,66 @@ fn collect(source: &[u8], tokens: &[Token], tree: &Tree, map: &mut BlockMap) {
         }) {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::markup::{self, Tokens};
+
+    const SPECIFICATIONS: &[TagSpecification] = &[TagSpecification {
+        intermediates: &[b"else"],
+        name: b"if",
+    }];
+
+    fn paired(source: &[u8], end_prefix: &[u8]) -> BlockMap {
+        let mut tokens = Tokens::reserve(1 << 8);
+        let mut tree = Tree::reserve(1 << 8, 1 << 4);
+        let mut map = BlockMap::reserve(1 << 6);
+
+        markup::lex(source, &mut tokens);
+        let _ = markup::tree::build(source, tokens.as_slice(), &mut tree);
+
+        build(
+            source,
+            tokens.as_slice(),
+            &tree,
+            SPECIFICATIONS,
+            &[b"else"],
+            end_prefix,
+            &mut map,
+        );
+
+        map
+    }
+
+    #[test]
+    fn the_end_prefix_names_the_closer() {
+        let map = paired(b"{% if a %}x{% endif %}", b"end");
+
+        assert_eq!(map.blocks().len(), 1);
+        assert!(map.blocks()[0].is_closed());
+        assert!(map.unmatched_closers().is_empty());
+    }
+
+    #[test]
+    fn another_prefix_names_another_closer() {
+        let closed = paired(b"{% if a %}x{% /if %}", b"/");
+        let open = paired(b"{% if a %}x{% endif %}", b"/");
+
+        assert_eq!(closed.blocks().len(), 1);
+        assert!(closed.blocks()[0].is_closed());
+        assert_eq!(open.unmatched_openers().len(), 1);
+        assert!(open.unmatched_closers().is_empty());
+    }
+
+    #[test]
+    fn an_empty_prefix_closes_nothing() {
+        let map = paired(b"{% if a %}x{% endif %}", b"");
+
+        assert_eq!(map.unmatched_openers().len(), 1);
+        assert!(map.unmatched_closers().is_empty());
+        assert!(map.blocks().iter().all(|block| !block.is_closed()));
     }
 }

@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "./templates/django/child.html"
+                },
+                "region": {
+                  "endColumn": 15,
+                  "endLine": 6,
+                  "startColumn": 4,
+                  "startLine": 6
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "`{{ block.super }}` outside any `{% block %}` renders nothing"
+          },
+          "ruleId": "DG009"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "./templates/django/child.html"
+                },
+                "region": {
+                  "endColumn": 50,
+                  "endLine": 12,
+                  "startColumn": 1,
+                  "startLine": 12
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "`script` is not a block `django/base.html` or its parents define"
+          },
+          "ruleId": "DG008"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "./templates/django/child.html"
+                },
+                "region": {
+                  "endColumn": 56,
+                  "endLine": 18,
+                  "startColumn": 41,
+                  "startLine": 18
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "`location/ap.css` is not a file under any `static/` directory this project has"
+          },
+          "ruleId": "DG013"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "./templates/django/context.html"
+                },
+                "region": {
+                  "endColumn": 27,
+                  "endLine": 6,
+                  "startColumn": 18,
+                  "startLine": 6
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "`locations` is not in the context of any view that renders this template. Rendered by `detail_view` in `./app/location/views.py`, `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py`"
+          },
+          "ruleId": "DG004"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "./templates/django/context.html"
+                },
+                "region": {
+                  "endColumn": 17,
+                  "endLine": 8,
+                  "startColumn": 12,
+                  "startLine": 8
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "`title` is read here, but `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py` render this template without it"
+          },
+          "ruleId": "DG004"
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/stratusadv/parhelion",
+          "name": "parhelion",
+          "rules": [
+            {
+              "helpUri": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG004.md",
+              "id": "DG004",
+              "name": "django/unknown-context-variable",
+              "shortDescription": {
+                "text": "Checks for template variables that no view rendering the template puts in its context, and for variables that some of the rendering views leave out."
+              }
+            },
+            {
+              "helpUri": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG008.md",
+              "id": "DG008",
+              "name": "django/unknown-block",
+              "shortDescription": {
+                "text": "Checks for `{% block %}` tags in a child template whose name no template in its `{% extends %}` chain defines."
+              }
+            },
+            {
+              "helpUri": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG009.md",
+              "id": "DG009",
+              "name": "django/block-super-outside-block",
+              "shortDescription": {
+                "text": "Checks for `{{ block.super }}` written outside any `{% block %}`, or in a template that extends nothing."
+              }
+            },
+            {
+              "helpUri": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG013.md",
+              "id": "DG013",
+              "name": "django/unknown-static",
+              "shortDescription": {
+                "text": "Checks for `{% static %}` tags naming a file no `static/` directory in this project holds."
+              }
+            }
+          ],
+          "version": "<version>"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

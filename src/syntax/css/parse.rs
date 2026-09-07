@@ -35,6 +35,7 @@ const DECLARATION_STOP: [CSSKind; 2] = [CSSKind::BraceClose, CSSKind::Semicolon]
 const QUERY_STOP: [CSSKind; 2] = [CSSKind::BraceOpen, CSSKind::Semicolon];
 
 struct Parser<'run> {
+    declarations: bool,
     events: &'run mut Events<CSSKind>,
     nesting: u32,
     outcome: Structure,
@@ -377,6 +378,10 @@ impl Parser<'_> {
 
         if self.kind_at(self.significant(start + 1)) != Some(CSSKind::Colon) {
             return false;
+        }
+
+        if self.declarations && self.nesting == 0 {
+            return true;
         }
 
         let mut depth = 0_u32;
@@ -1476,6 +1481,27 @@ pub fn build(
     events: &mut Events<CSSKind>,
     tree: &mut Tree<CSSKind>,
 ) -> Structure {
+    build_with(source, tokens, raw, events, tree, false)
+}
+
+pub fn build_declarations(
+    source: &[u8],
+    tokens: &[Token],
+    raw: &[CSSKind],
+    events: &mut Events<CSSKind>,
+    tree: &mut Tree<CSSKind>,
+) -> Structure {
+    build_with(source, tokens, raw, events, tree, true)
+}
+
+fn build_with(
+    source: &[u8],
+    tokens: &[Token],
+    raw: &[CSSKind],
+    events: &mut Events<CSSKind>,
+    tree: &mut Tree<CSSKind>,
+    declarations: bool,
+) -> Structure {
     assert!(u32::try_from(source.len()).is_ok());
     assert_eq!(tokens.len(), raw.len());
 
@@ -1483,6 +1509,7 @@ pub fn build(
     tree.clear();
 
     let mut parser = Parser {
+        declarations,
         events,
         nesting: 0,
         outcome: Structure::Complete,
@@ -1511,4 +1538,64 @@ pub fn build(
     }
 
     replayed
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bounded::BoundedVec;
+    use crate::language::Lexer as _;
+    use crate::lex::CSS;
+    use crate::syntax::css::classify::classify;
+    use crate::token::Tokens;
+
+    fn kinds(source: &[u8], declarations: bool) -> Vec<CSSKind> {
+        let mut lexed = Tokens::reserve(1 << 8);
+        let mut tokens = Tokens::reserve(1 << 8);
+        let mut raw = BoundedVec::reserve(1 << 8);
+        let mut events = Events::reserve(1 << 10);
+        let mut tree = Tree::reserve(1 << 8, 1 << 4);
+
+        CSS.lex(source, &mut lexed);
+
+        assert!(classify(source, lexed.as_slice(), &mut tokens, &mut raw));
+
+        let built = if declarations {
+            build_declarations(source, tokens.as_slice(), &raw, &mut events, &mut tree)
+        } else {
+            build(source, tokens.as_slice(), &raw, &mut events, &mut tree)
+        };
+
+        assert_eq!(built, Structure::Complete);
+
+        tree.as_slice().iter().map(|node| node.kind).collect()
+    }
+
+    #[test]
+    fn a_style_value_reads_as_declarations() {
+        let held = kinds(b"color: red; margin: 0", true);
+
+        assert_eq!(
+            held.iter().filter(|kind| **kind == CSSKind::Declaration).count(),
+            2
+        );
+
+        assert!(!held.contains(&CSSKind::RuleSet));
+    }
+
+    #[test]
+    fn a_pseudo_class_prefix_stays_a_declaration_in_a_declaration_list() {
+        let list = kinds(b"a:hover {color: red}", true);
+        let sheet = kinds(b"a:hover {color: red}", false);
+
+        assert_eq!(list[1], CSSKind::Declaration);
+        assert_eq!(sheet[1], CSSKind::RuleSet);
+    }
+
+    #[test]
+    fn a_nested_rule_inside_a_declaration_list_keeps_the_sheet_reading() {
+        let held = kinds(b"@media print { a:hover { color: red } }", true);
+
+        assert!(held.contains(&CSSKind::RuleSet));
+    }
 }

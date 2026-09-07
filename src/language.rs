@@ -114,6 +114,17 @@ impl Language {
 }
 
 impl Languages {
+    pub const SHIPPED: [&'static dyn Lexer; 8] = [
+        &crate::lex::CSS,
+        &crate::lex::GO,
+        &crate::lex::JAVASCRIPT,
+        &crate::lex::ODIN,
+        &crate::lex::PYTHON,
+        &crate::lex::RUST,
+        &crate::lex::TYPESCRIPT,
+        &crate::lex::ZIG,
+    ];
+
     pub fn reserve(language_count_max: u32) -> Self {
         assert!(language_count_max > 0);
 
@@ -156,6 +167,20 @@ impl Languages {
         let extension = extension_of(path)?;
 
         self.by_extension.get(extension)
+    }
+
+    pub fn with_all(language_count_max: u32) -> Self {
+        assert!(language_count_max as usize >= Self::SHIPPED.len());
+
+        let mut languages = Self::reserve(language_count_max);
+
+        for lexer in Self::SHIPPED {
+            languages.register(lexer);
+        }
+
+        assert_eq!(languages.count() as usize, Self::SHIPPED.len());
+
+        languages
     }
 
     pub fn register(&mut self, lexer: &'static dyn Lexer) {
@@ -281,6 +306,22 @@ mod tests {
                 .of_path(b"file:///tmp/main.go")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn every_shipped_lexer_registers_at_once() {
+        let languages = Languages::with_all(12);
+
+        assert_eq!(languages.count(), 8);
+        assert!(languages.of_path(b"a.css").is_some());
+        assert!(languages.of_path(b"a.go").is_some());
+        assert!(languages.of_path(b"a.js").is_some());
+        assert!(languages.of_path(b"a.odin").is_some());
+        assert!(languages.of_path(b"a.py").is_some());
+        assert!(languages.of_path(b"a.rs").is_some());
+        assert!(languages.of_path(b"a.ts").is_some());
+        assert!(languages.of_path(b"a.zig").is_some());
+        assert!(languages.of_identifier(b"markup").is_none());
     }
 
     #[test]

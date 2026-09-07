@@ -339,6 +339,58 @@ fn a_floating_call_is_separated_from_a_chained_one() {
 }
 
 #[test]
+fn a_floating_call_is_graded_against_the_innermost_statement() {
+    let built = Built::new(
+        "{ items: [], init() { fetch(one); this.load(); }, load() { return fetch(two).then(read); \
+         } }\nfunction run() { const held = 1;\n fetch(three); }\nsend(() => { fetch(four); \
+         });\nsend(fetch(five));\n",
+    );
+
+    let fates: Vec<(String, bool)> = built
+        .outline
+        .calls()
+        .iter()
+        .map(|call| {
+            let fate = javascript::chain_fate(
+                call,
+                &built.source,
+                &built.tokens,
+                built.outline.statements(),
+            );
+
+            (
+                built.join(
+                    built
+                        .outline
+                        .segments_of(call.callee_segment_first, call.callee_segment_count),
+                ),
+                fate.floating,
+            )
+        })
+        .collect();
+
+    let expected: Vec<(String, bool)> = [
+        ("init", false),
+        ("fetch", true),
+        ("this.load", true),
+        ("load", false),
+        ("fetch", false),
+        ("then", false),
+        ("run", false),
+        ("fetch", true),
+        ("send", true),
+        ("fetch", true),
+        ("send", true),
+        ("fetch", false),
+    ]
+    .iter()
+    .map(|(name, floating)| ((*name).to_owned(), *floating))
+    .collect();
+
+    assert_eq!(fates, expected);
+}
+
+#[test]
 fn the_x_data_reading_walks_the_first_object_literal() {
     let built = Built::new("{ open: false, toggle() { this.open = !this.open; } }");
 

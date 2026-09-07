@@ -1,5 +1,5 @@
 use std::env::args_os;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::read_to_string;
 use std::io::{Write as _, stderr};
 use std::process::exit;
@@ -95,6 +95,14 @@ impl Arguments {
         self.index += 1;
 
         Ok(next.clone())
+    }
+}
+
+pub fn boolean_of(value: &OsStr) -> Option<bool> {
+    match crate::path::bytes_or_empty(value) {
+        b"true" | b"yes" | b"1" => Some(true),
+        b"false" | b"no" | b"0" => Some(false),
+        _ => None,
     }
 }
 
@@ -250,6 +258,18 @@ mod tests {
 
         assert_eq!(held.next(), Some(option("-q", None)));
         assert_eq!(held.next(), Some(option("-o", Some("out.txt"))));
+    }
+
+    #[test]
+    fn a_boolean_word_reads_its_three_spellings() {
+        assert_eq!(boolean_of(OsStr::new("true")), Some(true));
+        assert_eq!(boolean_of(OsStr::new("yes")), Some(true));
+        assert_eq!(boolean_of(OsStr::new("1")), Some(true));
+        assert_eq!(boolean_of(OsStr::new("false")), Some(false));
+        assert_eq!(boolean_of(OsStr::new("no")), Some(false));
+        assert_eq!(boolean_of(OsStr::new("0")), Some(false));
+        assert_eq!(boolean_of(OsStr::new("maybe")), None);
+        assert_eq!(boolean_of(OsStr::new("")), None);
     }
 
     #[test]

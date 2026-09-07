@@ -1,0 +1,114 @@
+{
+  "diagnostics": [
+    {
+      "code": {
+        "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG009.md",
+        "value": "DG009"
+      },
+      "location": {
+        "path": "./templates/django/child.html",
+        "range": {
+          "end": {
+            "column": 15,
+            "line": 6
+          },
+          "start": {
+            "column": 4,
+            "line": 6
+          }
+        }
+      },
+      "message": "`{{ block.super }}` outside any `{% block %}` renders nothing",
+      "suggestions": []
+    },
+    {
+      "code": {
+        "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG008.md",
+        "value": "DG008"
+      },
+      "location": {
+        "path": "./templates/django/child.html",
+        "range": {
+          "end": {
+            "column": 50,
+            "line": 12
+          },
+          "start": {
+            "column": 1,
+            "line": 12
+          }
+        }
+      },
+      "message": "`script` is not a block `django/base.html` or its parents define",
+      "suggestions": []
+    },
+    {
+      "code": {
+        "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG013.md",
+        "value": "DG013"
+      },
+      "location": {
+        "path": "./templates/django/child.html",
+        "range": {
+          "end": {
+            "column": 56,
+            "line": 18
+          },
+          "start": {
+            "column": 41,
+            "line": 18
+          }
+        }
+      },
+      "message": "`location/ap.css` is not a file under any `static/` directory this project has",
+      "suggestions": []
+    },
+    {
+      "code": {
+        "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG004.md",
+        "value": "DG004"
+      },
+      "location": {
+        "path": "./templates/django/context.html",
+        "range": {
+          "end": {
+            "column": 27,
+            "line": 6
+          },
+          "start": {
+            "column": 18,
+            "line": 6
+          }
+        }
+      },
+      "message": "`locations` is not in the context of any view that renders this template. Rendered by `detail_view` in `./app/location/views.py`, `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py`",
+      "suggestions": []
+    },
+    {
+      "code": {
+        "url": "https://github.com/stratusadv/parhelion/blob/main/docs/rules/DG004.md",
+        "value": "DG004"
+      },
+      "location": {
+        "path": "./templates/django/context.html",
+        "range": {
+          "end": {
+            "column": 17,
+            "line": 8
+          },
+          "start": {
+            "column": 12,
+            "line": 8
+          }
+        }
+      },
+      "message": "`title` is read here, but `list_view` in `./app/location/views.py`, `stale_view` in `./app/location/views.py` render this template without it",
+      "suggestions": []
+    }
+  ],
+  "severity": "WARNING",
+  "source": {
+    "name": "parhelion",
+    "url": "https://github.com/stratusadv/parhelion"
+  }
+}

@@ -165,6 +165,7 @@ fn limits_of(file_count_max: u32) -> Limits {
             reference_count_max: 256,
             scope_count_max: 64,
             segment_count_max: 256,
+            tag_count_max: 256,
             token_count_max: 1_024,
         },
         line_count_max: 256,

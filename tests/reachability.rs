@@ -35,6 +35,7 @@ use scylla::syntax::zig::{classify::classify as zig_classify, parse as zig_parse
 use scylla::token::{Lex, Token, Tokens};
 use scylla::tree::{Events, Kind, Tree};
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const ERROR_COUNT_MAX: u32 = 1 << 10;
 const EVENT_COUNT_MAX: u32 = 1 << 19;
 const MARKUP_NODE_COUNT_MAX: u32 = 1 << 17;
@@ -645,7 +646,7 @@ fn run_markup(
 ) {
     tokens.clear();
 
-    let lexed = markup::lex(source, tokens);
+    let lexed = markup::lex_with(source, tokens, RAW_TEXT_TAGS);
 
     assert_eq!(lexed, Lex::Complete, "{label} outgrows the token table");
 

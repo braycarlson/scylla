@@ -146,6 +146,46 @@ impl Pairs {
     }
 }
 
+pub fn enclosing_at(
+    pairs: &Pairs,
+    tokens: &[Token],
+    source: &[u8],
+    offset: u32,
+) -> Option<(usize, u32)> {
+    assert_eq!(pairs.count() as usize, tokens.len());
+
+    let mut cursor = tokens.partition_point(|token| token.offset < offset);
+    let mut commas = 0_u32;
+
+    while cursor > 0 {
+        cursor -= 1;
+
+        let token = &tokens[cursor];
+
+        match classify(source, token) {
+            Some((_, true)) => return Some((cursor, commas)),
+            Some((_, false)) => {
+                let partner = pairs.partner_of(count_of(cursor));
+
+                if partner == NONE {
+                    return None;
+                }
+
+                assert!((partner as usize) < cursor);
+
+                cursor = partner as usize;
+            }
+            None => {
+                if token.is_punctuation(Punctuation::Comma) {
+                    commas += 1;
+                }
+            }
+        }
+    }
+
+    None
+}
+
 pub fn block_open(tokens: &[Token], close: usize) -> usize {
     let mut depth = 0_u32;
 
@@ -652,5 +692,51 @@ mod tests {
         let start = token_at(SOURCE, &tokens, b"only", 1);
 
         assert_eq!(argument_end(&pairs, &tokens, start, start + 1), start + 1);
+    }
+
+    #[test]
+    fn the_enclosing_bracket_is_the_innermost_opener_and_the_commas_at_its_level() {
+        const SOURCE: &[u8] = b"fn held() {\n    call(first, g(a, b), [1, 2], third);\n}\n";
+
+        let (tokens, pairs) = built(&RUST, SOURCE);
+        let open = token_at(SOURCE, &tokens, b"(", 2);
+        let third = token_at(SOURCE, &tokens, b"third", 1);
+        let inside_g = tokens[token_at(SOURCE, &tokens, b"b", 1)].offset;
+        let inside_list = tokens[token_at(SOURCE, &tokens, b"2", 1)].offset;
+        let after_open = tokens[open].offset + 1;
+
+        assert_eq!(enclosing_at(&pairs, &tokens, SOURCE, tokens[third].offset), Some((open, 3)));
+        assert_eq!(enclosing_at(&pairs, &tokens, SOURCE, after_open), Some((open, 0)));
+        assert_eq!(enclosing_at(&pairs, &tokens, SOURCE, 0), None);
+
+        let (body, body_commas) = enclosing_at(&pairs, &tokens, SOURCE, tokens[open].offset)
+            .expect("the function body encloses the call");
+
+        assert_eq!(tokens[body].text(SOURCE), b"{");
+        assert_eq!(body_commas, 0);
+
+        let (g_open, g_commas) =
+            enclosing_at(&pairs, &tokens, SOURCE, inside_g).expect("g encloses b");
+
+        assert_eq!(tokens[g_open].text(SOURCE), b"(");
+        assert_eq!(g_commas, 1);
+        assert_eq!(g_open, token_at(SOURCE, &tokens, b"(", 3));
+
+        let (list_open, list_commas) =
+            enclosing_at(&pairs, &tokens, SOURCE, inside_list).expect("the list encloses 2");
+
+        assert_eq!(tokens[list_open].text(SOURCE), b"[");
+        assert_eq!(list_commas, 1);
+    }
+
+    #[test]
+    fn an_unmatched_closer_before_the_offset_leaves_nothing_enclosing() {
+        const SOURCE: &[u8] = b"fn held() {\n    ) x;\n}\n";
+
+        let (tokens, pairs) = built(&RUST, SOURCE);
+        let x = token_at(SOURCE, &tokens, b"x", 1);
+
+        assert_eq!(enclosing_at(&pairs, &tokens, SOURCE, tokens[x].offset), None);
+        assert_eq!(enclosing_at(&Pairs::reserve(4), &[], SOURCE, 3), None);
     }
 }

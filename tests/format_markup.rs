@@ -14,6 +14,7 @@ use scylla::markup::blocks::{self, BlockMap, TagSpecification};
 use scylla::markup::tree::{self, Tree};
 use scylla::markup::{self, MarkupKind, Tokens};
 
+const RAW_TEXT_TAGS: &[(&[u8], &[u8])] = &[(b"verbatim", b"endverbatim")];
 const ELEMENT_COUNT_MAX: u32 = 1 << 18;
 const ERROR_COUNT_MAX: u32 = 1 << 12;
 const LINE_COUNT_MAX: u32 = 1 << 16;
@@ -73,7 +74,7 @@ impl Held {
             return Outcome::Overflow;
         }
 
-        markup::lex(source, &mut self.tokens);
+        markup::lex_with(source, &mut self.tokens, RAW_TEXT_TAGS);
         tree::build(source, self.tokens.as_slice(), &mut self.tree);
 
         blocks::build(
@@ -82,6 +83,7 @@ impl Held {
             &self.tree,
             SPECIFICATIONS,
             WORDS,
+            b"end",
             &mut self.map,
         );
 
@@ -100,7 +102,7 @@ impl Held {
     fn kinds(&mut self, source: &[u8]) -> Vec<(MarkupKind, Vec<u8>)> {
         self.tokens.clear();
 
-        markup::lex(source, &mut self.tokens);
+        markup::lex_with(source, &mut self.tokens, RAW_TEXT_TAGS);
 
         self.tokens
             .as_slice()
@@ -124,7 +126,7 @@ impl Held {
     fn comments(&mut self, source: &[u8]) -> Vec<Vec<u8>> {
         self.tokens.clear();
 
-        markup::lex(source, &mut self.tokens);
+        markup::lex_with(source, &mut self.tokens, RAW_TEXT_TAGS);
 
         self.tokens
             .as_slice()
@@ -360,7 +362,7 @@ fn a_range_reads_back_the_lines_it_names() {
 
     assert!(held.index.build(source));
 
-    markup::lex(source, &mut held.tokens);
+    markup::lex_with(source, &mut held.tokens, RAW_TEXT_TAGS);
     tree::build(source, held.tokens.as_slice(), &mut held.tree);
 
     blocks::build(
@@ -369,6 +371,7 @@ fn a_range_reads_back_the_lines_it_names() {
         &held.tree,
         SPECIFICATIONS,
         WORDS,
+        b"end",
         &mut held.map,
     );
 

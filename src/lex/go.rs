@@ -1,8 +1,7 @@
 use crate::language::{Grammar, Lexer};
 use crate::scan::Numbers;
 use crate::scan::{
-    identifier_scan,
-    is_identifier_start_at,
+    is_identifier_part,
     line_scan,
     line_scan_trimmed,
     number_scan_bounded,
@@ -267,7 +266,7 @@ fn follows_word(source: &[u8], cursor: usize, word: &[u8]) -> bool {
         && !source[..cursor - word.len()]
             .last()
             .copied()
-            .is_some_and(crate::scan::is_identifier_part)
+            .is_some_and(is_identifier_part)
 }
 
 fn paren_open(source: &[u8], close: usize) -> Option<usize> {
@@ -422,6 +421,63 @@ fn string_raw_scan(source: &[u8], start: usize) -> usize {
     source.len()
 }
 
+fn identifier_scan(source: &[u8], start: usize) -> usize {
+    assert!(is_identifier_start_at(source, start));
+
+    let mut offset = start;
+
+    while offset < source.len() {
+        let byte = source[offset];
+
+        if byte < 0x80 {
+            if !is_identifier_part(byte) {
+                break;
+            }
+
+            offset += 1;
+
+            continue;
+        }
+
+        let Some(held) = scalar_at(source, offset).filter(|held| held.is_alphanumeric()) else {
+            break;
+        };
+
+        offset += held.len_utf8();
+    }
+
+    assert!(offset > start);
+
+    offset
+}
+
+fn is_identifier_start_at(source: &[u8], offset: usize) -> bool {
+    assert!(offset <= source.len());
+
+    let Some(byte) = source.get(offset).copied() else {
+        return false;
+    };
+
+    if byte < 0x80 {
+        return byte.is_ascii_alphabetic() || byte == b'_';
+    }
+
+    scalar_at(source, offset).is_some_and(char::is_alphabetic)
+}
+
+fn scalar_at(source: &[u8], offset: usize) -> Option<char> {
+    assert!(offset < source.len());
+
+    let limit = source.len().min(offset + 4);
+
+    source[offset..limit]
+        .utf8_chunks()
+        .next()?
+        .valid()
+        .chars()
+        .next()
+}
+
 fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
     let byte = source[offset];
     let next = source.get(offset + 1).copied();
@@ -461,6 +517,15 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
         );
     }
 
+    if byte == b'<' && next == Some(b'<') {
+        let assigns = usize::from(source.get(offset + 2) == Some(&b'='));
+
+        return (
+            TokenKind::Punctuation(Punctuation::Other),
+            offset + 2 + assigns,
+        );
+    }
+
     if byte == b'<' && next == Some(b'-') {
         return (TokenKind::Punctuation(Punctuation::Less), offset + 2);
     }
@@ -480,6 +545,12 @@ fn token_of(source: &[u8], offset: usize) -> (TokenKind, usize) {
             TokenKind::Number,
             number_scan_bounded(source, offset, Numbers::ONE_SIDED),
         );
+    }
+
+    if byte >= 0x80 {
+        let width = scalar_at(source, offset).map_or(1, char::len_utf8);
+
+        return (TokenKind::Punctuation(Punctuation::Other), offset + width);
     }
 
     let (punctuation, length) = punctuation_of(source, offset);
@@ -556,6 +627,44 @@ mod tests {
         let ended = b"func f() {\n\ts := 'a";
 
         assert_eq!(strings_of(ended), vec![b"'a".to_vec()]);
+    }
+
+    fn lexes_to(source: &[u8], expected: &[&[u8]]) {
+        let texts: Vec<Vec<u8>> = tests_support::lex(&GO, source)
+            .iter()
+            .filter(|token| token.kind != TokenKind::Newline)
+            .map(|token| token.text(source).to_vec())
+            .collect();
+
+        let wanted: Vec<Vec<u8>> = expected.iter().map(|held| held.to_vec()).collect();
+
+        assert_eq!(texts, wanted);
+    }
+
+    #[test]
+    fn a_double_less_wins_over_the_receive_arrow() {
+        lexes_to(b"1<<-1", &[b"1", b"<<", b"-", b"1"]);
+        lexes_to(b"a <- b", &[b"a", b"<-", b"b"]);
+        lexes_to(b"x <<= 1", &[b"x", b"<<=", b"1"]);
+        lexes_to(b"a<<b", &[b"a", b"<<", b"b"]);
+    }
+
+    #[test]
+    fn an_identifier_starts_with_a_letter_or_an_underscore() {
+        lexes_to("\u{3b1}\u{3b2}".as_bytes(), &["\u{3b1}\u{3b2}".as_bytes()]);
+        lexes_to(b"_x", &[b"_x"]);
+        lexes_to(b"x1", &[b"x1"]);
+        lexes_to(
+            "\u{65e5}\u{672c}\u{8a9e}".as_bytes(),
+            &["\u{65e5}\u{672c}\u{8a9e}".as_bytes()],
+        );
+        lexes_to("\u{2639}x".as_bytes(), &["\u{2639}".as_bytes(), b"x"]);
+
+        let tokens = tests_support::lex(&GO, "\u{2639}x".as_bytes());
+
+        assert_eq!(tokens[0].kind, TokenKind::Punctuation(Punctuation::Other));
+        assert_eq!(tokens[0].length, 3);
+        assert_eq!(tokens[1].kind, TokenKind::Identifier);
     }
 
     #[test]

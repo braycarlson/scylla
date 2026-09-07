@@ -108,6 +108,7 @@ pub struct Rules<K> {
     pub braced: fn(K) -> bool,
     pub denies: fn(K, K) -> bool,
     pub drops: fn(K, K, Option<K>) -> bool,
+    pub mixes: fn(K) -> bool,
     pub names: fn(K) -> bool,
     pub opens: fn(K) -> bool,
     pub operators: fn(K) -> bool,
@@ -115,7 +116,6 @@ pub struct Rules<K> {
     pub parens: fn(K) -> bool,
     pub queries: fn(K) -> bool,
     pub spans: fn(K, K, Option<K>) -> bool,
-    pub mixes: fn(K) -> bool,
     pub wraps: fn(K, K, Option<K>, bool) -> bool,
 }
 
@@ -331,11 +331,11 @@ fn separates(
 }
 
 fn cast_commented(text: &[u8]) -> bool {
-    let Some(body) = text.strip_prefix(b"/**") else {
+    let Some(opened) = text.strip_prefix(b"/**") else {
         return false;
     };
 
-    let body = body.strip_suffix(b"*/").unwrap_or(body);
+    let body = opened.strip_suffix(b"*/").unwrap_or(opened);
 
     body.split(u8::is_ascii_whitespace).any(|word| {
         let after = word

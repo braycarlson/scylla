@@ -167,29 +167,29 @@ pub fn is_absolute(path: &[u8]) -> bool {
 }
 
 pub fn directory_of(path: &[u8]) -> &[u8] {
+    let root = root_end(path);
     let mut end = path.len();
 
-    while end > 0 {
+    while end > root {
         end -= 1;
 
-        if !is_separator(path[end]) {
-            continue;
+        if is_separator(path[end]) {
+            return &path[..end];
         }
+    }
 
-        if end == 0 {
-            return &path[..1];
-        }
-
-        return &path[..end];
+    if root > 0 {
+        return &path[..root];
     }
 
     b"."
 }
 
 pub fn trimmed(path: &[u8]) -> &[u8] {
+    let root = root_end(path);
     let mut end = path.len();
 
-    while end > 1 && is_separator(path[end - 1]) {
+    while end > root && is_separator(path[end - 1]) {
         end -= 1;
     }
 
@@ -243,6 +243,121 @@ pub fn join(target: &mut [u8], base: &[u8], relative: &[u8]) -> Option<usize> {
     }
 
     Some(length)
+}
+
+pub fn parent_of(path: &[u8]) -> &[u8] {
+    &path[..parent_end(path)]
+}
+
+pub fn segments(path: &[u8]) -> impl Iterator<Item = &[u8]> {
+    path.split(|byte| is_separator(*byte))
+        .filter(|segment| !segment.is_empty())
+}
+
+pub fn segments_positioned(path: &[u8]) -> impl Iterator<Item = (u32, &[u8])> {
+    assert!(u32::try_from(path.len()).is_ok());
+
+    let mut offset = 0_u32;
+
+    path.split(|byte| is_separator(*byte))
+        .filter_map(move |segment| {
+            let start = offset;
+
+            offset += crate::bounded::count_of(segment.len()) + 1;
+
+            (!segment.is_empty()).then_some((start, segment))
+        })
+}
+
+pub fn file_name(path: &[u8]) -> &[u8] {
+    segments(path).last().unwrap_or(b"")
+}
+
+pub fn contains(directory: &[u8], path: &[u8]) -> bool {
+    let held = trimmed(directory);
+
+    if held.is_empty() {
+        return true;
+    }
+
+    let Some(rest) = path.strip_prefix(held) else {
+        return false;
+    };
+
+    if held.len() == root_end(held) {
+        return true;
+    }
+
+    rest.is_empty() || is_separator(rest[0])
+}
+
+pub fn relative_into(root: &[u8], path: &[u8], out: &mut [u8]) -> Option<usize> {
+    let held = trimmed(root);
+    let mut rest = path;
+
+    if !held.is_empty() && contains(held, path) {
+        rest = &path[held.len()..];
+
+        while rest.first().copied().is_some_and(is_separator) {
+            rest = &rest[1..];
+        }
+    }
+
+    written(out, 0, rest)
+}
+
+pub fn normalised_into(path: &[u8], out: &mut [u8]) -> Option<usize> {
+    let floor = root_end(path);
+    let absolute = floor > 0;
+    let mut length = written(out, 0, &path[..floor])?;
+
+    for segment in path[floor..].split(|byte| is_separator(*byte)) {
+        if segment.is_empty() || segment == b"." {
+            continue;
+        }
+
+        if segment == b".." {
+            if length > floor && file_name(&out[..length]) != b".." {
+                length = parent_end(&out[..length]);
+
+                continue;
+            }
+
+            if absolute {
+                continue;
+            }
+        }
+
+        if length > 0 && !is_separator(out[length - 1]) {
+            *out.get_mut(length)? = SEPARATOR;
+            length += 1;
+        }
+
+        length = written(out, length, segment)?;
+    }
+
+    assert!(length >= floor);
+
+    Some(length)
+}
+
+pub fn longest_prefix<'held>(
+    roots: impl IntoIterator<Item = &'held [u8]>,
+    path: &'held [u8],
+) -> Option<u32> {
+    let mut found = None;
+    let mut length = 0;
+
+    for (index, root) in roots.into_iter().enumerate() {
+        let longer = found.is_none() || root.len() > length;
+
+        if longer && contains(root, path) {
+            found = Some(crate::bounded::count_of(index));
+            length = root.len();
+        }
+    }
+
+    found
 }
 
 #[cfg(not(windows))]
@@ -321,6 +436,38 @@ pub fn create(bytes: &[u8]) -> Option<File> {
     opened(bytes, windows::GENERIC_WRITE, windows::CREATE_ALWAYS)
 }
 
+pub fn create_directories(bytes: &[u8]) -> bool {
+    path_of(bytes).is_some_and(|path| std::fs::create_dir_all(path).is_ok())
+}
+
+pub fn write(bytes: &[u8], content: &[u8]) -> bool {
+    use std::io::Write as _;
+
+    let Some(mut file) = create(bytes) else {
+        return false;
+    };
+
+    file.write_all(content).is_ok() && file.flush().is_ok()
+}
+
+pub fn is_project_root(bytes: &[u8], markers: &[&[u8]]) -> bool {
+    let mut scratch = [0_u8; PATH_BYTES_MAX];
+
+    for marker in markers {
+        assert!(!marker.is_empty());
+
+        let Some(length) = join(&mut scratch, bytes, marker) else {
+            continue;
+        };
+
+        if facts_of(&scratch[..length]).is_some() {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[cfg(not(windows))]
 pub fn rename(from: &[u8], to: &[u8]) -> bool {
     let (Some(source), Some(target)) = (path_of(from), path_of(to)) else {
@@ -377,17 +524,30 @@ pub fn remove_directory(bytes: &[u8]) -> bool {
 }
 
 fn parent_end(path: &[u8]) -> usize {
+    let root = root_end(path);
     let mut end = path.len();
 
-    while end > 0 {
+    while end > root {
         end -= 1;
 
         if is_separator(path[end]) {
-            return end.max(1);
+            return end;
         }
     }
 
-    0
+    root
+}
+
+fn root_end(path: &[u8]) -> usize {
+    if path.first().copied().is_some_and(is_separator) {
+        return 1;
+    }
+
+    if !is_absolute(path) {
+        return 0;
+    }
+
+    2 + usize::from(path.get(2).copied().is_some_and(is_separator))
 }
 
 fn written(target: &mut [u8], offset: usize, bytes: &[u8]) -> Option<usize> {
@@ -631,7 +791,7 @@ mod tests {
     fn a_windows_path_has_a_directory() {
         if cfg!(windows) {
             assert_eq!(directory_of(br"C:\work\a.rs"), br"C:\work");
-            assert_eq!(directory_of(br"C:\work"), b"C:");
+            assert_eq!(directory_of(br"C:\work"), br"C:\");
 
             return;
         }
@@ -661,6 +821,48 @@ mod tests {
         if cfg!(windows) {
             assert_eq!(directory_of(&held), br"C:\work");
         }
+    }
+
+    #[test]
+    fn a_drive_root_is_the_floor_of_its_path() {
+        if cfg!(windows) {
+            assert_eq!(normalised(b"C:"), b"C:");
+            assert_eq!(normalised(br"C:\"), br"C:\");
+            assert_eq!(normalised(b"C:/"), b"C:/");
+            assert_eq!(normalised(br"C:\a\..\.."), br"C:\");
+            assert_eq!(normalised(b"C:/a/../../b"), b"C:/b");
+            assert_eq!(normalised(b"C:.."), b"C:");
+            assert_eq!(joined(br"C:\", b"c"), br"C:\c");
+            assert_eq!(joined(b"C:/", b"c"), b"C:/c");
+            assert_eq!(joined(b"C:", b"c"), b"C:/c");
+            assert_eq!(joined(br"C:\a", br"..\..\c"), br"C:\c");
+
+            return;
+        }
+
+        assert_eq!(normalised(br"C:\a\..\.."), br"C:\a\..\..");
+        assert_eq!(normalised(b"C:/a/../.."), b"");
+        assert_eq!(joined(b"C:/", b"c"), b"C:/c");
+    }
+
+    #[test]
+    fn a_drive_root_is_its_own_directory() {
+        if cfg!(windows) {
+            assert_eq!(directory_of(br"C:\file"), br"C:\");
+            assert_eq!(directory_of(b"C:/file"), b"C:/");
+            assert_eq!(directory_of(br"C:\"), br"C:\");
+            assert_eq!(directory_of(b"C:"), b"C:");
+            assert_eq!(trimmed(br"C:\"), br"C:\");
+            assert_eq!(trimmed(b"C:/"), b"C:/");
+            assert!(contains(br"C:\", br"C:\a"));
+            assert_eq!(relative(br"C:\", br"C:\a"), b"a");
+
+            return;
+        }
+
+        assert_eq!(directory_of(b"C:/file"), b"C:");
+        assert_eq!(trimmed(b"C:/"), b"C:");
+        assert!(contains(b"C:/", b"C:/a"));
     }
 
     #[test]
@@ -813,5 +1015,129 @@ mod tests {
         assert!(facts_of(&overlong).is_none());
         assert!(!remove(&overlong));
         assert!(!is_file(&overlong));
+    }
+
+    fn normalised(path: &[u8]) -> Vec<u8> {
+        let mut out = [0_u8; 64];
+        let length = normalised_into(path, &mut out).expect("the path fits");
+
+        out[..length].to_vec()
+    }
+
+    fn relative(root: &[u8], path: &[u8]) -> Vec<u8> {
+        let mut out = [0_u8; 64];
+        let length = relative_into(root, path, &mut out).expect("the path fits");
+
+        out[..length].to_vec()
+    }
+
+    #[test]
+    fn segments_skip_empty_parts_and_the_file_name_is_the_last() {
+        assert_eq!(segments(b"/a//b/c/").collect::<Vec<_>>(), [b"a", b"b", b"c"]);
+        assert_eq!(segments(b"").count(), 0);
+        assert_eq!(segments(b"/").count(), 0);
+        assert_eq!(file_name(b"/a/b/c.rs"), b"c.rs");
+        assert_eq!(file_name(b"a/b/"), b"b");
+        assert_eq!(file_name(b"c.rs"), b"c.rs");
+        assert_eq!(file_name(b"/"), b"");
+        assert_eq!(file_name(b""), b"");
+    }
+
+    #[test]
+    fn a_parent_is_empty_for_a_bare_name_and_positioned_segments_keep_their_offsets() {
+        assert_eq!(parent_of(b"a/b/c.rs"), b"a/b");
+        assert_eq!(parent_of(b"/a"), b"/");
+        assert_eq!(parent_of(b"/"), b"/");
+        assert_eq!(parent_of(b"c.rs"), b"");
+        assert_eq!(parent_of(b".hidden"), b"");
+        assert_eq!(parent_of(b""), b"");
+        assert_eq!(directory_of(b"c.rs"), b".");
+
+        let positioned: Vec<(u32, &[u8])> = segments_positioned(b"/a/b").collect();
+
+        assert_eq!(positioned, [(1, &b"a"[..]), (3, &b"b"[..])]);
+
+        let relative: Vec<(u32, &[u8])> = segments_positioned(b"a//bc/").collect();
+
+        assert_eq!(relative, [(0, &b"a"[..]), (3, &b"bc"[..])]);
+        assert_eq!(segments_positioned(b"").count(), 0);
+        assert_eq!(segments_positioned(b"/").count(), 0);
+    }
+
+    #[test]
+    fn a_directory_contains_itself_and_what_sits_under_it() {
+        assert!(contains(b"/a/b", b"/a/b"));
+        assert!(contains(b"/a/b/", b"/a/b"));
+        assert!(contains(b"/a/b", b"/a/b/c"));
+        assert!(contains(b"/", b"/a"));
+        assert!(contains(b"/", b"/"));
+        assert!(contains(b"", b"anything"));
+        assert!(!contains(b"/a/b", b"/a/bc"));
+        assert!(!contains(b"/a/b", b"/a"));
+        assert!(!contains(b"/a/b", b""));
+        assert!(!contains(b"/", b"a"));
+    }
+
+    #[test]
+    fn a_path_under_the_root_loses_the_root_and_any_other_path_is_kept() {
+        assert_eq!(relative(b"/a/b", b"/a/b/c/d.rs"), b"c/d.rs");
+        assert_eq!(relative(b"/a/b/", b"/a/b//c"), b"c");
+        assert_eq!(relative(b"/a/b", b"/a/b"), b"");
+        assert_eq!(relative(b"/a/b", b"/a/bc/d"), b"/a/bc/d");
+        assert_eq!(relative(b"", b"/a/b"), b"/a/b");
+        assert_eq!(relative(b"/", b"/a"), b"a");
+        assert_eq!(relative(b"/a", b""), b"");
+        assert_eq!(relative_into(b"/a", b"/a/bcdefgh", &mut [0_u8; 4]), None);
+    }
+
+    #[test]
+    fn a_normalised_path_folds_dots_and_stays_at_its_root() {
+        assert_eq!(normalised(b"./a/../b/./c/"), b"b/c");
+        assert_eq!(normalised(b"/a/b/../../c"), b"/c");
+        assert_eq!(normalised(b"/a/../.."), b"/");
+        assert_eq!(normalised(b"/.."), b"/");
+        assert_eq!(normalised(b"/"), b"/");
+        assert_eq!(normalised(b"../a"), b"../a");
+        assert_eq!(normalised(b"a/../../b"), b"../b");
+        assert_eq!(normalised(b"../.."), b"../..");
+        assert_eq!(normalised(b"a//b"), b"a/b");
+        assert_eq!(normalised(b"."), b"");
+        assert_eq!(normalised(b""), b"");
+        assert_eq!(normalised(b"a/.."), b"");
+        assert_eq!(normalised_into(b"/abc", &mut [0_u8; 3]), None);
+        assert_eq!(normalised_into(b"/", &mut []), None);
+    }
+
+    #[test]
+    fn the_longest_prefix_is_the_deepest_root_holding_the_path() {
+        let roots: [&[u8]; 4] = [b"/a", b"/a/b/c", b"/a/b", b"/x"];
+
+        assert_eq!(longest_prefix(roots, b"/a/b/c/d.rs"), Some(1));
+        assert_eq!(longest_prefix(roots, b"/a/b/x.rs"), Some(2));
+        assert_eq!(longest_prefix(roots, b"/a/x.rs"), Some(0));
+        assert_eq!(longest_prefix(roots, b"/y"), None);
+        assert_eq!(longest_prefix([], b"/y"), None);
+        assert_eq!(longest_prefix([b"".as_slice(), b"/y"], b"/y/z"), Some(1));
+    }
+
+    #[test]
+    fn a_written_file_reads_back_and_a_project_root_is_told_by_its_markers() {
+        let root = std::env::temp_dir().join(format!("scylla-path-write-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let bytes = bytes_of(root.as_os_str()).expect("a text path").to_vec();
+        let nested = joined(&bytes, b"nested/deeper");
+        let file = joined(&nested, b"held.txt");
+
+        assert!(create_directories(&nested));
+        assert!(is_directory(&nested));
+        assert!(write(&file, b"held"));
+        assert_eq!(std::fs::read(named(&file)).expect("the file reads"), b"held");
+        assert!(!write(&joined(&bytes, b"missing/held.txt"), b"held"));
+        assert!(is_project_root(&nested, &[b"held.txt"]));
+        assert!(is_project_root(&bytes, &[b"nested", b"held.txt"]));
+        assert!(!is_project_root(&bytes, &[b"held.txt"]));
+        assert!(!is_project_root(&bytes, &[]));
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

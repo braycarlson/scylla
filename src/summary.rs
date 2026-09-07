@@ -4,11 +4,13 @@ use crate::token::{Punctuation, Token, TokenKind};
 
 pub const DOTTED_PATH_DEPTH_MAX: u32 = 32;
 
-pub const LITERAL_WORDS: [&[u8]; 7] = [
+pub const LITERAL_WORDS: [&[u8]; 9] = [
     b"False",
     b"None",
     b"True",
     b"false",
+    b"iota",
+    b"nil",
     b"null",
     b"true",
     b"undefined",
@@ -635,5 +637,14 @@ mod tests {
         let (_, summary) = built(&JAVASCRIPT, "`a${b}c`");
 
         assert_eq!(summary, Summary::Dynamic);
+    }
+
+    #[test]
+    fn the_literal_words_are_sorted_and_hold_every_language_constant() {
+        assert!(LITERAL_WORDS.is_sorted());
+
+        for word in [b"iota".as_slice(), b"nil", b"None", b"undefined"] {
+            assert!(LITERAL_WORDS.contains(&word));
+        }
     }
 }

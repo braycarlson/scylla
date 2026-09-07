@@ -145,6 +145,31 @@ impl Buffer {
 
         Ok(true)
     }
+
+    pub fn read_into(source: &mut impl Read, target: &mut [u8]) -> std::io::Result<Option<usize>> {
+        let mut filled = 0_usize;
+
+        for _ in 0..=target.len() {
+            if filled == target.len() {
+                let mut probe = [0_u8; 1];
+                let extra = source.read(&mut probe)?;
+
+                return Ok((extra == 0).then_some(filled));
+            }
+
+            let read = source.read(&mut target[filled..])?;
+
+            if read == 0 {
+                return Ok(Some(filled));
+            }
+
+            filled += read;
+
+            assert!(filled <= target.len());
+        }
+
+        Ok(None)
+    }
 }
 
 impl Bytes for Buffer {
@@ -411,5 +436,19 @@ mod tests {
         );
 
         assert_eq!(buffer.as_bytes(), b"linter lints");
+    }
+
+    #[test]
+    fn a_read_into_a_slice_fills_what_fits_and_reports_the_rest() {
+        let mut target = [0_u8; 4];
+
+        assert_eq!(Buffer::read_into(&mut b"ab".as_slice(), &mut target).ok(), Some(Some(2)));
+        assert_eq!(&target[..2], b"ab");
+        assert_eq!(Buffer::read_into(&mut b"abcd".as_slice(), &mut target).ok(), Some(Some(4)));
+        assert_eq!(&target, b"abcd");
+        assert_eq!(Buffer::read_into(&mut b"abcde".as_slice(), &mut target).ok(), Some(None));
+        assert_eq!(Buffer::read_into(&mut b"".as_slice(), &mut target).ok(), Some(Some(0)));
+        assert_eq!(Buffer::read_into(&mut b"".as_slice(), &mut []).ok(), Some(Some(0)));
+        assert_eq!(Buffer::read_into(&mut b"a".as_slice(), &mut []).ok(), Some(None));
     }
 }
