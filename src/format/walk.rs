@@ -2,6 +2,7 @@ use crate::bounded::{BoundedVec, Span, count_of};
 use crate::scan::line_break_width;
 use crate::token::{Punctuation, Token, TokenKind};
 
+const BUCKET_SHIFT: u32 = 6;
 const NEAR_BREAK_MAX: usize = 8;
 
 pub(crate) const fn punctuated(kind: TokenKind) -> bool {
@@ -593,8 +594,11 @@ pub(crate) struct Brackets {
     blocks: BoundedVec<u32>,
     closes: BoundedVec<u32>,
     held: BoundedVec<u32>,
+    identifiers: BoundedVec<u32>,
     nested: BoundedVec<Angle>,
     opens: BoundedVec<u32>,
+    skipped: BoundedVec<u32>,
+    substitutions: BoundedVec<u32>,
 }
 
 impl Brackets {
@@ -604,8 +608,11 @@ impl Brackets {
             blocks: BoundedVec::reserve(count_max),
             closes: BoundedVec::reserve(count_max),
             held: BoundedVec::reserve(count_max),
+            identifiers: BoundedVec::reserve(count_max),
             nested: BoundedVec::reserve(count_max),
             opens: BoundedVec::reserve(count_max),
+            skipped: BoundedVec::reserve(count_max + 1),
+            substitutions: BoundedVec::reserve(count_max + 1),
         }
     }
 
@@ -631,6 +638,28 @@ impl Brackets {
         (open != u32::MAX).then_some(open)
     }
 
+    pub(crate) fn identifier_open_of(&self, position: u32) -> Option<u32> {
+        assert_eq!(self.identifiers.len(), self.opens.len());
+
+        let open = *self.identifiers.get(position as usize)?;
+
+        (open != u32::MAX).then_some(open)
+    }
+
+    pub(crate) fn stepped(&self, from: u32, to: u32) -> u32 {
+        assert!(from <= to);
+        assert!((to as usize) < self.skipped.len());
+
+        (to - from) - (self.skipped[to as usize] - self.skipped[from as usize])
+    }
+
+    pub(crate) fn substituted(&self, from: u32, to: u32) -> bool {
+        assert!(from <= to);
+        assert!((to as usize) < self.substitutions.len());
+
+        self.substitutions[to as usize] > self.substitutions[from as usize]
+    }
+
     pub(crate) fn build(&mut self, source: &[u8], tokens: &[Token]) -> bool {
         self.closes.clear();
         self.opens.clear();
@@ -651,7 +680,62 @@ impl Brackets {
             }
         }
 
-        self.blocked(source, tokens) && self.angled(source, tokens)
+        self.blocked(source, tokens)
+            && self.angled(source, tokens)
+            && self.counted(source, tokens)
+            && self.identified(tokens)
+    }
+
+    fn identified(&mut self, tokens: &[Token]) -> bool {
+        self.held.clear();
+        self.identifiers.clear();
+
+        for _ in 0..tokens.len() {
+            if !self.identifiers.push(u32::MAX) {
+                return false;
+            }
+        }
+
+        for position in 0..count_of(tokens.len()) {
+            let kind = tokens[position as usize].kind;
+
+            if kind == TokenKind::Punctuation(Punctuation::ParenOpen) {
+                if !self.held.push(position) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            if kind != TokenKind::Identifier {
+                continue;
+            }
+
+            if let Some(held) = self.held.pop() {
+                self.identifiers[position as usize] = held;
+            }
+        }
+
+        true
+    }
+
+    fn counted(&mut self, source: &[u8], tokens: &[Token]) -> bool {
+        self.skipped.clear();
+        self.substitutions.clear();
+
+        let mut skipped = 0;
+        let mut substitutions = 0;
+
+        for token in tokens {
+            if !self.skipped.push(skipped) || !self.substitutions.push(substitutions) {
+                return false;
+            }
+
+            skipped += u32::from(token.kind == TokenKind::Newline || token.length == 0);
+            substitutions += u32::from(substituting(source, *token));
+        }
+
+        self.skipped.push(skipped) && self.substitutions.push(substitutions)
     }
 
     fn angled(&mut self, source: &[u8], tokens: &[Token]) -> bool {
@@ -757,6 +841,7 @@ impl Brackets {
 
 #[derive(Debug)]
 pub(crate) struct Breaks {
+    buckets: BoundedVec<u32>,
     held: BoundedVec<u32>,
     leads: BoundedVec<u32>,
     plain: BoundedVec<u32>,
@@ -765,16 +850,28 @@ pub(crate) struct Breaks {
 impl Breaks {
     pub(crate) fn reserve(count_max: u32) -> Self {
         Self {
+            buckets: BoundedVec::reserve(count_max),
             held: BoundedVec::reserve(count_max),
             leads: BoundedVec::reserve(count_max),
             plain: BoundedVec::reserve(count_max),
         }
     }
 
+    fn plain_from(&self, offset: u32) -> usize {
+        let bucket = ((offset >> BUCKET_SHIFT) as usize).min(self.buckets.len() - 1);
+        let mut index = self.buckets[bucket] as usize;
+
+        while index < self.plain.len() && self.plain[index] < offset {
+            index += 1;
+        }
+
+        index
+    }
+
     pub(crate) fn counted(&self, from: u32, to: u32) -> u32 {
         assert!(from <= to);
 
-        let start = self.plain.partition_point(|offset| *offset < from);
+        let start = self.plain_from(from);
         let mut stop = start;
 
         while stop < self.plain.len() && stop - start < NEAR_BREAK_MAX && self.plain[stop] < to {
@@ -782,7 +879,7 @@ impl Breaks {
         }
 
         if stop - start == NEAR_BREAK_MAX {
-            stop = self.plain.partition_point(|offset| *offset < to);
+            stop = self.plain_from(to).max(stop);
         }
 
         let found = count_of(stop - start);
@@ -794,6 +891,26 @@ impl Breaks {
             .is_some_and(|offset| *offset < to && self.leads[first] < from);
 
         found + u32::from(owed)
+    }
+
+    fn bucketed(&mut self, source: &[u8]) -> bool {
+        self.buckets.clear();
+
+        let mut index = 0_u32;
+
+        for bucket in 0..=(count_of(source.len()) >> BUCKET_SHIFT) {
+            let floor = bucket << BUCKET_SHIFT;
+
+            while (index as usize) < self.plain.len() && self.plain[index as usize] < floor {
+                index += 1;
+            }
+
+            if !self.buckets.push(index) {
+                return false;
+            }
+        }
+
+        true
     }
 
     pub(crate) fn build(&mut self, source: &[u8], carriage: bool) -> bool {
@@ -844,7 +961,7 @@ impl Breaks {
             offset += 1;
         }
 
-        true
+        self.bucketed(source)
     }
 }
 

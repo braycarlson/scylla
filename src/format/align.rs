@@ -1265,9 +1265,37 @@ fn lifetime_at(line: &[u8], held: usize, target: Target) -> bool {
     named && line.get(held + 2) != Some(&b'\'')
 }
 
+fn admits(line: &[u8], target: Target, indent: usize, read: Reading<'_>) -> bool {
+    match target {
+        Target::Assign | Target::Value => line.contains(&b'='),
+        Target::Body => line[indent..].starts_with(b"func ") && read.body.ends_with(b"}"),
+        Target::Comment | Target::Element => line.contains(&b'/'),
+        Target::Field => line
+            .get(indent)
+            .is_some_and(|byte| lettered(*byte) || matches!(*byte, b'*' | b'_')),
+        Target::Key => (read.body.ends_with(b",") || read.closes) && line.contains(&b':'),
+        Target::Row(column) => {
+            read.body.ends_with(b",")
+                && !arrowed(line, indent)
+                && separators(line, indent, line.len()) > column
+        }
+        Target::Tag => read.body.ends_with(b"`") || read.body.ends_with(b"\""),
+        Target::Type => {
+            read.fielded.is_some()
+                && !worded(line, indent)
+                && line.iter().any(|byte| matches!(*byte, b'`' | b'"' | b'/'))
+        }
+    }
+}
+
 fn cut_of(line: &[u8], target: Target) -> Option<Cut> {
     let read = reading(line, target);
     let indent = indent_of(line) as usize;
+
+    if !admits(line, target, indent, read) {
+        return None;
+    }
+
     let mut block = false;
     let mut depth = 0_i32;
     let mut held = indent;
@@ -1341,23 +1369,27 @@ fn cut_of(line: &[u8], target: Target) -> Option<Cut> {
             continue;
         }
 
-        let mut start = held;
-
-        while start > indent && line[start - 1] == b' ' {
-            start -= 1;
-        }
-
-        if start == indent {
-            return None;
-        }
-
-        return Some(Cut {
-            head: count_of(start),
-            tail: count_of(held),
-        });
+        return cut_before(line, indent, held);
     }
 
     None
+}
+
+fn cut_before(line: &[u8], indent: usize, held: usize) -> Option<Cut> {
+    let mut start = held;
+
+    while start > indent && line[start - 1] == b' ' {
+        start -= 1;
+    }
+
+    if start == indent {
+        return None;
+    }
+
+    Some(Cut {
+        head: count_of(start),
+        tail: count_of(held),
+    })
 }
 
 fn line_at(bytes: &[u8], offset: u32) -> (u32, u32) {

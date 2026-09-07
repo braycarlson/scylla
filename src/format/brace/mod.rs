@@ -466,7 +466,8 @@ impl<'held> Emitter<'held> {
 
         let closed = kind == TokenKind::BlockEnd
             && !(BLANK_MODULES
-                && reach::opened(self.source, self.tokens, position)
+                && self
+                    .opened(position)
                     .is_some_and(|open| self.moduled(open, FOREIGN_WORDS)));
 
         let edged = opened
@@ -1044,19 +1045,31 @@ impl<'held> Emitter<'held> {
     }
 
     fn line_level(&self, position: u32) -> Option<u32> {
-        let mut held: Option<(u32, u32)> = None;
+        self.line_at(position).map(|found| found.1)
+    }
 
-        for line in self.lines {
-            if line.0 == 0 || line.0 - 1 > position {
-                continue;
+    pub(super) fn line_at(&self, position: u32) -> Option<(u32, u32)> {
+        let mut index = self.lined;
+
+        for _ in 0..LINE_LEVEL_MAX {
+            index = if index == 0 {
+                LINE_LEVEL_MAX - 1
+            } else {
+                index - 1
+            };
+
+            let line = self.lines[index as usize];
+
+            if line.0 == 0 {
+                return None;
             }
 
-            if held.is_none_or(|found| line.0 > found.0) {
-                held = Some(line);
+            if line.0 - 1 <= position {
+                return Some(line);
             }
         }
 
-        held.map(|found| found.1)
+        None
     }
 
     fn heads_a_body(&self, position: u32, previous: u32) -> bool {
@@ -1637,7 +1650,7 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
-        let Some(open) = reach::opened(self.source, self.tokens, position) else {
+        let Some(open) = self.opened(position) else {
             return false;
         };
 
@@ -1753,10 +1766,13 @@ impl<'held> Emitter<'held> {
     }
 
     pub(super) fn head_word(&self, open: u32, words: &[&[u8]]) -> Option<u32> {
+        let mut budget = TYPE_SCAN_MAX;
         let mut depth = 0_u32;
         let mut scan = open;
 
-        for _ in 0..TYPE_SCAN_MAX {
+        while budget > 0 {
+            budget -= 1;
+
             let held = self.back_of(scan)?;
             let kind = self.tokens[held as usize].kind;
 
@@ -1767,6 +1783,19 @@ impl<'held> Emitter<'held> {
                     && !self.joins_a_value(held)
                 {
                     return None;
+                }
+
+                if let Some(inner) = self.union_skipped(held) {
+                    let steps = self.brackets.stepped(inner, held);
+
+                    if steps > budget {
+                        return None;
+                    }
+
+                    budget -= steps;
+                    scan = inner;
+
+                    continue;
                 }
 
                 depth += 1;
@@ -2999,7 +3028,8 @@ impl<'held> Emitter<'held> {
         }
 
         if self.tokens[position as usize].kind == TokenKind::BlockEnd {
-            return reach::opened(self.source, self.tokens, position)
+            return self
+                .opened(position)
                 .is_some_and(|open| self.body_clauses(open));
         }
 
@@ -3085,7 +3115,7 @@ impl<'held> Emitter<'held> {
             return false;
         };
 
-        reach::opened(self.source, self.tokens, close)
+        self.opened(close)
             .and_then(|found| self.back_of(found))
             .is_some_and(|name| self.defining(name))
     }
@@ -3661,7 +3691,7 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
-        let Some(open) = reach::opened(self.source, self.tokens, close) else {
+        let Some(open) = self.opened(close) else {
             return false;
         };
 
@@ -3692,7 +3722,7 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
-        let Some(open) = reach::opened(self.source, self.tokens, before) else {
+        let Some(open) = self.opened(before) else {
             return false;
         };
 
@@ -3817,7 +3847,7 @@ impl<'held> Emitter<'held> {
         let kind = self.tokens[position as usize].kind;
         let bracketed = kind == TokenKind::Punctuation(Punctuation::BracketClose);
 
-        let Some(open) = reach::opened(self.source, self.tokens, position) else {
+        let Some(open) = self.opened(position) else {
             return false;
         };
 
@@ -3850,7 +3880,7 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
-        let Some(open) = reach::opened(self.source, self.tokens, position) else {
+        let Some(open) = self.opened(position) else {
             return false;
         };
 
@@ -5200,6 +5230,20 @@ impl<'held> Emitter<'held> {
             && !self.closed.index
     }
 
+    pub(super) fn opened(&self, position: u32) -> Option<u32> {
+        let kind = self.tokens[position as usize].kind;
+
+        if is_close(kind) {
+            return self.brackets.open_of(position);
+        }
+
+        if kind == TokenKind::Identifier {
+            return self.brackets.identifier_open_of(position);
+        }
+
+        reach::opened(self.source, self.tokens, position)
+    }
+
     pub(super) fn back_of(&self, position: u32) -> Option<u32> {
         let mut scan = position;
 
@@ -5535,7 +5579,7 @@ impl<'held> Emitter<'held> {
             return false;
         }
 
-        let Some(open) = reach::opened(self.source, self.tokens, previous) else {
+        let Some(open) = self.opened(previous) else {
             return false;
         };
 
@@ -6888,7 +6932,7 @@ impl<'held> Emitter<'held> {
             return None;
         }
 
-        let open = reach::opened(self.source, self.tokens, held)?;
+        let open = self.opened(held)?;
 
         Some(self.tokens[open as usize].kind)
     }
@@ -6980,19 +7024,7 @@ impl<'held> Emitter<'held> {
     }
 
     pub(super) fn leveled_at(&self, position: u32) -> Option<u32> {
-        let mut found: Option<(u32, u32)> = None;
-
-        for (start, level) in self.lines {
-            if start == 0 || start - 1 > position {
-                continue;
-            }
-
-            if found.is_none_or(|(held, _)| start > held) {
-                found = Some((start, level));
-            }
-        }
-
-        found.map(|(_, level)| level)
+        self.line_at(position).map(|found| found.1)
     }
 
     fn owing_operand(&self) -> bool {
@@ -7109,6 +7141,10 @@ impl<'held> Emitter<'held> {
         if !self.level(stepped) {
             return false;
         }
+
+        let newest = (self.lined + LINE_LEVEL_MAX - 1) % LINE_LEVEL_MAX;
+
+        assert!(self.lines[newest as usize].0 <= position);
 
         self.printed = stepped;
         self.lines[self.lined as usize] = (position + 1, stepped);

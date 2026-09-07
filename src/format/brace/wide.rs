@@ -693,7 +693,7 @@ impl Emitter<'_> {
             let token = self.tokens[scan as usize];
 
             if token.kind == TokenKind::BlockEnd {
-                scan = reach::opened(self.source, self.tokens, scan)?;
+                scan = self.opened(scan)?;
 
                 continue;
             }
@@ -1125,7 +1125,7 @@ impl Emitter<'_> {
         let open = if self.tokens[previous as usize].kind == TokenKind::BlockStart {
             previous
         } else if self.tokens[position as usize].kind == TokenKind::BlockEnd {
-            match reach::opened(self.source, self.tokens, position) {
+            match self.opened(position) {
                 Some(held) => held,
                 None => return false,
             }
@@ -1206,7 +1206,7 @@ impl Emitter<'_> {
         let open = if self.tokens[previous as usize].kind == TokenKind::BlockStart {
             previous
         } else if self.tokens[position as usize].kind == TokenKind::BlockEnd {
-            match reach::opened(self.source, self.tokens, position) {
+            match self.opened(position) {
                 Some(held) => held,
                 None => return false,
             }
@@ -1233,7 +1233,7 @@ impl Emitter<'_> {
         let open = if self.tokens[previous as usize].kind == TokenKind::BlockStart {
             previous
         } else if self.tokens[position as usize].kind == TokenKind::BlockEnd {
-            match reach::opened(self.source, self.tokens, position) {
+            match self.opened(position) {
                 Some(held) => held,
                 None => return false,
             }
@@ -4114,7 +4114,8 @@ impl Emitter<'_> {
             return false;
         }
 
-        reach::opened(self.source, self.tokens, close).is_some_and(|open| self.macroed(open, close))
+        self.opened(close)
+            .is_some_and(|open| self.macroed(open, close))
     }
 
     fn members(&self, position: u32, previous: u32) -> bool {

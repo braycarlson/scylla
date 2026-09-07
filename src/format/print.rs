@@ -613,6 +613,10 @@ const fn code_width(code: u32) -> u32 {
         (0x1f300, 0x1f9ff),
     ];
 
+    if code < MARK_RANGES[0].0 && code < WIDE[0].0 {
+        return 1;
+    }
+
     let mut index = 0;
 
     while index < MARK_RANGES.len() {
@@ -637,6 +641,10 @@ const fn code_width(code: u32) -> u32 {
 }
 
 fn columns_of(bytes: &[u8]) -> (u32, u32, bool) {
+    if bytes.is_ascii() {
+        return ascii_columns_of(bytes);
+    }
+
     let mut broken = false;
     let mut held = 0;
     let mut leading = 0;
@@ -666,6 +674,23 @@ fn columns_of(bytes: &[u8]) -> (u32, u32, bool) {
     }
 
     (width, width, false)
+}
+
+fn ascii_columns_of(bytes: &[u8]) -> (u32, u32, bool) {
+    let width = count_of(bytes.len());
+
+    let Some(first) = bytes.iter().position(|byte| *byte == b'\n') else {
+        return (width, width, false);
+    };
+
+    let last = bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .expect("a first break implies a last break");
+
+    assert!(first <= last);
+
+    (count_of(first), count_of(bytes.len() - last - 1), true)
 }
 
 struct Measure<'held> {

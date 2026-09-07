@@ -3723,19 +3723,7 @@ impl Emitter<'_> {
     }
 
     pub(super) fn line_opened(&self, position: u32) -> Option<u32> {
-        let mut held: Option<(u32, u32)> = None;
-
-        for line in self.lines {
-            if line.0 == 0 || line.0 - 1 > position {
-                continue;
-            }
-
-            if held.is_none_or(|found| line.0 > found.0) {
-                held = Some(line);
-            }
-        }
-
-        held.map(|found| found.0 - 1)
+        self.line_at(position).map(|found| found.0 - 1)
     }
 
     fn heritage_wrapped(&self, held: &Heritage) -> u32 {
@@ -3901,17 +3889,43 @@ impl Emitter<'_> {
 
         Some(level + 1)
     }
+    pub(super) fn union_skipped(&self, close: u32) -> Option<u32> {
+        let open = self.brackets.open_of(close)?;
+
+        if !is_open(self.tokens[open as usize].kind) || self.brackets.substituted(open, close) {
+            return None;
+        }
+
+        Some(open)
+    }
+
     fn union_open(&self, position: u32) -> Option<u32> {
         let mut angles = 0_u32;
+        let mut budget = UNION_SCAN_MAX;
         let mut depth = 0_u32;
         let mut scan = position;
 
-        for _ in 0..UNION_SCAN_MAX {
+        while budget > 0 {
+            budget -= 1;
+
             let held = self.back_of(scan)?;
             let kind = self.tokens[held as usize].kind;
             let text = self.tokens[held as usize].text(self.source);
 
             if is_close(kind) || kind == TokenKind::BlockEnd {
+                if let Some(open) = self.union_skipped(held) {
+                    let steps = self.brackets.stepped(open, held);
+
+                    if steps > budget {
+                        return None;
+                    }
+
+                    budget -= steps;
+                    scan = open;
+
+                    continue;
+                }
+
                 depth += 1;
             } else if is_open(kind) || kind == TokenKind::BlockStart {
                 if depth == 0 {

@@ -1,5 +1,4 @@
 use super::{DEFINE_SCAN_MAX, Emitter, is_close, is_open};
-use crate::format::reach;
 use crate::token::{Punctuation, TokenKind};
 
 #[expect(
@@ -164,7 +163,7 @@ impl Emitter<'_> {
     }
 
     fn clause_head(&self, close: u32) -> Option<u32> {
-        let open = reach::opened(self.source, self.tokens, close)?;
+        let open = self.opened(close)?;
 
         if !self.headed(open) {
             return None;

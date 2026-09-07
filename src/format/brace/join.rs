@@ -1,7 +1,6 @@
 use super::{DEFINE_SCAN_MAX, Emitter, NEST_DEPTH_MAX, TYPE_SCAN_MAX};
 use crate::bounded::{Buffer, Bytes as _, Span, count_of};
 use crate::format::ir::Element;
-use crate::format::reach;
 use crate::format::stream::{prefix_width, spilled};
 use crate::format::text::spaced;
 use crate::format::walk::{columns, is_close, is_open};
@@ -517,7 +516,8 @@ impl Emitter<'_> {
         let kind = self.tokens[held as usize].kind;
 
         if kind == TokenKind::BlockEnd {
-            return reach::opened(self.source, self.tokens, held)
+            return self
+                .opened(held)
                 .is_some_and(|open| self.lambdas(open) || self.block_flat(open));
         }
 
@@ -535,7 +535,8 @@ impl Emitter<'_> {
 
     pub(super) fn arm_commas(&self, position: u32) -> bool {
         self.tokens[position as usize].kind == TokenKind::BlockEnd
-            && reach::opened(self.source, self.tokens, position)
+            && self
+                .opened(position)
                 .is_some_and(|open| self.flattens(open))
             && self.next_of(position).is_none_or(|held| {
                 self.tokens[held as usize].kind != TokenKind::Punctuation(Punctuation::Comma)
@@ -557,7 +558,7 @@ impl Emitter<'_> {
             return false;
         };
 
-        reach::opened(self.source, self.tokens, close)
+        self.opened(close)
             .is_some_and(|open| self.arm_braced(open) && !self.flattened(close))
     }
 
@@ -569,7 +570,7 @@ impl Emitter<'_> {
             return false;
         }
 
-        let Some(open) = reach::opened(self.source, self.tokens, position) else {
+        let Some(open) = self.opened(position) else {
             return false;
         };
 
@@ -587,7 +588,8 @@ impl Emitter<'_> {
         }
 
         if kind == TokenKind::BlockEnd
-            && reach::opened(self.source, self.tokens, last)
+            && self
+                .opened(last)
                 .is_some_and(|brace| self.arm_braced(brace))
         {
             return false;
@@ -1151,7 +1153,7 @@ impl Emitter<'_> {
 
             if is_close(kind) {
                 if depth == 0 && kind == TokenKind::BlockEnd {
-                    let open = reach::opened(self.source, self.tokens, held)?;
+                    let open = self.opened(held)?;
 
                     if self.arm_brace(open) {
                         return Some(scan);
@@ -1226,7 +1228,7 @@ impl Emitter<'_> {
             return false;
         }
 
-        let Some(open) = reach::opened(self.source, self.tokens, last) else {
+        let Some(open) = self.opened(last) else {
             return false;
         };
 
@@ -1388,7 +1390,7 @@ impl Emitter<'_> {
         let open = if kind == TokenKind::BlockStart {
             position
         } else if kind == TokenKind::BlockEnd {
-            match reach::opened(self.source, self.tokens, position) {
+            match self.opened(position) {
                 Some(held) => held,
                 None => return false,
             }
@@ -1898,10 +1900,13 @@ impl Emitter<'_> {
     }
 
     fn header_head(&self, position: u32) -> Option<u32> {
+        let mut budget = DEFINE_SCAN_MAX;
         let mut depth = 0_u32;
         let mut scan = position;
 
-        for _ in 0..DEFINE_SCAN_MAX {
+        while budget > 0 {
+            budget -= 1;
+
             let token = self.tokens[scan as usize];
 
             if depth == 0 && self.word_is(scan, self.policy.header_words) && self.looping(scan) {
@@ -1918,6 +1923,19 @@ impl Emitter<'_> {
             }
 
             if is_close(token.kind) || token.kind == TokenKind::BlockEnd {
+                if let Some(open) = self.union_skipped(scan) {
+                    let steps = self.brackets.stepped(open, scan);
+
+                    if steps > budget {
+                        return None;
+                    }
+
+                    budget -= steps;
+                    scan = self.back_of(open)?;
+
+                    continue;
+                }
+
                 depth += 1;
             } else if is_open(token.kind) || token.kind == TokenKind::BlockStart {
                 depth = depth.checked_sub(1)?;
@@ -2595,11 +2613,11 @@ impl Emitter<'_> {
         let brace = if held == TokenKind::BlockStart {
             previous
         } else if kind == TokenKind::BlockEnd {
-            reach::opened(self.source, self.tokens, position)?
+            self.opened(position)?
         } else if held == TokenKind::BlockEnd
             && self.tokens[position as usize].text(self.source) == b"else"
         {
-            reach::opened(self.source, self.tokens, previous)?
+            self.opened(previous)?
         } else {
             return None;
         };
@@ -2612,7 +2630,7 @@ impl Emitter<'_> {
 
         let close = self.back_of(word)?;
 
-        reach::opened(self.source, self.tokens, close)
+        self.opened(close)
     }
 
     pub(super) fn branch_inline(&self, open: u32) -> bool {
@@ -2730,7 +2748,7 @@ impl Emitter<'_> {
             return false;
         };
 
-        reach::opened(self.source, self.tokens, end)
+        self.opened(end)
             .and_then(|open| self.back_of(open))
             .is_none_or(|held| self.tokens[held as usize].text(self.source) != b"=>")
     }
@@ -2782,19 +2800,7 @@ impl Emitter<'_> {
     }
 
     pub(super) fn line_lead(&self, position: u32) -> Option<(u32, u32)> {
-        let mut held: Option<(u32, u32)> = None;
-
-        for line in self.lines {
-            if line.0 == 0 || line.0 - 1 > position {
-                continue;
-            }
-
-            if held.is_none_or(|found| line.0 > found.0) {
-                held = Some(line);
-            }
-        }
-
-        held.map(|found| (found.0 - 1, found.1))
+        self.line_at(position).map(|found| (found.0 - 1, found.1))
     }
 
     fn chain_span(&self, dot: u32) -> (u32, u32, u32) {
@@ -4200,7 +4206,7 @@ impl Emitter<'_> {
             return None;
         }
 
-        let inner = reach::opened(self.source, self.tokens, held)?;
+        let inner = self.opened(held)?;
 
         if inner <= open {
             return None;
@@ -4465,7 +4471,7 @@ impl Emitter<'_> {
             return false;
         }
 
-        let Some(inner) = reach::opened(self.source, self.tokens, held) else {
+        let Some(inner) = self.opened(held) else {
             return false;
         };
 
