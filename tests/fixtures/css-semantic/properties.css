@@ -1,0 +1,11 @@
+:root {
+	--brand: #123456;
+	--space: 4px;
+}
+
+.card {
+	color: var(--brand);
+	padding: var(--space, 2px);
+	margin: var(--missing);
+	--brand: #654321;
+}

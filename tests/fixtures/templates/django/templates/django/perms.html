@@ -1,0 +1,7 @@
+{# LocationField is its own app, so its permissions are not the parent's. #}
+{# lintcheck-expect: django/wrong-perm-app #}
+{% if perms.location.view_locationfield %}<a>fields</a>{% endif %}
+
+{# And the other direction: Location belongs to the parent, not the child. #}
+{# lintcheck-expect: django/wrong-perm-app #}
+{% if perms.location_field.change_location %}<a>edit</a>{% endif %}

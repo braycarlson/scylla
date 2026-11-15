@@ -1,0 +1,17 @@
+const ast = @import("javascript/ast.zig");
+pub const Call = ast.Call;
+pub const Children = ast.Children;
+pub const ClassDeclaration = ast.ClassDeclaration;
+pub const Constant = ast.Constant;
+pub const Declarator = ast.Declarator;
+pub const Function = ast.Function;
+pub const Goal = @import("javascript/dialect.zig").Goal;
+pub const ImportStatement = ast.ImportStatement;
+pub const Kind = @import("javascript/kind.zig").Kind;
+pub const Literal = ast.Literal;
+pub const Member = ast.Member;
+pub const MemberExpression = ast.MemberExpression;
+pub const Operation = ast.Operation;
+pub const Positions = ast.Positions;
+pub const Statement = ast.Statement;
+pub const View = ast.View;

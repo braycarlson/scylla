@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_inline_comment.html","tokens":[["CommentOpen",0,2],["CommentText",2,21],["CommentClose",21,23],["Text",23,24]],"tree":[["Document",0,24],["TemplateComment",0,23]],"errors":[]}

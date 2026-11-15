@@ -1,0 +1,362 @@
+[
+    {
+        "fixture": "angular/packages/common/http/test/client_spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "angular/packages/common/locales/closure-locale.ts",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 8461: `i % 10 === Math.floor(i % 10) && i % 10 >= 2 && i % 10 <= 4 &&` becomes `i % 10 === Math.floor(i % 10) &&`. biome is unstable on this file too, and its two passes differ from the two printed here."
+    },
+    {
+        "fixture": "angular/packages/core/test/acceptance/animation_spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `fixture.debugElement.query(By.css('button')).nativeElement.dispatchEvent(new AnimationEvent('animationend', {animationName: 'flash', bubbles: true}))`: the source writes the object on one line, so biome's first pass breaks the chain at every member once its one-line form does not fit, and its second pass reads that object as expanded, where the best-fitting choice measures only the first line and keeps the chain together."
+    },
+    {
+        "fixture": "angular/packages/service-worker/cli/filesystem.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "angular/packages/upgrade/static/test/integration/downgrade_component_spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `angular.module_('ng1', []).directive('ng2', downgradeComponent({component: Ng2Component, downgradedModule: 'foo'}))`: the source writes the object on one line, so biome's first pass breaks the two-call chain at every member once its one-line form does not fit, and its second pass reads that object as expanded, where the best-fitting choice measures only the first line and keeps `angular.module_('ng1', []).directive(` together."
+    },
+    {
+        "fixture": "angular/packages/upgrade/static/test/integration/downgrade_module_spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two. The cause is the `angular.module_('ng1', [lazyModuleName]).directive('ng2', downgradeComponent({...}))` chains, whose one-line objects make the first pass break each chain and the second keep it together."
+    },
+    {
+        "fixture": "nest/packages/core/test/router/router-execution-context.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/packages/playwright-core/src/tools/dashboard/dashboardApp.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/config/traceViewerFixtures.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/library/browsercontext-viewport.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/library/chromium/chromium.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/library/emulation-focus.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/library/locator-highlight.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/library/permissions.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/library/screenshot.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/page/page-dispatchevent.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/method-chain/object/issue-17239.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `types.model({ something: mxSomething }).volatile<[foo]>((self) => ({ ... }))`: the source writes the returned object on one line, so biome's first pass breaks the two-call chain and its second pass, reading the object as expanded, keeps the chain on one line."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/union/comments/18389.ts",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 1: `type A1 = /**` becomes `type A1 =`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/union/consistent-with-flow/single-type.ts",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 3: `| (` becomes `| A`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/union/single-type/single-type-2.ts",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 3: `'A';` becomes `'A';`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "vscode/extensions/copilot/src/extension/completions-core/vscode-node/lib/src/prompt/completionsPromptFactory/test/completionsPromptFactory.test.tsx",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `virtualPrompt.snapshot = sinon.stub().returns({ snapshot: undefined, status: 'error', error: new Error('Intentional snapshot error') })`: the source writes the object on one line, so biome's first pass breaks the two-call chain at every member once its one-line form does not fit, and its second pass reads that object as expanded, where the best-fitting choice measures only the first line and keeps `sinon.stub().returns({` together."
+    },
+    {
+        "fixture": "vscode/extensions/copilot/src/extension/conversation/vscode-node/test/conversationFeature.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/extensions/copilot/src/extension/prompt/vscode-node/test/gitDiffService.spec.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/extensions/git-base/src/remoteSource.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/extensions/git/src/repository.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/extensions/vscode-colorize-perf-tests/test/colorize-fixtures/test-treeView.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/base/common/uriTemplate.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/editor/common/services/semanticTokensDto.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/editor/contrib/find/test/browser/findController.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/editor/contrib/snippet/test/browser/snippetController2.old.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/editor/test/common/model/modelInjectedText.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/agentHost/test/browser/sshHostKeyTrustService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/agentHost/test/common/agentSubscription.test.ts",
+        "category": "scylla-unstable",
+        "reason": "biome's own second pass differs from its first here, and the second pass printed for this file differs from both: part of the row is the reference's and part is a layout that reads the source where it should read the printing."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/agentHost/test/node/claudeAgent.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/agentHost/test/node/codex/codexModelRefresh.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/extensionManagement/test/common/allowedExtensionsService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/extensionManagement/test/node/extensionDownloader.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/extensionManagement/test/node/extensionsScannerService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/userDataSync/common/abstractSynchronizer.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/userDataSync/common/keybindingsMerge.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/userDataSync/common/settingsMerge.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/platform/userDataSync/common/userDataAutoSyncService.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/sessions/contrib/automations/test/browser/automationService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/sessions/contrib/github/browser/fetchers/githubRecentUserWorkFetcher.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/sessions/services/sessions/test/browser/sessionsManagementService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/api/common/extHostComments.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/api/test/browser/mainThreadChatSessions.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/browser/parts/views/treeView.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/chat/browser/widget/chatDragAndDrop.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/chat/electron-browser/agentSessions/agentSessionsActions.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/chatThinkingContentPart.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/chat/test/common/chatService/chatService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/debug/browser/breakpointWidget.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/debug/browser/debugCommands.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/extensions/test/electron-browser/extension.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/extensions/test/electron-browser/extensionRecommendationsService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/extensions/test/electron-browser/extensionsActions.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/extensions/test/electron-browser/extensionsViews.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/extensions/test/electron-browser/extensionsWorkbenchService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/files/browser/editors/fileEditorHandler.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/preferences/browser/preferences.contribution.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/tasks/browser/abstractTaskService.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/terminal/common/terminalExtensionPoints.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/terminalContrib/links/browser/terminalLinkManager.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/userDataSync/browser/userDataSync.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/contrib/workspace/browser/workspace.contribution.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/services/configuration/browser/configurationService.ts",
+        "category": "scylla-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`, so the harness holds no reference for it; graded with the option the first pass does not match, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/services/configurationResolver/test/electron-browser/configurationResolverService.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/services/extensions/browser/extensionUrlHandler.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "vscode/src/vs/workbench/services/untitled/common/untitledTextEditorHandler.ts",
+        "category": "reference-unstable",
+        "reason": "biome formats this file only with `unsafeParameterDecoratorsEnabled`; with it, biome's own second pass differs from its first, and the two passes here are byte-identical to biome's two."
+    },
+    {
+        "fixture": "zod/packages/zod/src/v4/mini/tests/checks.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "zod/packages/zod/src/v4/mini/tests/codec.test.ts",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    }
+]

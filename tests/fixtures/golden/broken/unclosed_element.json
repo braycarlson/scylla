@@ -1,0 +1,1 @@
+{"path":"fixtures/broken/unclosed_element.html","tokens":[["AngleOpen",0,1],["ElementName",1,4],["AngleClose",4,5],["AngleOpen",5,6],["ElementName",6,10],["AngleClose",10,11],["Text",11,16]],"tree":[["Document",0,16],["Element",0,16],["OpenTag",0,5],["Element",5,16],["OpenTag",5,11]],"errors":[["UnclosedElement",5],["UnclosedElement",0]]}

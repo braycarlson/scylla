@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_load_multiple_libraries.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,7],["Whitespace",7,8],["Identifier",8,28],["Whitespace",28,29],["Identifier",29,35],["Whitespace",35,36],["TagClose",36,38],["Text",38,39]],"tree":[["Document",0,39],["TemplateTag",0,38]],"errors":[]}

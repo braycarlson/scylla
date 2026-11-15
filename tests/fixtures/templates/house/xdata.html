@@ -1,0 +1,38 @@
+{# x-data structure rules. Each object violates exactly one thing. #}
+
+<div x-data="{
+    open: false,
+{# lintcheck-expect: house/x-data-init-first #}
+    async init() {
+        this.open = true;
+    }
+}"></div>
+
+<div x-data="{
+{# lintcheck-expect: house/x-data-init-first #}
+    init() {
+        this.open = true;
+    },
+    open: false
+}"></div>
+
+<div x-data="{
+{# lintcheck-expect: house/x-data-init-first #}
+    init() {
+        this.rows = await Glue.querySet.rows.all();
+    },
+    rows: []
+}"></div>
+
+<div x-data="{
+    toggle() {},
+{# lintcheck-expect: house/x-data-member-order #}
+    open: false
+}"></div>
+
+<div x-data="{
+    open: false,
+    toggle() {},
+{# lintcheck-expect: house/x-data-member-order #}
+    apply() {}
+}"></div>

@@ -1,0 +1,1 @@
+{"path":"fixtures/django/app/location/models.py","kind":"python","registrations":[],"models":[{"name":"Location","app_label":null,"range":[31,104],"bases":[{"kind":"Literal","text":"models.Model"}],"fields":[{"name":"name","kind":"CharField","editable":true,"relates_to":null,"range":[65,104]}]}]}

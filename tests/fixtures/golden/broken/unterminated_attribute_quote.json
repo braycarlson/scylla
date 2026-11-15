@@ -1,0 +1,1 @@
+{"path":"fixtures/broken/unterminated_attribute_quote.html","tokens":[["AngleOpen",0,1],["ElementName",1,4],["Whitespace",4,5],["AttributeName",5,10],["Equals",10,11],["Quote",11,12],["AttributeText",12,29]],"tree":[["Document",0,29],["Element",0,29],["OpenTag",0,29],["Attribute",5,29],["AttributeValue",11,29]],"errors":[["UnterminatedAttributeValue",11]]}

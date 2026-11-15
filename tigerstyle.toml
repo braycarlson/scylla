@@ -1,0 +1,2 @@
+extend-exclude = ["corpus/**", "tests/fixtures/**"]
+extend-select = ["TS022", "TS026"]

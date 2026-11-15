@@ -1,0 +1,9 @@
+
+{% for key, value in rows.items %}
+    <div class="row">
+        <span>{{ key|default:"unknown_key" }}</span>
+        <span>{{ value|default:"unknown_value"|upper }}</span>
+    </div>
+{% empty %}
+    <p>No rows</p>
+{% endfor %}

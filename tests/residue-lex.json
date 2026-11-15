@@ -1,0 +1,86 @@
+{
+  "go": {
+    "classified": {
+      "a_label_statement_end": 39804,
+      "a_multi_character_operator": 26521,
+      "an_assertion_name_keyword": 1035
+    },
+    "files": 7707,
+    "unclassified": 0
+  },
+  "javascript": {
+    "classified": {
+      "a_contextual_keyword": 1021,
+      "a_jsx_element_span": 6,
+      "a_jsx_text_run": 4,
+      "a_multi_character_operator": 11749,
+      "a_type_word_keyword": 55,
+      "a_value_word_keyword": 5956,
+      "an_assertion_name_keyword": 1746
+    },
+    "files": 416,
+    "unclassified": 0
+  },
+  "odin": {
+    "classified": {
+      "a_carriage_return_span": 2,
+      "a_closure_bar": 22101,
+      "a_joined_operator": 259312,
+      "a_multi_character_operator": 28706,
+      "a_raw_or_prefixed_literal": 22101,
+      "a_triple_quoted_string": 6103,
+      "an_assertion_name_keyword": 1542
+    },
+    "files": 1989,
+    "unclassified": 0
+  },
+  "python": {
+    "classified": {
+      "a_multi_character_operator": 13,
+      "a_raw_identifier": 3,
+      "a_value_word_keyword": 527
+    },
+    "files": 1008,
+    "unclassified": 0
+  },
+  "rust": {
+    "classified": {
+      "a_byte_literal_prefix": 1270,
+      "a_closure_bar": 10915,
+      "a_joined_operator": 196143,
+      "a_raw_identifier": 114,
+      "a_raw_or_prefixed_literal": 1270,
+      "a_reserved_keyword": 78,
+      "a_trailing_dot_float": 21242,
+      "a_value_word_keyword": 19813,
+      "an_assertion_name_keyword": 31263
+    },
+    "files": 3158,
+    "unclassified": 0
+  },
+  "typescript": {
+    "classified": {
+      "a_closure_bar": 192,
+      "a_contextual_keyword": 254463,
+      "a_jsx_element_span": 16573,
+      "a_jsx_text_run": 92944,
+      "a_jsx_text_spill": 1790,
+      "a_multi_character_operator": 311557,
+      "a_type_word_keyword": 251100,
+      "a_value_word_keyword": 185410,
+      "an_assertion_name_keyword": 29440
+    },
+    "files": 13519,
+    "unclassified": 0
+  },
+  "zig": {
+    "classified": {
+      "a_builtin_keyword": 1471,
+      "a_multi_character_operator": 7265,
+      "a_word_spelled_operator": 1398,
+      "an_assertion_name_keyword": 9949
+    },
+    "files": 249,
+    "unclassified": 0
+  }
+}

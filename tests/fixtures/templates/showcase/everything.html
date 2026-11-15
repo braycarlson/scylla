@@ -1,0 +1,218 @@
+{# Every name the highlighter knows, in one page: all 46 template tags, #}
+{# all 72 filters, every Alpine directive core and plugin, and every #}
+{# modifier group in the generated tables. Nothing here is a finding; #}
+{# the fixture exists to eyeball the whole colour surface at once. #}
+
+{% extends base_template %}
+{% load cache humanize i18n l10n static tz %}
+
+{# ------------------------------------------------------------------ #}
+{# Builtin tags. #}
+{# ------------------------------------------------------------------ #}
+
+{% block content %}
+{% autoescape off %}{{ markup }}{% endautoescape %}
+{% comment %}Hidden from output, coloured as comment.{% endcomment %}
+{% csrf_token %}
+{% debug %}
+{% filter lower %}SHOUTED{% endfilter %}
+{% firstof product.nickname product.name "unnamed" %}
+
+{% for item in items %}
+    {% cycle 'odd' 'even' %}
+    {% ifchanged item.city %}{{ item.city }}{% else %}same{% endifchanged %}
+    {% resetcycle %}
+{% empty %}
+    nothing yet
+{% endfor %}
+
+{% if items %}many{% elif product %}one{% else %}none{% endif %}
+
+{% include partial_name %}
+{% lorem 2 p %}
+{% now "Y-m-d H:i" %}
+{% querystring page=2 %}
+{% regroup people by city as city_list %}
+{% spaceless %}<b> tight </b>{% endspaceless %}
+{% templatetag openblock %} {% templatetag closeblock %}
+{% url "catalog:list" %}
+{% verbatim %}{{ not_a_variable }}{% endverbatim %}
+{% widthratio price price_max 100 %}
+{% with count_total=items|length %}{{ count_total }}{% endwith %}
+
+{% partialdef price-tag %}{{ product.price }}{% endpartialdef %}
+{% partial price-tag %}
+
+<script {% csp_nonce_attr %}></script>
+
+{# ------------------------------------------------------------------ #}
+{# Library tags: cache, i18n, l10n, static, tz. #}
+{# ------------------------------------------------------------------ #}
+
+{% cache 300 sidebar request.user.pk %}cached{% endcache %}
+
+{% get_available_languages as languages %}
+{% get_current_language as language_code %}
+{% get_current_language_bidi as language_bidi %}
+{% get_language_info for "fr" as language %}
+{% get_language_info_list for languages as language_list %}
+{% trans "Welcome" %}
+{% translate "Welcome" context "greeting" %}
+{% blocktrans with name=product.name %}Made for {{ name }}{% endblocktrans %}
+{% blocktranslate count total=items|length %}
+One item
+{% plural %}
+{{ total }} items
+{% endblocktranslate %}
+{% language "fr" %}{% trans "Bonjour" %}{% endlanguage %}
+
+{% localize on %}{{ price }}{% endlocalize %}
+
+{% get_static_prefix %}
+{% get_media_prefix %}
+{% static "css/site.css" %}
+
+{% get_current_timezone as time_zone %}
+{% localtime on %}{{ published_at }}{% endlocaltime %}
+{% timezone "America/Edmonton" %}{{ published_at }}{% endtimezone %}
+
+{# ------------------------------------------------------------------ #}
+{# Builtin filters, grouped roughly by what they chew on. #}
+{# ------------------------------------------------------------------ #}
+
+{{ product.name|capfirst|lower|upper|title|slugify }}
+{{ product.name|addslashes|escape|escapejs|force_escape|iriencode|urlencode }}
+{{ summary|cut:" "|center:"24"|ljust:12|rjust:12|wordwrap:32 }}
+{{ summary|truncatechars:24|truncatewords:6|striptags }}
+{{ markup|truncatechars_html:24|truncatewords_html:6|safe }}
+{{ summary|linebreaks|linebreaksbr|linenumbers|urlize|urlizetrunc:20 }}
+{{ summary|stringformat:"s"|make_list|slice:":3"|join:", " }}
+{{ summary|wordcount|pluralize }}
+{{ phone|phone2numeric }}
+
+{{ price|add:3|divisibleby:3|yesno:"yes,no,maybe" }}
+{{ price|floatformat:2|get_digit:2|filesizeformat }}
+{{ items|default:"n/a"|default_if_none:"n/a" }}
+{{ items|dictsort:"name"|dictsortreversed:"name"|first }}
+{{ items|last|length|random|pprint }}
+{{ items|escapeseq|join:" + " }}
+{{ items|safeseq|join:" + " }}
+{{ tree|unordered_list }}
+{{ payload|json_script:"payload" }}
+
+{{ published_at|date:"Y-m-d"|default:"never" }}
+{{ published_at|time:"H:i"|default:"never" }}
+{{ published_at|timesince }} {{ launch_at|timeuntil }}
+
+{{ price|apnumber }} {{ price|intcomma }} {{ price|intword }} {{ price|ordinal }}
+{{ published_at|naturalday }} {{ published_at|naturaltime }}
+
+{{ language_code|language_bidi }} {{ language_code|language_name }}
+{{ language_code|language_name_local }} {{ language_code|language_name_translated }}
+
+{{ price|localize }} {{ price|unlocalize }}
+{{ published_at|localtime|utc }} {{ published_at|timezone:"America/Edmonton" }}
+
+{# ------------------------------------------------------------------ #}
+{# Alpine core directives on one component. #}
+{# ------------------------------------------------------------------ #}
+
+<div x-data="{
+        count: $persist(0),
+        markup: '<em>hi</em>',
+        open: false,
+        query: '',
+        rows: [],
+        theme: 'dark',
+        total: 0,
+        handle(item, position, key) { this.rows.splice(position, 1, item ?? key) },
+        save() { this.rows.push(this.count) },
+        toggle() { this.open = !this.open }
+    }"
+     x-id="['dropdown']"
+     x-init="$watch('open', () => $dispatch('toggled'))">
+
+    <span x-cloak x-show.important="open" x-text="rows.length"></span>
+    <span x-html="markup"></span>
+    <div x-effect="total = rows.length + count"></div>
+    <div x-ignore></div>
+    <input x-ref="host" :placeholder="theme">
+    <div x-modelable="open"></div>
+
+    <template x-if="open"><span x-text="$id('dropdown')"></span></template>
+    <template x-for="row in rows"><span x-text="row"></span></template>
+    <template x-for="(row, index) in rows" :key="index"><span x-text="index"></span></template>
+
+    <button x-bind:aria-label="open ? 'Close' : 'Open'"
+            x-on:click.prevent="toggle()">toggle</button>
+    <button :class="open ? 'card' : 'card muted'" @click="$el.blur()">blur</button>
+
+    {# Transition arguments with the whole transition modifier table. #}
+    <div x-show="open"
+         x-transition.in.out
+         x-transition:enter.duration.300ms.delay.50ms.opacity
+         x-transition:enter-start.origin.top.left
+         x-transition:enter-end.origin.bottom.right
+         x-transition:leave.scale.80
+         x-transition:leave-start.origin.center
+         x-transition:leave-end.origin.top.right></div>
+
+    {# Every model modifier, spread over the inputs it shapes. #}
+    <input x-model.trim.lazy="query">
+    <input x-model.number.fill="count">
+    <input x-model.boolean.change="open">
+    <input x-model.enter.blur="query">
+    <select x-model.parent.unintrusive="theme"><option value="dark">dark</option></select>
+
+    {# Every event modifier. #}
+    <button @click.prevent.stop.self.once="toggle()">save</button>
+    <div @click.outside="open = false" @click.away="open = false"></div>
+    <div @click.document.capture="save()"></div>
+    <div @scroll.window.passive.throttle.750ms="save()"></div>
+    <input @input.debounce.250ms="save()">
+    <div @row-saved.window.camel.dot="save()"></div>
+    <div @refresh.window.blur.change.lazy.preserve-scroll="save()"></div>
+
+    {# Every keyboard modifier, four to a listener. #}
+    <input @keydown.alt.arrow-down.arrow-left.arrow-right="toggle()"
+           @keydown.arrow-up.backspace.caps-lock.cmd="toggle()"
+           @keydown.comma.ctrl.delete.down="toggle()"
+           @keydown.end.enter.equal.esc="toggle()"
+           @keyup.escape.home.left.meta="toggle()"
+           @keyup.minus.page-down.page-up.period="toggle()"
+           @keyup.right.shift.slash.space="toggle()"
+           @keyup.spacebar.super.tab.underscore="toggle()"
+           @keyup.up="toggle()">
+
+    {# Magics the wrapper resolves. #}
+    <button @click="$nextTick(() => $refs.host.focus())">focus</button>
+    <div @toggled.window="console.log($data, $store.session, $root)"></div>
+    <input @change="theme = $event.target.value">
+
+    <div x-teleport="body"></div>
+
+    {# ---------------------------------------------------------------- #}
+    {# Plugin directives, their modifier long tail, and scoped magics. #}
+    {# ---------------------------------------------------------------- #}
+
+    <div x-anchor.bottom-start.offset.12.noflip="$refs.host"></div>
+    <div x-anchor.top-end.bottom-end.top-start.no-style="$refs.host"></div>
+    <div x-anchor.left-start.left-end.right-start.right-end.fixed="$refs.host"></div>
+    <div x-anchor.top.bottom.left.right="$refs.host"></div>
+
+    <div x-collapse.duration.250ms.min.40px></div>
+    <div x-intersect.once.half.threshold.50="save()"></div>
+    <div x-intersect.full.immediate="save()"></div>
+    <input x-mask="(999) 999-9999">
+    <input x-mask:dynamic="$money(query)">
+    <div x-resize.document="save()"></div>
+    <ul x-sort.ghost="handle(0, 0, 'row')"><li x-sort:item>row</li></ul>
+    <div x-trap.inert.noscroll.noreturn.noautofocus="open"></div>
+    <template x-teleport.append="'#modals'"><span x-text="theme"></span></template>
+    <template x-teleport.prepend="'#modals'"><span x-text="theme"></span></template>
+
+    {# Community directives the tables carry alongside the plugins. #}
+    <div x-component="card"></div>
+    <div x-tooltip="theme"></div>
+</div>
+{% endblock %}

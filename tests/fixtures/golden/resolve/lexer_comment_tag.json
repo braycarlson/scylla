@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_comment_tag.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,10],["Whitespace",10,11],["TagClose",11,13],["Text",13,14]],"tree":[["Document",0,14],["TemplateTag",0,13]],"errors":[]}

@@ -1,0 +1,8 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+{% for line_item in line_items %}
+    {% with price_display=line_item.price|floatformat:2|intcomma %}
+        {% include 'components/fake_price.html' with price_display=price_display %}
+    {% endwith %}
+{% endfor %}
+{% endblock %}

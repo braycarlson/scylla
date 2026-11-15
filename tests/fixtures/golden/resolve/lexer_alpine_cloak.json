@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_alpine_cloak.html","tokens":[["AngleOpen",0,1],["ElementName",1,4],["Whitespace",4,5],["AttributeName",5,12],["AngleClose",12,13],["Text",13,14]],"tree":[["Document",0,14],["Element",0,14],["OpenTag",0,13],["Attribute",5,12]],"errors":[["UnclosedElement",0]]}

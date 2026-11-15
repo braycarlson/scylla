@@ -1,0 +1,4 @@
+
+{% include 'pkg_a/comp_c/elem_l.html' with badge_text=obj_a.owner.first_name|slice:":1"|add_str:obj_a.owner.last_name|slice:":2" %}
+{% include 'pkg_a/comp_c/elem_o.html' with attribute_title='FieldC' attribute_value_prefix='$' attribute_value=obj_a.total|floatformat:'2g' %}
+{% include 'pkg_a/comp_c/elem_p.html' with attribute_title='FieldD' attribute_value=obj_a.created_at|date:"M d, Y g:i A" %}

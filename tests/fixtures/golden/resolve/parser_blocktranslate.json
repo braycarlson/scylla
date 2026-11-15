@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_blocktranslate.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,17],["Whitespace",17,18],["TagClose",18,20],["Text",20,25],["TagOpen",25,27],["Whitespace",27,28],["TagName",28,45],["Whitespace",45,46],["TagClose",46,48],["Text",48,49]],"tree":[["Document",0,49],["TemplateTag",0,20],["TemplateTag",25,48]],"errors":[]}

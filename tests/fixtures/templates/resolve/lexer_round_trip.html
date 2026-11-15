@@ -1,0 +1,5 @@
+<div x-data="{ value: {{ var|default:\"\" }} }" class="test" {% if cond %}active{% endif %}>
+    <template x-for="item in items">
+        <span>{{ item.name|upper }}</span>
+    </template>
+</div>

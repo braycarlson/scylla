@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_alpine_model.html","tokens":[["AngleOpen",0,1],["ElementName",1,6],["Whitespace",6,7],["AttributeName",7,14],["Equals",14,15],["Quote",15,16],["AttributeText",16,21],["Quote",21,22],["AngleClose",22,23],["Text",23,24]],"tree":[["Document",0,24],["Element",0,23],["OpenTag",0,23],["Attribute",7,22],["AttributeValue",15,22]],"errors":[]}

@@ -1,0 +1,6 @@
+{# The first read keeps `blobby` off glue/dead-registration. `price` is a #}
+{# Product field the registration's `fields` list leaves out. #}
+{% extends 'seeded/base.html' %}
+{% block content %}<div x-init="Glue.model.blobby.load()"></div>
+{# lintcheck-expect: glue/filtered-field-read #}
+<p x-text="Glue.model.blobby.price"></p>{% endblock %}

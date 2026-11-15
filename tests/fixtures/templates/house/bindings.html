@@ -1,0 +1,33 @@
+{# Declaration and DOM-access rules. One violation per line: the seeded #}
+{# harness expects a marker on the line directly above each finding. #}
+{# Methods stay in alphabetical order so house/x-data-member-order, which #}
+{# this file is not about, stays quiet. #}
+
+<div x-data="{
+    count() {
+        let total = 0;
+        total += 1;
+        return total;
+    },
+    load() {
+{# lintcheck-expect: house/prefer-const #}
+        let label = 'never reassigned';
+        return label;
+    }
+}"></div>
+
+{# An Alpine attribute holds an expression, not statements, so `var` only #}
+{# ever appears in a script block. #}
+<script>
+{# lintcheck-expect: house/no-var #}
+    var pending = 1;
+    window.pending = pending;
+</script>
+
+{# lintcheck-expect: house/no-direct-dom #}
+<div x-on:click="document.querySelector('.panel').focus()"></div>
+
+<script>
+{# lintcheck-expect: house/vanilla-script-block #}
+    window.a = 1; window.b = 2; window.c = 3; window.d = 4; window.e = 5;
+</script>

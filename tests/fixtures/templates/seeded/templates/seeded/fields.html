@@ -1,0 +1,6 @@
+{# The first read keeps `typo` off glue/dead-registration. `price` is a #}
+{# real Product field the registration never selected. #}
+{% extends 'seeded/base.html' %}
+{% block content %}<div x-init="Glue.model.typo.load()"></div>
+{# lintcheck-expect: glue/filtered-field-read #}
+<p x-text="Glue.model.typo.price"></p>{% endblock %}

@@ -1,0 +1,10 @@
+
+{% if record.status == 'active' %}
+    {% include 'badge/fake_success.html' with text='Active' %}
+{% elif record.status == 'pending' %}
+    {% include 'badge/fake_warning.html' with text='Pending' %}
+{% elif record.status == 'archived' %}
+    {% include 'badge/fake_secondary.html' with text='Archived' %}
+{% else %}
+    {% include 'badge/fake_danger.html' with text='Unknown' %}
+{% endif %}

@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_unclosed_block.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,11],["Whitespace",11,12]],"tree":[["Document",0,12],["TemplateTag",0,12]],"errors":[["UnterminatedTemplateTag",0]]}

@@ -1,0 +1,15 @@
+const ast = @import("go/ast.zig");
+pub const Call = ast.Call;
+pub const Children = ast.Children;
+pub const Declaration = ast.Declaration;
+pub const Field = ast.Field;
+pub const Function = ast.Function;
+pub const Kind = @import("go/kind.zig").Kind;
+pub const Leading = ast.Leading;
+pub const Literal = ast.Literal;
+pub const Operation = ast.Operation;
+pub const Positions = ast.Positions;
+pub const Specification = ast.Specification;
+pub const Statement = ast.Statement;
+pub const Values = ast.Values;
+pub const View = ast.View;

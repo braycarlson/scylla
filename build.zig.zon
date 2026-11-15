@@ -1,0 +1,17 @@
+.{
+    .name = .scylla,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.17.1",
+    .fingerprint = 0x46e17b6687a1ea05,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "LICENSE",
+        "src",
+    },
+    .dependencies = .{
+        .json = .{
+            .path = "../json-zig",
+        },
+    },
+}

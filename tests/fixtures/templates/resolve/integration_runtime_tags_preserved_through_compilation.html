@@ -1,0 +1,10 @@
+{% extends 'layouts/base.html' %}
+{% load static %}
+
+{% block content %}
+{% now "Y-m-d" as today %}
+{% widthratio total_billable total_expected 100 %}
+{% firstof headline fallback_headline "Default" as chosen_headline %}
+{% user_list_from_content_type obj as user_list %}
+{% session_controller_to_json 'report_filter' %}
+{% endblock %}

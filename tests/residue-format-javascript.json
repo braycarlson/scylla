@@ -1,0 +1,12 @@
+[
+    {
+        "fixture": "expressions.js",
+        "category": "biome-line-breaking",
+        "reason": "biome refuses the file: `-value ** 2` puts a unary operator immediately before an exponentiation, which does not parse, so the golden beside it is not the oracle's own output and the fixture is not comparable."
+    },
+    {
+        "fixture": "jsx_attributes.js",
+        "category": "biome-jsx-layout",
+        "reason": "biome refuses the file: an empty expression container in an attribute position does not parse, so the golden beside it is not the oracle's own output and the fixture is not comparable."
+    }
+]

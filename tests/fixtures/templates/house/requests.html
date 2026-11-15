@@ -1,0 +1,25 @@
+{# Fetch rules. Both django-glue eras are recognised, so the legacy #}
+{# helper below is linted for its URL the same way Glue.fetch is. #}
+
+<div x-data="{
+    async hardcoded() {
+{# lintcheck-expect: house/hardcoded-fetch-url #}
+        await Glue.fetch('/catalog/save/');
+    },
+    async legacyHardcoded() {
+{# lintcheck-expect: house/hardcoded-fetch-url #}
+        await GlueFetchHelper.tryGlueFetch('/catalog/save/');
+    },
+    async raw() {
+{# lintcheck-expect: house/no-raw-fetch #}
+        await fetch('{% url 'catalog:json:save' %}');
+    },
+    async unawaited() {
+{# lintcheck-expect: house/floating-glue-call #}
+        Glue.fetch('{% url 'catalog:json:save' %}', { payload: {} });
+    },
+    async unawaitedRender() {
+{# lintcheck-expect: house/floating-glue-call #}
+        Glue.view('{% url 'catalog:template:row' %}').renderInnerHtml(this.$refs.host);
+    }
+}"></div>

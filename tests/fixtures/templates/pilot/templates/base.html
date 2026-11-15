@@ -1,0 +1,15 @@
+{% load django_glue %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{% block title %}lintcheck pilot{% endblock %}</title>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.x/dist/cdn.min.js"></script>
+    {% django_glue_init %}
+</head>
+<body>
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+</body>
+</html>

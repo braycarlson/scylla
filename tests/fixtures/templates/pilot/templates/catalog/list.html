@@ -1,0 +1,19 @@
+{% extends 'base.html' %}
+
+{% block title %}Products{% endblock %}
+
+{% block content %}
+    <div class="listing {% if products %}has-items{% endif %}"
+         x-data="{ pageSize: {{ 25 }}, products: [] }"
+         x-init="products = await Glue.querySet.products.all()">
+        <p x-text="`${products.length} of ${Glue.json.page_size.value}`"></p>
+
+        <template x-for="product in products" :key="product.id">
+            <article class="product" :class="product.is_active ? 'active' : 'inactive'">
+                <h2 x-text="product.name"></h2>
+                <span x-text="product.price"></span>
+                <span x-text="product.sku"></span>
+            </article>
+        </template>
+    </div>
+{% endblock %}

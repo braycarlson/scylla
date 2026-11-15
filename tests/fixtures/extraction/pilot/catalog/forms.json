@@ -1,0 +1,1 @@
+{"path":"fixtures/pilot/catalog/forms.py","kind":"python","registrations":[],"models":[{"name":"ProductForm","app_label":null,"range":[63,208],"bases":[{"kind":"Literal","text":"forms.ModelForm"}],"fields":[]}]}

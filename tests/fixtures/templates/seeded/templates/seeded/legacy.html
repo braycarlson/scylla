@@ -1,0 +1,5 @@
+{% extends 'seeded/base.html' %}
+{% block content %}
+{# lintcheck-expect: glue/legacy-client-api #}
+<div x-data="{ company: new ModelObjectGlue('company') }"></div>
+{% endblock %}

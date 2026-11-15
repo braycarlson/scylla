@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_custom_tag_form_label_to_name.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,21],["Whitespace",21,22],["Identifier",22,33],["Whitespace",33,34],["TagClose",34,36],["Text",36,37]],"tree":[["Document",0,37],["TemplateTag",0,36]],"errors":[]}

@@ -1,0 +1,1 @@
+{"ast":[[9,"Function","outer",9],[15,"Parameter","first",15],[22,"Parameter","second",22],[31,"Read","first",15],[38,"Parameter","third",38],[46,"Read","body",-1],[64,"Variable","body",64],[86,"Read","second",22],[95,"Read","third",38]],"path":"parameters.js"}

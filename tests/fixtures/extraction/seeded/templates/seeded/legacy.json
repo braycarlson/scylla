@@ -1,0 +1,1 @@
+{"path":"fixtures/seeded/templates/seeded/legacy.html","kind":"template","objects":[{"range":[113,156],"members":[{"name":"company","kind":"Property","is_async":false,"has_await":false,"range":[115,154]}]}],"bindings":[]}

@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_empty_block_tag.html","tokens":[["Text",0,40],["VariableOpen",40,42],["Identifier",42,43],["Whitespace",43,45],["Identifier",45,46],["VariableClose",46,48],["Text",48,61]],"tree":[["Document",0,61],["TemplateVariable",40,48]],"errors":[]}

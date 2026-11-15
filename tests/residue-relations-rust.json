@@ -1,0 +1,7 @@
+[
+    {
+        "fixture": "rust/stdarch/crates/stdarch-gen-arm/src/load_store_tests.rs",
+        "category": "scylla-unstable",
+        "reason": "A closure whose body is a block holding one macro call keeps the block on the first pass and loses it on the second: `dropped_body` measures from the indentation the source gave the chain's first line, column 12 in the file and column 8 in the printing, so 101 columns become 97 and cross the width."
+    }
+]

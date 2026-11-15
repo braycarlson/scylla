@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/integration_circular_extends_is_graceful.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,10],["Whitespace",10,11],["String",11,27],["Whitespace",27,28],["TagClose",28,30],["Text",30,31]],"tree":[["Document",0,31],["TemplateTag",0,30]],"errors":[]}

@@ -1,0 +1,9 @@
+
+{% for line_item in line_items %}
+    {% with price_display=line_item.price|floatformat:2|intcomma cost_display=line_item.total_cost|floatformat:2|intcomma %}
+        <div class="line-item">
+            <span>${{ price_display }}</span>
+            <span>${{ cost_display }}</span>
+        </div>
+    {% endwith %}
+{% endfor %}

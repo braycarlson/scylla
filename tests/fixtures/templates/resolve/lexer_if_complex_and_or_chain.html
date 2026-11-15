@@ -1,0 +1,1 @@
+{% if perms.app_b.delete_model_b or perms.app_c.add_model_c and request.user.id == obj_a.requestor_id and obj_a.phase == 'req' %}

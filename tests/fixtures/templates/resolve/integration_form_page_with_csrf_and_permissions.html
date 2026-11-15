@@ -1,0 +1,12 @@
+{% extends 'layouts/form.html' %}
+{% load crispy_forms_filters static %}
+
+{% block form_content %}
+<form method="post">
+    {% csrf_token %}
+    {% crispy form %}
+    {% if perms.fake_app.change_record and not record.is_locked %}
+        {% include 'components/fake_submit.html' with button_text='Save Changes' %}
+    {% endif %}
+</form>
+{% endblock %}

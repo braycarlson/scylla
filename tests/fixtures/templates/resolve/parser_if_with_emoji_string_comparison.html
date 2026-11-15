@@ -1,0 +1,12 @@
+
+{% if '🎆 Done' in status %}
+    {% include 'badge/fake_done.html' %}
+{% elif '🤔 Waiting Information' in status %}
+    {% include 'badge/fake_waiting.html' %}
+{% elif '🔎 Code Review' in status %}
+    {% include 'badge/fake_review.html' %}
+{% elif '👷‍♂️ Ready' in status %}
+    {% include 'badge/fake_ready.html' %}
+{% elif '🏗️ In Progress' in status %}
+    {% include 'badge/fake_progress.html' %}
+{% endif %}

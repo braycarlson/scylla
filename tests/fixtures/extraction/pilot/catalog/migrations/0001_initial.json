@@ -1,0 +1,1 @@
+{"path":"fixtures/pilot/catalog/migrations/0001_initial.py","kind":"python","registrations":[],"models":[{"name":"Migration","app_label":null,"range":[125,1565],"bases":[{"kind":"Literal","text":"migrations.Migration"}],"fields":[]}]}

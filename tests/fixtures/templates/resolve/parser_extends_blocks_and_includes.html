@@ -1,0 +1,12 @@
+
+{% extends 'layouts/fake_base.html' %}
+{% load static fake_tags %}
+
+{% block page_title %}{{ page_title|default:"Example" }}{% endblock %}
+
+{% block page_content %}
+<div class="page-shell">
+    {% include 'components/fake_header.html' with heading=page_title subtitle='Example subtitle' %}
+    {% include 'components/fake_stat.html' with label='Open' value=open_count %}
+</div>
+{% endblock %}

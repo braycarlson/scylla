@@ -1,0 +1,14 @@
+{% extends 'layouts/page.html' %}
+{% load static fake_tags %}
+
+{% block title %}Operations Dashboard{% endblock %}
+
+{% block page_content %}
+<div class="dashboard">
+    {% for metric in metrics %}
+        {% include 'components/fake_metric.html' with label=metric.label value=metric.value %}
+    {% empty %}
+        {% include 'components/fake_empty.html' %}
+    {% endfor %}
+</div>
+{% endblock %}

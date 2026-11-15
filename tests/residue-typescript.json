@@ -1,0 +1,267 @@
+[
+  {
+    "fixture": "angular/packages/core/src/di/provider_collection.ts",
+    "category": "shape",
+    "reason": "The file writes `new defType!()`. The TypeScript compiler's parser (accepts.mjs) reads a new expression whose callee is the non-null assertion `defType!` and gives it the argument list; tree-sitter-typescript reads a call whose callee is the assertion over a `new` expression without arguments. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "angular/packages/core/src/render3/hooks.ts",
+    "category": "shape",
+    "reason": "The file writes `a <` across a line break and then `b[c] >> d`. The TypeScript compiler's parser (accepts.mjs) rescans `>>` as one shift operator, so no type argument list closes and `<` and `>>` are both binary operators; tree-sitter-typescript splits `>>` and reads the instantiation expression `a<b[c]>` followed by `>`. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/TypeScript/example.cts",
+    "category": "not-typescript",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a TypeScript module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/TypeScript/example.ts",
+    "category": "not-typescript",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a TypeScript module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/TypeScriptReact/app.tsx",
+    "category": "not-typescript",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a TSX module. The tree-sitter oracle reports an ERROR node over it too, which is what makes it residue rather than a defect. The two `TypeScript/example.*` rows above are the same file in the other dialect."
+  },
+  {
+    "fixture": "nest/sample/37-outbox/analytics-service/src/order-stats.service.ts",
+    "category": "shape",
+    "reason": "The file writes a tagged template behind type arguments (`tag<T>\\`...\\``). The TypeScript compiler's parser (accepts.mjs) reads a tagged template with type arguments; tree-sitter-typescript reads two comparisons around a template. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "playwright/tests/library/inspector/console-api.spec.ts",
+    "category": "shape",
+    "reason": "The file writes `expect(await body.evaluate<string, HTMLBodyElement>((node: HTMLBodyElement) => node.nodeName))` and the same call over `handle` with `HTMLDivElement`. The TypeScript compiler's parser (typescript-estree) reads one argument, an await over a call that carries the type arguments `<string, HTMLBodyElement>`; tree-sitter-typescript reads two comparisons split at the comma (`await body.evaluate < string` and `HTMLBodyElement > (...)`). scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/babel-ts/declare-accessor.ts",
+    "category": "not-typescript",
+    "reason": "The file is invalid TypeScript, kept in prettier's test suite on purpose: the TypeScript compiler's parser (accepts.mjs) rejects it: 'declare' modifier cannot appear on class elements of this kind. at line 2. scylla refuses it at line 2 (`declare get foo()`). tree-sitter-typescript accepts it and builds a tree scylla's error recovery does not reproduce."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/babel-ts2/multiline-declaration-abstract-class.ts",
+    "category": "shape",
+    "reason": "The file writes a modifier (`abstract`, `accessor`, `declare` with `abstract`, `interface` or `module`) followed by a line break. The TypeScript compiler's parser (accepts.mjs) applies automatic semicolon insertion there: a modifier other than `static` must share a line with what it modifies, so the word stands as its own statement or member. tree-sitter-typescript joins the word to the next line. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/babel-ts2/multiline-declaration-interface.ts",
+    "category": "shape",
+    "reason": "The file writes a modifier (`abstract`, `accessor`, `declare` with `abstract`, `interface` or `module`) followed by a line break. The TypeScript compiler's parser (accepts.mjs) applies automatic semicolon insertion there: a modifier other than `static` must share a line with what it modifies, so the word stands as its own statement or member. tree-sitter-typescript joins the word to the next line. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/babel-ts2/multiline-declaration-module.ts",
+    "category": "shape",
+    "reason": "The file writes a modifier (`abstract`, `accessor`, `declare` with `abstract`, `interface` or `module`) followed by a line break. The TypeScript compiler's parser (accepts.mjs) applies automatic semicolon insertion there: a modifier other than `static` must share a line with what it modifies, so the word stands as its own statement or member. tree-sitter-typescript joins the word to the next line. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/babel-ts2/type-annotation-expr-statement.ts",
+    "category": "not-typescript",
+    "reason": "The file is invalid TypeScript, kept in prettier's test suite on purpose: the TypeScript compiler's parser (accepts.mjs) rejects it: '=>' expected. at line 1. scylla refuses it at line 1 (`(a: T);`). tree-sitter-typescript accepts it and builds a tree scylla's error recovery does not reproduce."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/babel-ts2/type-annotation-func.ts",
+    "category": "not-typescript",
+    "reason": "The file is invalid TypeScript, kept in prettier's test suite on purpose: the TypeScript compiler's parser (accepts.mjs) rejects it: ',' expected. at line 1. scylla refuses it at line 1 (`func<T>(a: T);`). tree-sitter-typescript accepts it and builds a tree scylla's error recovery does not reproduce."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/declare-accessor/declare-getter.ts",
+    "category": "not-typescript",
+    "reason": "The file is invalid TypeScript, kept in prettier's test suite on purpose: the TypeScript compiler's parser (accepts.mjs) rejects it: 'declare' modifier cannot appear on class elements of this kind. at line 2. scylla refuses it at line 2 (`declare get foo()`). tree-sitter-typescript accepts it and builds a tree scylla's error recovery does not reproduce."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/declare-accessor/declare-setter.ts",
+    "category": "not-typescript",
+    "reason": "The file is invalid TypeScript, kept in prettier's test suite on purpose: the TypeScript compiler's parser (accepts.mjs) rejects it: 'declare' modifier cannot appear on class elements of this kind. at line 2. scylla refuses it at line 2 (`declare set foo(v)`). tree-sitter-typescript accepts it and builds a tree scylla's error recovery does not reproduce."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/_errors_/jsx/invalid-jsx-1.tsx",
+    "category": "tsx",
+    "reason": "The TSX file is invalid on purpose: the TypeScript compiler's parser (accepts.mjs) rejects it: Unexpected token. Did you mean `{'>'}` or `&gt;`? at line 3. scylla refuses it at line 3 (`let directions = <div>Navigate to: Menu Bar > Tools > Options</div>`). tree-sitter-tsx accepts it, and scylla's lexer writes an ErrorToken where TypeScript reports the error."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/as/array-pattern.ts",
+    "category": "shape",
+    "reason": "tree-sitter-typescript wraps the array or object literal on the left of `=` in a `non_null_expression` that no `!` in the source writes, because the literal holds an `as` or `satisfies` expression. The TypeScript compiler's parser (accepts.mjs) reads a destructuring target holding the assertion, which is how scylla reads it."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/binary-expressions/chain-expression.ts",
+    "category": "shape",
+    "reason": "tree-sitter-typescript starts the `non_null_expression` at the comment that precedes its operand, so the node's extent covers a comment it does not hold. scylla starts the node at its operand, as the TypeScript compiler's parser does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/cast/assert-and-assign.ts",
+    "category": "shape",
+    "reason": "tree-sitter-typescript wraps the array or object literal on the left of `=` in a `non_null_expression` that no `!` in the source writes, because the literal holds an `as` or `satisfies` expression. The TypeScript compiler's parser (accepts.mjs) reads a destructuring target holding the assertion, which is how scylla reads it."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/chain-expression/new-expression.ts",
+    "category": "shape",
+    "reason": "The file writes `new X!.a.b()` and `new (a?.b)!()`. The TypeScript compiler's parser (accepts.mjs) parses the non-null assertion and the member accesses into the callee and gives the argument list to `new`; tree-sitter-typescript reads a call whose callee is a `new` expression without arguments. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/chain-expression/tagged-template-literals.ts",
+    "category": "shape",
+    "reason": "The file writes a tagged template behind type arguments (`tag<T>\\`...\\``). The TypeScript compiler's parser (accepts.mjs) reads a tagged template with type arguments; tree-sitter-typescript reads two comparisons around a template. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/comments/11662.ts",
+    "category": "shape",
+    "reason": "The file writes a tagged template behind type arguments (`tag<T>\\`...\\``). The TypeScript compiler's parser (accepts.mjs) reads a tagged template with type arguments; tree-sitter-typescript reads two comparisons around a template. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/compiler/commentInNamespaceDeclarationWithIdentifierPathName.ts",
+    "category": "shape",
+    "reason": "The namespace name and its body sit on separate lines with a comment between them. The TypeScript compiler's parser (accepts.mjs) reads one namespace declaration whose name is a dotted path; tree-sitter-typescript ends the declaration at the line break and reads the body as a block. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/conditional-types/conditional-types.ts",
+    "category": "shape",
+    "reason": "The file writes `new () => X extends T ? U : V`. The TypeScript compiler's parser (accepts.mjs) parses a constructor type's return type with its full type grammar, so the conditional type is the return type; tree-sitter-typescript makes the constructor type the conditional's check type. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/conformance/classes/classDeclarations/classAbstractKeyword/classAbstractSingleLineDecl.ts",
+    "category": "shape",
+    "reason": "The file writes a modifier (`abstract`, `accessor`, `declare` with `abstract`, `interface` or `module`) followed by a line break. The TypeScript compiler's parser (accepts.mjs) applies automatic semicolon insertion there: a modifier other than `static` must share a line with what it modifies, so the word stands as its own statement or member. tree-sitter-typescript joins the word to the next line. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/decorator-auto-accessors/decorator-auto-accessors-new-line.ts",
+    "category": "shape",
+    "reason": "The file writes a modifier (`abstract`, `accessor`, `declare` with `abstract`, `interface` or `module`) followed by a line break. The TypeScript compiler's parser (accepts.mjs) applies automatic semicolon insertion there: a modifier other than `static` must share a line with what it modifies, so the word stands as its own statement or member. tree-sitter-typescript joins the word to the next line. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/instantiation-expression/17714.ts",
+    "category": "shape",
+    "reason": "The file writes `void (...)<never>`. The TypeScript compiler's parser (accepts.mjs) binds the instantiation expression tighter than the prefix `void`; tree-sitter-typescript instantiates the `void` expression. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/mapped-type/break-mode/break-mode.ts",
+    "category": "shape",
+    "reason": "The mapped type writes `readonly` and `[A in B]` on separate lines. The TypeScript compiler's parser (accepts.mjs) reads one mapped type whose modifier is `readonly`; tree-sitter-typescript reads a property named `readonly` followed by an index signature. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/module/global.ts",
+    "category": "shape",
+    "reason": "The file writes `global {}` without `declare`. The TypeScript compiler's parser (accepts.mjs) reads a global augmentation, a module declaration; tree-sitter-typescript reads an expression statement `global` and a block on the same line. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/new/with-member-expression.ts",
+    "category": "shape",
+    "reason": "The file writes `new X!.a.b()` and `new (a?.b)!()`. The TypeScript compiler's parser (accepts.mjs) parses the non-null assertion and the member accesses into the callee and gives the argument list to `new`; tree-sitter-typescript reads a call whose callee is a `new` expression without arguments. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/parentheses/yield.ts",
+    "category": "shape",
+    "reason": "The file writes `(yield* f)<T>` and a new statement on the next line. The TypeScript compiler's parser (accepts.mjs) ends type arguments in an expression at a line break and inserts a semicolon there, so the first line is an instantiation expression; tree-sitter-typescript continues a comparison across the line break. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/satisfies-operators/lhs.ts",
+    "category": "shape",
+    "reason": "tree-sitter-typescript wraps the array or object literal on the left of `=` in a `non_null_expression` that no `!` in the source writes, because the literal holds an `as` or `satisfies` expression. The TypeScript compiler's parser (accepts.mjs) reads a destructuring target holding the assertion, which is how scylla reads it."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/template-literals/expressions.ts",
+    "category": "shape",
+    "reason": "The file writes a tagged template behind type arguments (`tag<T>\\`...\\``). The TypeScript compiler's parser (accepts.mjs) reads a tagged template with type arguments; tree-sitter-typescript reads two comparisons around a template. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/type-arguments-bit-shift-left-like/5.tsx",
+    "category": "tsx",
+    "reason": "The TSX file is invalid on purpose: the TypeScript compiler's parser (accepts.mjs) rejects it: Identifier expected. at line 1. scylla refuses it at line 1 (`<Component<<T>(v: T) => void> />`). tree-sitter-tsx accepts it, and scylla's lexer writes an ErrorToken where TypeScript reports the error."
+  },
+  {
+    "fixture": "prettier/tests/format/typescript/type-parameters-arguments/tagged-template-expression.ts",
+    "category": "shape",
+    "reason": "The file writes a tagged template behind type arguments (`tag<T>\\`...\\``). The TypeScript compiler's parser (accepts.mjs) reads a tagged template with type arguments; tree-sitter-typescript reads two comparisons around a template. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "redux/src/types/store.ts",
+    "category": "grammar",
+    "reason": "The file opens a generic call signature `<S, A extends Action, ...>(reducer: ...)` on the line after the previous member's type `Store<...> & Ext`, with no separator between them. The TypeScript compiler's parser (accepts.mjs) reads no type arguments after a type reference across a line break, so `Ext` ends the member and the next line opens a call signature; tree-sitter-typescript reads `Ext<S, A extends Action` as a type argument list and reports an ERROR node, so the oracle has no walk to compare against. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "redux/website/plugins/remark-typescript-tools/linkDocblocks/plugin.ts",
+    "category": "shape",
+    "reason": "The file writes `type RenderFunction = (c: Comment) => import('unist').Node[];`. The TypeScript compiler's parser reads the function type's return type as an ArrayType over the import type `import('unist').Node`, so the alias runs to the semicolon; tree-sitter-typescript reads `import('unist').Node` as a member expression that ends the alias and `[]` as an expression statement holding an empty array. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/bracketPairsTree.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/codeEditorWidget.1.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/codeEditorWidget.2.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/codeEditorWidget.3.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/extHost.api.impl.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/map.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/pullRequestModel.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/simpleClass.summarized.tsx",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/strings.test-example.3.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/strings.test-example.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/src/extension/prompts/node/test/fixtures/vscode.proposed.chatParticipantAdditions.d.summarized.ts",
+    "category": "not-typescript",
+    "reason": "The file is a Copilot prompt fixture that summarizes a TypeScript module, eliding bodies as `{…}` with U+2026 HORIZONTAL ELLIPSIS. U+2026 is punctuation, not ID_Start, so `tsc` rejects the file and scylla lexes each ellipsis to an error token. The tree-sitter-typescript grammar's identifier pattern admits any non-ASCII character and names the ellipsis an identifier, which is what makes this residue rather than a defect."
+  },
+  {
+    "fixture": "vue/packages-private/dts-test/defineComponent.test-d.tsx",
+    "category": "shape",
+    "reason": "The file writes `new parent.components!.KeepAlive()`, `new child.components!.KeepAlive()` and the same two over `Transition`. The TypeScript compiler's parser (accepts.mjs, and typescript-estree's NewExpression) reads a new expression whose callee is the member access `parent.components!.KeepAlive` over the non-null assertion and gives it the argument list; tree-sitter-typescript reads a call whose callee is a member access over the assertion over a `new` expression without arguments. scylla reads it the way TypeScript does."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/classic/schemas.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/core/checks.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/core/schemas.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  },
+  {
+    "fixture": "zod/packages/zod/src/v4/mini/schemas.ts",
+    "category": "grammar",
+    "reason": "The tree-sitter-typescript 0.23 grammar reports an ERROR node over this file, so the oracle has no walk to compare against. The file is valid TypeScript that `tsc` accepts; the limit is the grammar, not scylla."
+  }
+]

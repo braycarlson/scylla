@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+
+{% block title %}Product{% endblock %}
+
+{% block content %}
+    <section x-data="{ html: '', product: null }"
+             x-init="product = await Glue.model.product.load()">
+        <h1 x-text="product?.name"></h1>
+
+        <button type="button" @click="await Glue.model.product.save()">Save</button>
+        <button type="button" @click="html = await Glue.template.product_row.renderHtml()">Preview</button>
+        <button type="button"
+                @click="await Glue.function.restock.execute({quantity: 5, sku: product.sku})">
+            Restock
+        </button>
+
+        <form @submit.prevent="await Glue.form.product_form.validate()">
+            <button type="submit">Validate</button>
+        </form>
+
+        <div x-html="html"></div>
+    </section>
+{% endblock %}

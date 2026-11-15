@@ -1,0 +1,17 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Python/battest.py",
+    "category": "not-python",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Python module. CPython's own `ast.parse` rejects it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/copilot/test/simulation/fixtures/fixing/python/pyright_badtoken.py",
+    "category": "not-python",
+    "reason": "The file is a Copilot fixing fixture built to trigger tokenizer errors: it writes a U+00A0 non-breaking space between `import` and `sys`. CPython's own `ast.parse` rejects it with `invalid non-printable character U+00A0`, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "vscode/extensions/vscode-colorize-tests/test/colorize-fixtures/test-freeze-56377.py",
+    "category": "not-python",
+    "reason": "The file is a colorizer freeze regression fixture: it writes a backslash continuation with a space behind it inside a `cmd = \"...\" \\ \"...\"` line. CPython's own `ast.parse` rejects it with `unexpected character after line continuation character`, which is what makes it residue rather than a defect."
+  }
+]

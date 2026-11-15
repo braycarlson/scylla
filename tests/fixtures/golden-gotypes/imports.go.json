@@ -1,0 +1,1 @@
+{"ast":[[27,"PkgName","fmt",27],[33,"PkgName","alias",33],[66,"PkgName","http",66],[90,"Func","use",90],[99,"PkgName","fmt",27],[111,"PkgName","alias",33],[132,"PkgName","http",66],[147,"PkgName","fmt",27],[159,"Const","Pi",-1],[171,"Func","dotted",171],[180,"TypeName","float64",-1],[191,"Var","Pi",191],[210,"Func","Sqrt",-1],[215,"Var","Pi",191]],"path":"imports.go"}

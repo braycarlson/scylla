@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_cycle.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,8],["Whitespace",8,9],["String",9,12],["Whitespace",12,13],["String",13,16],["Whitespace",16,17],["String",17,20],["Whitespace",20,21],["TagClose",21,23],["Text",23,24]],"tree":[["Document",0,24],["TemplateTag",0,23]],"errors":[]}

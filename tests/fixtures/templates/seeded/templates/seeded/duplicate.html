@@ -1,0 +1,6 @@
+{# The first read keeps `item` off glue/dead-registration -- both of its #}
+{# duplicate registrations, which is why neutering this file reports two. #}
+{% extends 'seeded/base.html' %}
+{% block content %}<div x-init="Glue.model.item.load()"></div>
+{# lintcheck-expect: glue/unregistered-name #}
+<div x-init="Glue.model.ghost_item.load()"></div>{% endblock %}

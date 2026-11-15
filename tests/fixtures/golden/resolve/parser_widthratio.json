@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_widthratio.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,13],["Whitespace",13,14],["Identifier",14,24],["Whitespace",24,25],["Identifier",25,34],["Whitespace",34,35],["Number",35,38],["Whitespace",38,39],["TagClose",39,41],["Text",41,42]],"tree":[["Document",0,42],["TemplateTag",0,41]],"errors":[]}

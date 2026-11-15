@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_very_long_variable_name.html","tokens":[["VariableOpen",0,2],["Whitespace",2,3],["Identifier",3,42],["Whitespace",42,43],["VariableClose",43,45],["Text",45,46]],"tree":[["Document",0,46],["TemplateVariable",0,45]],"errors":[]}

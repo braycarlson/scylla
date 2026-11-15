@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/parser_mixed_alpine_and_django.html","kind":"template","objects":[{"range":[13,28],"members":[{"name":"open","kind":"Property","is_async":false,"has_await":false,"range":[15,26]}]}],"bindings":[]}

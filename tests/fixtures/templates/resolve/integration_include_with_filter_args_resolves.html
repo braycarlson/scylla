@@ -1,0 +1,6 @@
+{% extends 'layouts/base.html' %}
+{% block content %}
+{% include 'components/fake_attribute.html' with attribute_title='Notes' attribute_value=obj.notes|default_if_none:"—"|truncatechars:40 %}
+{% include 'components/fake_attribute.html' with attribute_title='Amount' attribute_value_prefix='$' attribute_value=obj.total|floatformat:'2g' %}
+{% include 'components/fake_attribute.html' with attribute_title='Created' attribute_value=obj.created_at|date:"M d, Y g:i A" %}
+{% endblock %}

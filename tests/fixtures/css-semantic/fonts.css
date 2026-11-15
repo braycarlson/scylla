@@ -1,0 +1,8 @@
+@font-face {
+	font-family: "Scylla";
+	src: url(scylla.woff2);
+}
+
+.card {
+	font-family: "Scylla", serif;
+}

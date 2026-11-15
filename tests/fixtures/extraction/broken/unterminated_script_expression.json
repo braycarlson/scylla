@@ -1,0 +1,1 @@
+{"path":"fixtures/broken/unterminated_script_expression.html","kind":"template","objects":[],"bindings":[{"name":"total","kind":"Const","name_range":[19,24],"scope_range":[13,61],"initializer":[]}]}

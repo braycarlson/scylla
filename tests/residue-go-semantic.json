@@ -1,0 +1,7 @@
+[
+  {
+    "fixture": "go/internal/types/testdata/fixedbugs/issue75885.go",
+    "category": "gotypes",
+    "reason": "The file is the test for `cannot use type parameter declared in alias declaration as RHS`, and it writes `type A[P any] = P` inside `func _[P any]()`. `go/types` keeps the alias's own type parameters out of the scope its right-hand side resolves through, so the `P` after the `=` lands on the function's `P`; scylla's scope for a type declaration carries its type parameters and lands on the alias's own `P`. Both name a `P` that is in scope at that point, and only the diagnostic go/types raises separates them."
+  }
+]

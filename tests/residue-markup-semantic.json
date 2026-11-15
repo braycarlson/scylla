@@ -1,0 +1,177 @@
+[
+  {
+    "fixture": "ghostty/dist/doxygen/header.html",
+    "category": "tree-construction",
+    "reason": "The file is a doxygen header template, so `$treeview`, `$search`, `$mathjax` and `$darkmode` stand as text inside `<head>`. HTML5 tree construction closes the head at that text and opens an implied body, so the `<body>` written after `</head>` merges its attributes into the body already open and creates no node, which parse5 does and scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "go/internal/trace/traceviewer/static/trace_viewer_full.html",
+    "category": "tree-construction",
+    "reason": "The file writes a second `<body>` after content has already opened one. HTML5 tree construction merges that start tag's attributes into the body already open and creates no node, which parse5 does and scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. The rest of the file's 3,000 elements agree."
+  },
+  {
+    "fixture": "pandas/pandas/tests/io/data/html/spam.html",
+    "category": "tree-construction",
+    "reason": "The file opens `<html lang=\"en\" class=\"no-js\">` behind an IE conditional comment and then writes a second `<html>` start tag. HTML5 tree construction merges a later `<html>` start tag's attributes into the root element already open and creates no node, which parse5 does and scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/examples/mock-filesystem/src/file-picker.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores `<head>` and `<body>` start tags; parse5 creates no node for the `<head>` the file opens with or for the `<body>` that follows it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/examples/mock-filesystem/src/ls-dir.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores `<head>` and `<body>` start tags; parse5 creates no node for the `<head>` the file opens with or for the `<body>` that follows it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/drag-n-drop.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` the file writes after its opening `<style>` and `<script>`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/evals/fill-form.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores `<head>` and `<body>` start tags; parse5 creates no node for the `<head>` the file opens with or for the `<body>` that follows it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/frames/frameset.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction runs the in-body insertion mode and ignores `<frameset>` and `<frame>` start tags; parse5 creates no node for the file's four `<frame>` elements or for their `src` attributes, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/input/background-fixed.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores `<head>` and `<body>` start tags; parse5 creates no node for the `<head>` the file opens with or for the `<body>` that follows it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/input/drag-n-drop-manual.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` the file writes after its opening `<style>`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/modernizr/index.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` the file writes after its opening `<script>`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/mui.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores `<head>` and `<body>` start tags; parse5 creates no node for the `<head>` the file opens with or for the `<body>` that follows it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/overflow-large.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` the file writes after its opening `<style>`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/overflow.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` the file writes after its opening `<style>`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/player.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` the file writes after its opening `<script>`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/react.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores `<head>` and `<body>` start tags; parse5 creates no node for the `<head>` the file opens with or for the `<body>` that follows it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "playwright/tests/assets/worker/worker-http-import.html",
+    "category": "tree-construction",
+    "reason": "The file writes a second `<html>` start tag after `</head>`. HTML5 tree construction merges a later `<html>` start tag's attributes into the root element already open and creates no node, which parse5 does and scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "prettier/tests/format/html/comments/conditional.html",
+    "category": "tree-construction",
+    "reason": "The file concatenates several documents, each writing its own `<html>`, `<head>` and `<body>`. Once the first document has opened its body, HTML5 tree construction merges the attributes of every later `<html>` and `<body>` start tag into the element already open and ignores every later `<head>`, so parse5 creates no node for any of them and names none of their attributes (`lang`, `width`, `align`, `hello`), which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "prettier/tests/format/html/prettier_ignore/issue-15738.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<head>` start tag; parse5 creates no node for the `<head>` the file opens with, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "prettier/tests/format/html/yaml/invalid.html",
+    "category": "tree-construction",
+    "reason": "The file opens with a front matter block between `---` lines that is not valid YAML, which HTML5 reads as text. Text ahead of any tag makes tree construction imply an `<html>`, a `<head>` and a `<body>`, so the `<html>`, `<head>` and `<body>` the file writes after it arrive in the in-body mode, which merges `<html>` and `<body>` into the elements already open and ignores `<head>`; parse5 creates no node for the three, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. The file names nothing else."
+  },
+  {
+    "fixture": "prettier/tests/format/html/yaml/yaml.html",
+    "category": "tree-construction",
+    "reason": "The file opens with a YAML front matter block between `---` lines, which HTML5 reads as text. Text ahead of any tag makes tree construction imply an `<html>`, a `<head>` and a `<body>`, so the `<html>`, `<head>` and `<body>` the file writes after it arrive in the in-body mode, which merges `<html>` and `<body>` into the elements already open and ignores `<head>`; parse5 creates no node for the three, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. The file names nothing else."
+  },
+  {
+    "fixture": "rxjs/apps/rxjs.dev/tools/transforms/templates/overview-dump.template.html",
+    "category": "tree-construction",
+    "reason": "The file is a dgeni Nunjucks template that opens with `{% import %}` and `{% macro %}` blocks, which HTML5 reads as text. Text ahead of any tag makes tree construction imply an `<html>`, a `<head>` and a `<body>`, so the `<!DOCTYPE html>`, `<html>`, `<head>` and `<body>` the file writes after the macros arrive in the in-body mode, which ignores the doctype and `<head>` and merges `<html>` and `<body>` into the elements already open; parse5 creates no node for the three, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "svelte/packages/svelte/tests/hydration/samples/optgroup-rich-content/_expected.html",
+    "category": "tree-construction",
+    "reason": "The file is a hydration expectation that writes `<span>hello</span>` inside an `<option>` of a `<select>`. parse5 8.0.1 reads a select's content in the `in select` insertion mode, which ignores a `<span>` start tag as a parse error, so it creates no node for it and keeps only its text in the option; scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "svelte/packages/svelte/tests/hydration/samples/option-rich-content-static/_expected.html",
+    "category": "tree-construction",
+    "reason": "The file is a hydration expectation that writes `<strong>Bold</strong>` and `<em>Italic</em>` inside the `<option>` elements of a `<select>`. parse5 8.0.1 reads a select's content in the `in select` insertion mode, which ignores `<strong>` and `<em>` start tags as parse errors, so it creates no node for either and keeps only their text in the options; scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "three/examples/index.html",
+    "category": "tree-construction",
+    "reason": "A `<template id=\"PlaceholderHTML\">` holds a whole document: `<!DOCTYPE html>`, `<html lang=\"en\">`, `<head>` and `<body>`. Inside template contents HTML5 tree construction ignores an `<html>` start tag and a `<body>` start tag while a template is open, and ignores `<head>` in the in-body mode, so parse5 creates no node for the three and none for `lang`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "three/examples/webgl_postprocessing_ssr.html",
+    "category": "tree-construction",
+    "reason": "The file writes `<head>` twice. HTML5 tree construction ignores a `<head>` start tag in the in-head insertion mode, so parse5 creates no node for the second one, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "three/examples/webgpu_postprocessing_ssr.html",
+    "category": "tree-construction",
+    "reason": "The file writes `<head>` twice. HTML5 tree construction ignores a `<head>` start tag in the in-head insertion mode, so parse5 creates no node for the second one, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "three/manual/examples/3dlut-base-cube-maker.html",
+    "category": "tree-construction",
+    "reason": "The file writes `<meta charset=\"utf-8\">` before `<head>`. HTML5 tree construction opens an implied head for that `<meta>` in the before-head mode, so the `<head>` start tag that follows arrives in the in-head mode and is ignored; parse5 creates no node for it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "three/manual/examples/debugging-mcve.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag (the stack of open elements holds one node); parse5 creates no node for it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "three/manual/examples/gpw-data-viewer.html",
+    "category": "tree-construction",
+    "reason": "The file writes `<meta charset=\"utf-8\">` before `<head>`. HTML5 tree construction opens an implied head for that `<meta>` in the before-head mode, so the `<head>` start tag that follows arrives in the in-head mode and is ignored; parse5 creates no node for it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "vite/playground/chunk-importmap/index.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores `<head>` and `<body>` start tags; parse5 creates no node for the `<head>` the file opens with or for the `<body>` that follows it, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "vite/playground/client-reload/index.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` the file opens with, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "vite/playground/css-codesplit/shared-css-no-js.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` written after the stylesheet `<link>`, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "vite/playground/css-codesplit/shared-css-with-js.html",
+    "category": "tree-construction",
+    "reason": "The file carries no `<!doctype>` and no `<html>`, so the oracle parses it as a fragment in a template context, where HTML5 tree construction ignores a `<body>` start tag; parse5 creates no node for the `<body>` written after the stylesheet `<link>` and the two `<script>` tags, which scylla does not do: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  },
+  {
+    "fixture": "vitest/packages/browser/src/client/orchestrator.html",
+    "category": "tree-construction",
+    "reason": "The file is the browser runner's page template, so `{__VITEST_INJECTOR__} {__VITEST_ERROR_CATCHER__} {__VITEST_SCRIPTS__}` stands as text inside `<head>`. HTML5 tree construction closes the head at that text and opens an implied body, so the `<body>` written after `</head>` merges its attributes into the body already open and creates no node, which parse5 does and scylla does not: scylla's markup tree is a lossless tiling of the bytes, so every start tag written becomes an element. Every other name in the file agrees."
+  }
+]

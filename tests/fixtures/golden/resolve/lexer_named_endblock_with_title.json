@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_named_endblock_with_title.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,11],["Whitespace",11,12],["Identifier",12,17],["Whitespace",17,18],["TagClose",18,20],["Text",20,21]],"tree":[["Document",0,21],["TemplateTag",0,20]],"errors":[]}

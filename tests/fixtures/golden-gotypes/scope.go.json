@@ -1,0 +1,1 @@
+{"ast":[[24,"PkgName","strings",24],[38,"Var","top",38],[52,"Func","outer",52],[60,"TypeName","int",-1],[67,"Var","held",67],[75,"Var","top",38],[85,"Var","inner",85],[94,"Var","held",67],[109,"Var","inner",85],[126,"Func","later",126],[134,"TypeName","int",-1],[148,"Func","outer",52],[158,"Builtin","len",-1],[162,"PkgName","strings",24]],"path":"scope.go"}

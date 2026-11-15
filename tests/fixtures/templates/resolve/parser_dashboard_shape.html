@@ -1,0 +1,30 @@
+
+{% extends 'layouts/dashboard.html' %}
+{% load static fake_ui %}
+
+{% block page_content %}
+<div class="dashboard"
+     x-data="{
+        refreshInterval: {{ refresh_interval|default:15000 }},
+        selectedKey: '{{ selected_key|default:"summary" }}'
+     }">
+
+    {% for widget in widgets %}
+        <section class="widget" {% if widget.is_live %}x-on:refresh.window="reloadWidget()"{% endif %}>
+            <h3>{{ widget.title }}</h3>
+
+            {% if widget.kind == 'chart' %}
+                {% include 'widgets/fake_chart.html' with config=widget.config %}
+            {% elif widget.kind == 'table' %}
+                {% include 'widgets/fake_table.html' with rows=widget.rows %}
+            {% elif widget.kind == 'metric' %}
+                {% include 'widgets/fake_metric.html' with value=widget.value %}
+            {% else %}
+                {% include 'widgets/fake_unknown.html' %}
+            {% endif %}
+        </section>
+    {% empty %}
+        {% include 'widgets/fake_empty.html' %}
+    {% endfor %}
+</div>
+{% endblock %}

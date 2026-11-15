@@ -1,0 +1,20 @@
+
+{% extends 'layouts/fake_form.html' %}
+{% load static crispy_forms_filters %}
+
+{% block page_content %}
+<form method="post" action="{% url 'fake_ns:record:update' pk=record.pk %}">
+    {% csrf_token %}
+
+    {% crispy form %}
+
+    {% if perms.fake_app.change_record and not record.is_locked %}
+        {% include 'components/fake_submit_button.html' with button_text='Save Changes' %}
+    {% endif %}
+
+    {% if perms.fake_app.delete_record %}
+        {% url 'fake_ns:record:delete' pk=record.pk as delete_url %}
+        {% include 'components/fake_delete_button.html' with button_href=delete_url %}
+    {% endif %}
+</form>
+{% endblock %}

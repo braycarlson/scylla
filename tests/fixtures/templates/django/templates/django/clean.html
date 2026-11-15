@@ -1,0 +1,27 @@
+{# Every name here resolves and every permission is asked for under the #}
+{# app that owns it. Anything that cannot be checked is left alone. #}
+{# Held to zero findings, so this is the pack's false-positive guard. #}
+{% load django_glue %}
+
+<a href="{% url 'location:page:list' %}">list</a>
+<a href="{% url 'location:page:detail' pk=object.pk %}">detail</a>
+
+{# Namespaces belonging to packages this project never indexed. #}
+<a href="{% url 'django_glue:something' %}">glue</a>
+<a href="{% url 'admin:index' %}">admin</a>
+
+{# A name the context decides at render time. #}
+<a href="{% url view_name %}">wherever</a>
+
+{# django-glue's own tag resolves the same names the same way. It emits #}
+{# its own quotes -- "/location/page/list/" -- so it goes in bare, with #}
+{# nothing wrapped around it. #}
+<a :href="{% js_url 'location:page:list' %}">list</a>
+
+{# Each permission under the app whose models it belongs to. #}
+{% if perms.location.change_location %}<a>edit</a>{% endif %}
+{% if perms.location_field.view_locationfield %}<a>fields</a>{% endif %}
+
+{# A third-party label, and a custom codename with no model half. #}
+{% if perms.auth.change_user %}<a>users</a>{% endif %}
+{% if perms.location.can_lock_location %}<a>lock</a>{% endif %}

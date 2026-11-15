@@ -1,0 +1,5 @@
+{% extends 'seeded/base.html' %}
+{% block content %}
+{# lintcheck-expect: glue/filtered-field-read #}
+<p x-text="Glue.model.card.price"></p>
+{% endblock %}

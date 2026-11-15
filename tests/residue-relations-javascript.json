@@ -1,0 +1,192 @@
+[
+    {
+        "fixture": "bat/tests/benchmarks/highlighting-speed-src/jquery.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "django/django/contrib/admin/static/admin/js/vendor/jquery/jquery.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "django/django/contrib/admin/static/admin/js/vendor/jquery/jquery.min.js",
+        "category": "scylla-unstable",
+        "reason": "The first pass does not match the reference yet, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "django/django/contrib/admin/static/admin/js/vendor/select2/select2.full.min.js",
+        "category": "scylla-unstable",
+        "reason": "The first pass does not match the reference yet, and the hunks that differ move between the passes."
+    },
+    {
+        "fixture": "go/internal/trace/traceviewer/static/webcomponents.min.js",
+        "category": "scylla-unstable",
+        "reason": "The first pass is byte-identical to biome's and biome's second pass changes nothing, but the second pass printed here moves a break: a width is measured off the source's own line where the printing's line is what counts."
+    },
+    {
+        "fixture": "jquery/src/selector.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `toSelector(tokens.slice( 0, i - 1 ).concat( { value: ... } ))` in `matcherFromTokens`: the source writes the object on one line, so biome's first pass breaks the two-call chain at every member once its one-line form does not fit, and its second pass reads that object as expanded, where the best-fitting choice measures only the first line and keeps `tokens.slice(0, i - 1).concat({` together."
+    },
+    {
+        "fixture": "jquery/test/data/jquery-3.7.1.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `toSelector(tokens.slice( 0, i - 1 ).concat( { value: ... } ))` in `matcherFromTokens`: the source writes the object on one line, so biome's first pass breaks the two-call chain at every member once its one-line form does not fit, and its second pass reads that object as expanded, where the best-fitting choice measures only the first line and keeps `tokens.slice(0, i - 1).concat({` together."
+    },
+    {
+        "fixture": "lodash/dist/lodash.core.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `isIndex`, which writes `!!length && (...) && (value > -1 && value % 1 == 0 && value < length)`: biome drops the parentheses around the last operand and prints it as a group of its own, so its first pass keeps `value > -1 && value % 1 == 0 &&` on one line, and its second pass, reading a chain with no parentheses, puts every operand on its own line."
+    },
+    {
+        "fixture": "lodash/dist/lodash.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `isIndex`, which writes `!!length && (...) && (value > -1 && value % 1 == 0 && value < length)`: biome drops the parentheses around the last operand and prints it as a group of its own, so its first pass keeps `value > -1 && value % 1 == 0 &&` on one line, and its second pass, reading a chain with no parentheses, puts every operand on its own line."
+    },
+    {
+        "fixture": "lodash/lodash.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `isIndex`, which writes `!!length && (...) && (value > -1 && value % 1 == 0 && value < length)`: biome drops the parentheses around the last operand and prints it as a group of its own, so its first pass keeps `value > -1 && value % 1 == 0 &&` on one line, and its second pass, reading a chain with no parentheses, puts every operand on its own line."
+    },
+    {
+        "fixture": "playwright/browser_patches/firefox/juggler/TargetRegistry.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference."
+    },
+    {
+        "fixture": "playwright/tests/assets/reading-list/vue_3.1.5.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the one hunk that moves between the passes here moves the same way between biome's two: at output line 15468 the first pass prints `/* COMPONENT */` after the parentheses of the last `||` operand inside `!(...)`, and the second pass reads it as a trailing comment of the enclosing `&&`, which it wraps in new parentheses. Every other line is a fixed point, so a fixed point here would be a divergence from the reference."
+    },
+    {
+        "fixture": "prettier/tests/format/flow/comments/type_annotations.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 1: `new window.Request /*: Class<Request> */ ('');` becomes `new window.Request(/*: Class<Request> */ '');`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/array-exprssion/preserve_empty_lines.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 61: `a = b /* comment */ /* comment */),` becomes `a = b) /* comment */ /* comment */,`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/arrow-expression/call.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 343: `a =` becomes `a = 1 + f({`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/assignment-expression/chain.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 5: `anodyneCondosMalateOverateRetinol =` becomes `anodyneCondosMalateOverateRetinol = annularCooeedSplicesWalksWayWay =`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/call-expression/boolean/boolean.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 95: `a_long_long_long_long_condition || a_long_long_long_long_condition ||` becomes `a_long_long_long_long_condition ||`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/comments-closure-typecast/issue-9358.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 4: `/** @type {Array.<fooo.barr.baaaaaaz>} */ (fooobaarbazzItems || foo)` becomes `/** @type {Array.<fooo.barr.baaaaaaz>} */ (fooobaarbazzItems || foo) ?`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/comments/15661.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 37: `b || c || // second condition` becomes `b ||`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/comments/flow-types/inline.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 1: `btnActions[1] = () => <button> test </button>` becomes `btnActions[1] = () => <button> test </button>;`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/comments/function-declaration.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 8: `<div />` becomes ``. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/comments/return-statement.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 55: `return` becomes `return;`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/conditional-expression/new-ternary-spec.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 61: `? bark()` becomes `? bark()`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/function-comments/comments-after-callee.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 1: `a = foo /* comment */ ();` becomes `a = foo(/* comment */);`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/function/dangling-comments.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 2: `() => {};` becomes `() => {};`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/function/iife.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 16: `(function () {}) /* trialing 2 */ (),` becomes `(function () {})(/* trialing 2 */),`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/if-statement/blank-lines.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 20: `` becomes `/* 22 */`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/ignore/issue-10661.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 9: `a. // prettier-ignore` becomes `a // prettier-ignore`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/performance/nested-real.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 18: `(batch) => (batch.state !== 'error' && batch.state !== 'completed'),` becomes `(batch) => batch.state !== 'error' && batch.state !== 'completed',`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/sequence-expression/parenthesized-trailing-comment.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 8: `(a, b, c /* comment */);` becomes `a, b, c /* comment */;`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/sequence-expression/parenthesized.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 5: `(` becomes `/* 3 */`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/string-literal/template-literals.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 7: `return 3;` becomes `return 3;`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/unary-expression/comments.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 8: `!(` becomes `!(x /* foo */);`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "prettier/tests/format/js/yield-exprsssion/comment.js",
+        "category": "scylla-unstable",
+        "reason": "The second pass moves what the first printed, first at output line 4: `yield /*` becomes `yield (/*`. The file is a prettier formatting fixture that stresses comment and break placement; the emitter decision behind the move is open."
+    },
+    {
+        "fixture": "three/examples/jsm/libs/mikktspace.module.js",
+        "category": "scylla-unstable",
+        "reason": "The first pass does not match the reference yet, and the hunks that differ move between the passes. A comparison whose left operand is a broken nested `fround( fround( ... ) + fround( ... ) )` sum, `... > -1` inside an `if` test, breaks after `>` on the first pass and joins `) > -1` on the second."
+    },
+    {
+        "fixture": "three/examples/jsm/transpiler/TSLEncoder.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is the `if` test in `emitFor`, which writes `( condition && condition.left && condition.left.isAccessor && condition.left.property === initialization.name ) &&` inside a longer `&&` chain: biome's first pass drops those parentheses but keeps the group they formed, so it fills `condition && condition.left && condition.left.isAccessor &&` onto one line of the broken chain, and its second pass reads one flat `&&` chain and puts every operand on a line of its own."
+    },
+    {
+        "fixture": "three/src/nodes/display/BumpMapNode.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `textureNode.isolate().context( { getUV: ..., forceUVContext: true } )` in `dHdxy_fwd`: the source writes the object on one line, so biome's first pass breaks the two-call chain at every member once its one-line form does not fit, and its second pass reads that object as expanded, where the best-fitting choice measures only the first line and keeps `textureNode.isolate().context({` together."
+    },
+    {
+        "fixture": "three/src/nodes/functions/PhysicalLightingModel.js",
+        "category": "reference-unstable",
+        "reason": "biome's own second pass over this file differs from its first, and the two passes here are byte-identical to biome's two: a fixed point would be a divergence from the reference. The cause is `lightColor.mul( diffuseContribution ).mul( LTC_Evaluate( { N, V, P, mInv: ..., p0, p1, p2, p3 } ) )` in `directRectArea`: the source writes the object on one line, so biome's first pass breaks the two-call chain at every member once its one-line form does not fit, and its second pass reads that object as expanded, where the best-fitting choice measures only the first line and keeps `lightColor.mul(diffuseContribution).mul(` together."
+    }
+]

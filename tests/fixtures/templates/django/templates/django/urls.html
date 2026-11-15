@@ -1,0 +1,9 @@
+{# Nothing in the parent app's urls creates a `field` namespace, so this #}
+{# name resolves to nothing. Django renders the empty string rather than #}
+{# raising, and the link goes to the current page. #}
+{# lintcheck-expect: django/unknown-url #}
+<a href="{% url 'location:field:form:create' %}">add field</a>
+
+{# A typo in the last segment fails exactly the same way. #}
+{# lintcheck-expect: django/unknown-url #}
+<a href="{% url 'location:page:lst' %}">list</a>

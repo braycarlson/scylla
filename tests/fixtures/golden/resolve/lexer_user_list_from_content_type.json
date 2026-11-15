@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_user_list_from_content_type.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,30],["Whitespace",30,31],["Identifier",31,36],["Whitespace",36,37],["Identifier",37,39],["Whitespace",39,40],["Identifier",40,57],["Whitespace",57,58],["TagClose",58,60],["Text",60,61]],"tree":[["Document",0,61],["TemplateTag",0,60]],"errors":[]}

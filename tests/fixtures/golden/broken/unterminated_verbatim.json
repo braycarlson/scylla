@@ -1,0 +1,1 @@
+{"path":"fixtures/broken/unterminated_verbatim.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,11],["Whitespace",11,12],["TagClose",12,14],["VerbatimText",14,24]],"tree":[["Document",0,24],["TemplateTag",0,14]],"errors":[]}

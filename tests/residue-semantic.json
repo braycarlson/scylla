@@ -1,0 +1,7 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Python/battest.py",
+    "category": "not-python",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Python module. The lexer stops on them, which is what makes it residue rather than a defect."
+  }
+]

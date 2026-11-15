@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_now_with_format_and_as.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,6],["Whitespace",6,7],["String",7,14],["Whitespace",14,15],["Identifier",15,17],["Whitespace",17,18],["Identifier",18,23],["Whitespace",23,24],["TagClose",24,26],["Text",26,27]],"tree":[["Document",0,27],["TemplateTag",0,26]],"errors":[]}

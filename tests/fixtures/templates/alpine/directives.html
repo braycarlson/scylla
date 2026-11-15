@@ -1,0 +1,18 @@
+{# Alpine directive, modifier, listener and name rules. One violation #}
+{# per marked line, the way the seeded harness expects. #}
+
+<div x-data="{ open: false, rows: [], toggle() { this.open = !this.open } }">
+{# lintcheck-expect: alpine/unknown-directive #}
+    <span x-shwo="open"></span>
+
+{# lintcheck-expect: alpine/unknown-modifier #}
+    <button @click.prevnt="toggle()">save</button>
+
+{# lintcheck-expect: alpine/unknown-name #}
+    <span x-text="opne"></span>
+
+{# The modal that dispatches this sits elsewhere in the page, so the #}
+{# event never bubbles through here. #}
+{# lintcheck-expect: alpine/listener-needs-window #}
+    <div @row-saved="rows = []"></div>
+</div>

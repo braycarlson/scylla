@@ -1,0 +1,25 @@
+.values {
+    color: #fff;
+    background-color: #aabbccdd;
+    z-index: 1;
+    opacity: 0.5;
+    width: 10px;
+    height: 1.5em;
+    flex-basis: 100%;
+    content: "a b";
+    quotes: 'x';
+    margin: -50% +1em;
+    font-family: Arial, sans-serif;
+    background: url(a.png) no-repeat !important;
+    width: calc(100% - 2 * var(--gap));
+    grid-area: 1 / 2 / 3 / 4;
+    grid-template-areas: [full-start] 1fr [full-end];
+    transform: translate(-50%, -50%);
+    filter: progid:DXImageTransform.Microsoft.gradient(startColorstr='#ffffff');
+    unicode-range: U+0000-00FF;
+}
+
+.custom {
+    --gap: 10px;
+    padding: var(--gap)
+}

@@ -1,0 +1,97 @@
+[
+  {
+    "fixture": "bat/tests/snapshots/sample.modified.rs",
+    "category": "not-rust",
+    "reason": "The file is not valid UTF-8; it is a byte snapshot `bat` keeps to exercise its own encoding path. The oracle cannot read it, so it is residue rather than a defect."
+  },
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Rust/output.rs",
+    "category": "not-rust",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Rust module. `syn` rejects it too, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/byte_char_literals.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: an empty byte literal `b''`, a byte literal holding a raw newline, and byte literals holding several characters or an invalid escape (`b'spam'`, `b'\\x0ff'`). syn and rustc 1.97.1 (`empty character literal`) both reject the file, and scylla classifies the first malformed literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/char_literals.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: character literals holding several characters (`'hello'`), an empty literal `''`, a raw newline, and invalid escapes. syn and rustc 1.97.1 (`character literal may only contain one codepoint`) both reject the file, and scylla classifies the first malformed literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_byte_with_ascii_escape.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the byte literal `b'\\x7f` never closes before the end of the file. syn and rustc 1.97.1 (`E0763 unterminated byte constant`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_byte_with_slash.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the byte literal `b'\\` never closes before the end of the file. syn and rustc 1.97.1 (`E0763 unterminated byte constant`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_byte_with_slash_n.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the byte literal `b'\\n` never closes before the end of the file. syn and rustc 1.97.1 (`E0763 unterminated byte constant`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_byte_with_slash_single_quote.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the byte literal `b'\\'` escapes its own closing quote and never closes. syn and rustc 1.97.1 (`E0763 unterminated byte constant`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_byte_with_unicode_escape.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the byte literal `b'\\u{20AA}` never closes before the end of the file. syn and rustc 1.97.1 (`E0763 unterminated byte constant`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_char_with_ascii_escape.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the character literal `'\\x7f` never closes before the end of the file. syn and rustc 1.97.1 (`E0762 unterminated character literal`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_char_with_slash.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the character literal `'\\` never closes before the end of the file. syn and rustc 1.97.1 (`E0762 unterminated character literal`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_char_with_slash_n.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the character literal `'\\n` never closes before the end of the file. syn and rustc 1.97.1 (`E0762 unterminated character literal`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_char_with_slash_single_quote.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the character literal `'\\'` escapes its own closing quote and never closes. syn and rustc 1.97.1 (`E0762 unterminated character literal`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/lexer/err/unclosed_char_with_unicode_escape.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's lexer error fixture: the character literal `'\\u{20AA}` never closes before the end of the file. syn and rustc 1.97.1 (`E0762 unterminated character literal`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/parser/test_data/parser/ok/0055_dot_dot_dot.rs",
+    "category": "shape",
+    "reason": "`let ():::X = ();` writes three colons with no space. syn splits them as `:` then `::X` and accepts the file; rustc 1.97.1 lexes `::` then `:` and rejects it (`expected identifier, found `:``). scylla lexes the colons the way rustc does, so its walk differs from syn's in this one statement."
+  },
+  {
+    "fixture": "rust-analyzer/crates/syntax/test_data/parser/fuzz-failures/0002.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's parser fuzz regression `!('\\`: a character literal opened inside a macro invocation never closes. syn and rustc 1.97.1 (`E0762 unterminated character literal`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/syntax/test_data/parser/fuzz-failures/0003.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's parser fuzz regression `if'\\xɿ`: a character literal with a truncated `\\x` escape that never closes. syn and rustc 1.97.1 (`prefix `if` is unknown`) both reject it, and scylla classifies the literal to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/syntax/test_data/reparse/fuzz-failures/0003.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's reparse fuzz regression: the file carries a NUL byte after `__`. syn and rustc 1.97.1 (`unknown start of token: \\u{0}`) both reject it, and scylla classifies the NUL to an ErrorToken."
+  },
+  {
+    "fixture": "rust-analyzer/crates/syntax/test_data/reparse/fuzz-failures/0005.rs",
+    "category": "not-rust",
+    "reason": "rust-analyzer's reparse fuzz regression: the byte literal `b'` holding a control byte never closes. syn and rustc 1.97.1 (`E0763 unterminated byte constant`) both reject it, and scylla classifies the open literal to an ErrorToken."
+  }
+]

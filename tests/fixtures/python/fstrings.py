@@ -1,0 +1,13 @@
+a = f"plain"
+b = f"{value}"
+c = f"{value!r}"
+d = f"{value:>10}"
+e = f"{value!r:>{width}}"
+f = f"{a + b}"
+g = f"text {a} more {b} end"
+h = f"{{literal}}"
+i = f'{d["key"]}'
+j = rf"{raw}"
+k = f"""
+{multi}
+"""

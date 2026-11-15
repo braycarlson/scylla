@@ -1,0 +1,19 @@
+{# Colour and variable rules. #}
+
+{# lintcheck-expect: house/no-inline-color #}
+<div style="background-color: #FBFCF8"></div>
+
+{# lintcheck-expect: house/no-inline-color #}
+<div style="border: 1px solid red"></div>
+
+{# lintcheck-expect: house/var-fallback #}
+<div style="color: var(--app-default-text-color)"></div>
+
+<style>
+{# lintcheck-expect: house/no-hardcoded-color #}
+    .badge { background: rgba(0, 0, 0, 0.1); }
+
+    @media print {
+        .badge { background: #000; }
+    }
+</style>

@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_spaceless_tag.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,12],["Whitespace",12,13],["TagClose",13,15],["Text",15,16]],"tree":[["Document",0,16],["TemplateTag",0,15]],"errors":[]}

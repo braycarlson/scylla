@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_unclosed_comment.html","tokens":[["CommentOpen",0,2],["CommentText",2,12]],"tree":[["Document",0,12],["TemplateComment",0,12]],"errors":[["UnterminatedTemplateComment",0]]}

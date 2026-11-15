@@ -1,0 +1,1 @@
+{"path":"fixtures/pilot/catalog/apps.py","kind":"python","registrations":[],"models":[{"name":"CatalogConfig","app_label":null,"range":[36,88],"bases":[{"kind":"Literal","text":"AppConfig"}],"fields":[]}]}

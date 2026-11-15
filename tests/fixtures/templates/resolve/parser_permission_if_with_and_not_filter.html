@@ -1,0 +1,4 @@
+
+{% if perms.app_a.change_model_a and not obj_a.status|in_list:'done,rejected,cancelled' %}
+    {% include 'components/fake_edit_button.html' with href=edit_url %}
+{% endif %}

@@ -1,0 +1,1 @@
+{"path":"fixtures/broken/unterminated_variable.html","tokens":[["AngleOpen",0,1],["ElementName",1,2],["AngleClose",2,3],["VariableOpen",3,5],["Whitespace",5,6],["Identifier",6,10],["Whitespace",10,11]],"tree":[["Document",0,11],["Element",0,11],["OpenTag",0,3],["TemplateVariable",3,11]],"errors":[["UnterminatedTemplateVariable",3],["UnclosedElement",0]]}

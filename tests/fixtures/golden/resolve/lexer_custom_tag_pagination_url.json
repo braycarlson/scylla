@@ -1,0 +1,1 @@
+{"path":"fixtures/resolve/lexer_custom_tag_pagination_url.html","tokens":[["TagOpen",0,2],["Whitespace",2,3],["TagName",3,17],["Whitespace",17,18],["Number",18,19],["Whitespace",19,20],["Identifier",20,22],["Whitespace",22,23],["Identifier",23,37],["Whitespace",37,38],["TagClose",38,40],["Text",40,41]],"tree":[["Document",0,41],["TemplateTag",0,40]],"errors":[]}

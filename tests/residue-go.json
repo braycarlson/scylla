@@ -1,0 +1,12 @@
+[
+  {
+    "fixture": "bat/tests/syntax-tests/highlighted/Go/main.go",
+    "category": "not-go",
+    "reason": "The file is `bat`'s recorded highlighting output: every token is wrapped in ANSI colour escapes, so the bytes are a terminal transcript rather than a Go package. `go/parser` rejects it on the first escape byte, which is what makes it residue rather than a defect."
+  },
+  {
+    "fixture": "go/cmd/compile/internal/types2/testdata/local/issue68183.go",
+    "category": "not-go",
+    "reason": "The file is compiler testdata for identifiers spelled with invalid characters: it writes `☹x`, and the Go specification admits only Unicode letters, digits, and `_` in an identifier, so `go/parser` reports `invalid character` at each and scylla lexes each to an error token. The file exists to be rejected, which is what makes it residue rather than a defect."
+  }
+]

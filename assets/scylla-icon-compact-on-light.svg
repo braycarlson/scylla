@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="scylla">
+    <title>scylla</title>
+    <defs>
+        <linearGradient id="scylla-icon-compact-on-light-1" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2="1024">
+            <stop offset="0.000" stop-color="#F0F3F9"/>
+            <stop offset="1.000" stop-color="#DDE3EF"/>
+        </linearGradient>
+        <linearGradient id="scylla-icon-compact-on-light-2" gradientUnits="userSpaceOnUse" x1="512.62" y1="175.65" x2="385.21" y2="653.98">
+            <stop offset="0.000" stop-color="#65BAE4"/>
+            <stop offset="0.354" stop-color="#53AAE3"/>
+            <stop offset="0.672" stop-color="#7990E4"/>
+            <stop offset="0.870" stop-color="#6B6AE3"/>
+        </linearGradient>
+        <linearGradient id="scylla-icon-compact-on-light-3" gradientUnits="userSpaceOnUse" x1="514.79" y1="649.64" x2="488.44" y2="830.99">
+            <stop offset="0.000" stop-color="#05A8E8"/>
+            <stop offset="0.438" stop-color="#4E84E7"/>
+            <stop offset="1.000" stop-color="#5358DB"/>
+        </linearGradient>
+        <linearGradient id="scylla-icon-compact-on-light-4" gradientUnits="userSpaceOnUse" x1="524.4" y1="693.04" x2="514.48" y2="830.06">
+            <stop offset="0.000" stop-color="#3F6AD0"/>
+            <stop offset="0.516" stop-color="#4452CE"/>
+            <stop offset="1.000" stop-color="#4942CC"/>
+        </linearGradient>
+        <linearGradient id="scylla-icon-compact-on-light-5" gradientUnits="userSpaceOnUse" x1="760.93" y1="771.47" x2="747.91" y2="849.59">
+            <stop offset="0.000" stop-color="#434CBF"/>
+            <stop offset="0.510" stop-color="#4046B8"/>
+            <stop offset="1.000" stop-color="#3F42B4"/>
+        </linearGradient>
+    </defs>
+    <rect width="1024" height="1024" rx="225" fill="url(#scylla-icon-compact-on-light-1)"/>
+    <path fill="url(#scylla-icon-compact-on-light-2)" d="M512 174.41L460.23 304.61L488.75 296.86L488.75 487.82C488.75 525.95 469.84 549.51 438.84 549.51L422.1 549.51C387.38 549.51 366.3 534.01 366.3 508.9L366.3 451.86C366.3 425.51 360.41 401.02 348.32 381.18L377.46 381.18C353.28 348.63 319.8 316.39 285.7 296.86L318.56 385.83C322.59 396.06 324.45 406.91 324.45 418.07L324.45 582.06C324.45 591.36 329.41 597.56 336.85 597.56L434.5 597.56C470.15 597.56 488.75 612.75 488.75 642.51L488.75 672.58C503.94 665.45 519.44 658.63 535.25 652.43L535.25 642.51C535.25 612.75 553.85 597.56 589.5 597.56L687.15 597.56C694.59 597.56 699.55 591.36 699.55 582.06L699.55 418.07C699.55 406.91 701.41 396.06 705.44 385.83L738.3 296.86C704.2 316.39 670.72 348.63 646.54 381.18L675.68 381.18C663.59 401.02 657.7 425.51 657.7 451.86L657.7 508.9C657.7 534.01 636.62 549.51 601.9 549.51L585.16 549.51C554.16 549.51 535.25 525.95 535.25 487.82L535.25 296.86L563.77 304.61L512 174.41Z"/>
+    <path fill="url(#scylla-icon-compact-on-light-3)" d="M123.88 768.99C159.53 783.56 194.25 790.07 228.35 790.07C400.71 790.07 515.41 649.33 690.25 649.33C814.87 649.33 855.79 715.36 946 742.33C910.35 759.69 868.5 769.3 834.4 769.3C764.65 769.3 767.44 718.15 694.59 718.15C586.71 718.15 481 830.68 321.35 830.68C284.77 830.68 248.5 823.86 214.4 812.39C181.85 801.23 151.16 786.35 123.88 768.99Z"/>
+    <path fill="url(#scylla-icon-compact-on-light-4)" d="M946 742.33C910.35 759.69 868.5 769.3 834.4 769.3C764.65 769.3 767.44 718.15 694.59 718.15C586.71 718.15 481 830.68 321.35 830.68C284.77 830.68 248.5 823.86 214.4 812.39C456.2 812.39 545.79 693.35 682.19 693.35C786.04 693.35 787.59 749.77 837.19 749.77C874.7 749.77 915 745.43 946 742.33Z"/>
+    <path fill="url(#scylla-icon-compact-on-light-5)" d="M605 770.85C713.5 770.85 742.02 813.32 803.71 813.32C844.01 813.32 885.24 792.55 912.83 775.19C875.63 814.25 822.31 849.59 770.54 849.59C691.8 849.59 649.95 791.93 605 770.85Z"/>
+</svg>

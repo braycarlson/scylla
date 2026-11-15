@@ -1,0 +1,6 @@
+
+        {% querystring page=1 as qs %}
+        <div @click="$dispatch('navigate', { url: '{{ qs }}' })">
+            Next Page
+        </div>
+    

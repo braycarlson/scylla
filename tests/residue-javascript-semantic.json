@@ -1,0 +1,192 @@
+[
+    {
+        "fixture": "parameters.js",
+        "category": "oxlint",
+        "reason": "The fixture states rule 5 of phase 3: a parameter's default value resolves in a scope that sees the parameters before it and no part of the body. `function outer(first, second = first, third = body)` with a `const body` inside the body is a ReferenceError at run time, and scylla reports `body` undefined and `body` unused to match. ESLint's scope model, which oxlint reproduces, puts a function's body declarations in the function scope itself rather than in a block under it, so `body` resolves for the oracle and neither row is reported. The oracle is the limit: the model reports what the language does."
+    },
+    {
+        "fixture": "prettier/tests/format/js/arrow-expression/arrow_function_expression.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-unused-vars 163 (`a`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/await-expression/like-call.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 0 (`await`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/babel-plugins/source-phase-imports.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 110 (`x`); extra   no-undef 112 (`from`); extra   no-unused-vars 103 (`source`); missing no-unused-vars 110 (`x`). scylla refuses the file at line 5 (`import source x from './x'`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/comments/preserve-new-line-last.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-redeclare 54 (`f`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/reserved-word/yield.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-unused-vars 87 (`yield`). scylla refuses the file at line 3 (`new yield();`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/source-phase-imports/import-source-attributes-declaration.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 14 (`s`); extra   no-undef 16 (`from`); extra   no-unused-vars 7 (`source`); missing no-unused-vars 14 (`s`). scylla refuses the file at line 1 (`import source s from 'x' with { attr: 'val' };`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/source-phase-imports/import-source-binding-from.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 19 (`from`); extra   no-unused-vars 7 (`source`); missing no-unused-vars 14 (`from`). scylla refuses the file at line 1 (`import source from from 'x';`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/source-phase-imports/import-source-binding-source.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 21 (`from`); missing no-unused-vars 14 (`source`). scylla refuses the file at line 1 (`import source source from 'x';`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/source-phase-imports/import-source.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 14 (`x`); extra   no-undef 16 (`from`); extra   no-unused-vars 7 (`source`); missing no-unused-vars 14 (`x`). scylla refuses the file at line 1 (`import source x from 'x';`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/ternaries/parenthesis/await-expression.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 16 (`await`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/top-level-await/test.cjs",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 0 (`await`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/js/top-level-await/test.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 0 (`await`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/jsx/comments/in-end-tag.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 50 (`line`); extra   no-undef 56 (`a`); extra   no-undef 67 (`block`); extra   no-undef 77 (`a`), and 15 more. scylla refuses the file at line 2 (`<a><// line`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/jsx/fbt/test.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 17 (`fbt`); extra   no-undef 21 (`param`); extra   no-undef 46 (`fbt`); extra   no-undef 50 (`param`), and 20 more. scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/jsx/namespace/namespaced-attribute.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 5 (`namespaced`); extra   no-undef 16 (`attribte`); extra   no-undef 34 (`namespaced`); extra   no-undef 45 (`attribte`), and 2 more. scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/jsx/namespace/namespaced-name.js",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 1 (`jsx`); extra   no-undef 5 (`namespacedname`); extra   no-undef 26 (`jsx`); extra   no-undef 30 (`namespacedname`), and 2 more. scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/class/extends_implements.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-redeclare 1213 (`FOOOOOOOOOOOOOOOOOOOOOOOOOOO`); missing no-redeclare 1304 (`FOOOOOOOOOOOOOOOOOOOOOOOOOOO`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/comments/mapped-types.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-unused-vars 5 (`A`); missing no-unused-vars 101 (`C`); missing no-unused-vars 149 (`D`); missing no-unused-vars 197 (`E`), and 8 more. scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/conformance/internalModules/importDeclarations/invalidImportAliasIdentifiers.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 221 (`I`); missing no-unused-vars 66 (`V`); missing no-unused-vars 96 (`C`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/conformance/internalModules/importDeclarations/shadowedInternalModule.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-unused-vars 69 (`A`); missing no-unused-vars 207 (`A`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/conformance/types/functions/parameterInitializersForwardReferencing.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 69 (`b`); extra   no-undef 118 (`b`); extra   no-undef 125 (`c`); extra   no-undef 181 (`b`), and 14 more. scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/conformance/types/typeParameter/typeParameter.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-unused-vars 10 (`IObservable`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/infer-extends/basic.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-unused-vars 493 (`U`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet: in `type X9<U, T> = T extends (infer U extends number ? U : T) ? U : T;` oxlint binds both later `U` reads to the `infer U` inside the parentheses, so the type parameter `U` is unused, and scylla binds the last one to the type parameter."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/interface/comments-generic.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-redeclare 488 (`FOOOOOOOOOOOOOOOOOOOOOOOOOO`); missing no-redeclare 519 (`FOOOOOOOOOOOOOOOOOOOOOOOOOO`); missing no-unused-vars 450 (`Foo`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/interface/generic.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-redeclare 219 (`FOOOOOOOOOOOOOOOOOOOOOOOOOO`); missing no-redeclare 250 (`FOOOOOOOOOOOOOOOOOOOOOOOOOO`); missing no-unused-vars 10 (`Foo`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/new/new-signature.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-redeclare 589 (`AAAAAAAAAAAAAAAAAAAAAAAA`); missing no-redeclare 615 (`AAAAAAAAAAAAAAAAAAAAAAAA`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/optional-variance/basic.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-unused-vars 745 (`Parent`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/optional-variance/with-jsx.tsx",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-unused-vars 745 (`Parent`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/satisfies-operators/expression-statement.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 468 (`yield`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/top-level-await/test.cts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 0 (`await`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/top-level-await/test.ts",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 0 (`await`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/top-level-await/test.tsx",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: missing no-undef 0 (`await`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/tsx/this.tsx",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 1 (`this`); extra   no-undef 27 (`this`). scylla parses the file without an error; the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "prettier/tests/format/typescript/type-arguments-bit-shift-left-like/5.tsx",
+        "category": "scylla",
+        "reason": "Open divergence from oxlint 1.79.0 on a prettier fixture: extra   no-undef 15 (`v`); extra   no-undef 18 (`T`); extra   no-unused-vars 12 (`T`). scylla refuses the file at line 1 (`<Component<<T>(v: T) => void> />`); the rows scylla's linter emulation reports for it are not oxlint's yet."
+    },
+    {
+        "fixture": "vscode/extensions/copilot/test/simulation/fixtures/fixing/typescript/tsc_error_1015.ts",
+        "category": "oxlint",
+        "reason": "The file is invalid TypeScript: `function sum(a: number, b?: number = 10)` gives an optional parameter an initializer, which the grammar forbids. oxlint answers the file with the single diagnostic `TS(1015) A parameter cannot have a question mark and an initializer.` and lints nothing else in it, so the golden carries no rows at all; the same file with the `?` removed reports the `sum` scylla reports. Closing this would mean scylla implementing TypeScript's own diagnostics, of which oxlint stops on every one, and modelling two of them leaves the contract no more true than modelling none. The row scylla reports is correct: nothing reads `sum`."
+    },
+    {
+        "fixture": "vscode/extensions/copilot/test/simulation/fixtures/fixing/typescript/tsc_error_2391.ts",
+        "category": "oxlint",
+        "reason": "The file is invalid TypeScript: `class Class { constructor() { ... } function1(); }` writes a method with no body and no implementation under it. oxlint answers the file with the single diagnostic `TS(2391) Function implementation is missing or not immediately following the declaration.` and lints nothing else in it, so the golden carries no rows at all. The two rows scylla reports, `Class` and the `const tomato` its constructor writes, are both correct. See the note on `tsc_error_1015.ts`: the limit is that scylla implements no TypeScript diagnostics, and oxlint stops on all of them."
+    },
+    {
+        "fixture": "vscode/extensions/typescript-language-features/src/tsServer/protocol/protocol.d.ts",
+        "category": "oxlint",
+        "reason": "The file writes `import type ts from '...'` and then `export = ts.server.protocol`. oxlint 1.79.0 reports `'ts' is not defined.` for it, and reports nothing for the same import followed by `export = ts`, so it resolves the export assignment's name only where no member chain stands between the two. The scope manager resolves both, which is what `tests/resolve_javascript.rs` holds scylla to, and TypeScript accepts both because an export assignment may name a type-only binding."
+    }
+]

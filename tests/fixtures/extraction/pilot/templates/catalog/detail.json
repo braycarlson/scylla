@@ -1,0 +1,1 @@
+{"path":"fixtures/pilot/templates/catalog/detail.html","kind":"template","objects":[{"range":[108,135],"members":[{"name":"html","kind":"Property","is_async":false,"has_await":false,"range":[110,118]},{"name":"product","kind":"Property","is_async":false,"has_await":false,"range":[120,133]}]}],"bindings":[]}

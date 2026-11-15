@@ -1,0 +1,12 @@
+[
+    {
+        "fixture": "expressions.ts",
+        "category": "biome-line-breaking",
+        "reason": "biome refuses the file: `-value ** 2` puts a unary operator immediately before an exponentiation, which does not parse, so the golden beside it is not the oracle's own output and the fixture is not comparable."
+    },
+    {
+        "fixture": "control_flow.ts",
+        "category": "biome-line-breaking",
+        "reason": "biome refuses the file: a `with` statement is not allowed in strict mode, so the golden beside it is not the oracle's own output and the fixture is not comparable."
+    }
+]
